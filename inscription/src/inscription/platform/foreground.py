@@ -1,9 +1,8 @@
 """Foreground window / process inspection.
 
-Phase 1 provides a basic implementation returning window title and process
-name; Phase 3 replaces the Windows variant with a UIA-backed inspector that
-extracts per-suite forensic-tool context (AXIOM artifact path, X-Ways
-evidence item, etc.).
+Returns the title and process of the currently-focused window. UIA-based
+element lookup for click points is a separate concern — see
+:mod:`inscription.resolve`.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ class ForegroundInfo:
     process_id: int | None
     #: Absolute path to the executable, if resolvable.
     process_path: str | None = None
-    #: Free-form dict for provider-specific context (Phase 3+).
+    #: Free-form dict for provider-specific context.
     extras: dict[str, str] | None = None
 
 
@@ -54,8 +53,6 @@ class _WindowsForegroundInspector(ForegroundInspector):
     """Windows implementation using the Win32 API via ``ctypes``.
 
     Avoids a dependency on ``pywin32`` by calling ``user32`` directly.
-    Phase 3 will subclass or replace this with a pywinauto-based inspector
-    that also reads UIA trees.
     """
 
     def inspect(self) -> ForegroundInfo:
@@ -99,12 +96,11 @@ class _WindowsForegroundInspector(ForegroundInspector):
 
 
 class _LinuxForegroundInspector(ForegroundInspector):
-    """Best-effort Linux inspector. Phase 1 only needs something non-empty.
+    """Best-effort Linux inspector. Stub; Inscription targets Windows.
 
-    Proper X11/Wayland active-window detection (via python-xlib or
-    xdotool) is not worth the complexity for Phase 1 — forensic context
-    extraction that matters for evidence is Windows-only and belongs in
-    Phase 3's suite-specific adapters.
+    Real X11/Wayland active-window detection (via python-xlib or xdotool)
+    is not worth the complexity: the deployment target is Windows and this
+    implementation just keeps development-on-Linux working.
     """
 
     def inspect(self) -> ForegroundInfo:

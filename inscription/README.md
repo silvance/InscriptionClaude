@@ -1,23 +1,37 @@
 # Inscription
 
-Offline forensic examination notes and step-logging tool for Windows.
+Record a Windows workflow, auto-generate a step-by-step guide with screenshots,
+review and edit, then export.
 
-**Status:** Phase 0 — scaffolding only. Not yet functional for case work.
+**Status:** 0.3 alpha — capture → step generation → HTML export on a single
+thread of plumbing. Usable end-to-end, rough around the edges.
 
 ---
 
-## What this is
+## What it does
 
-Inscription is a desktop tool for digital forensic examiners that streamlines
-note-taking and step-logging during an examination. It captures screenshots,
-structured steps, free-form notes, and forensic-tool context (AXIOM, X-Ways,
-Cellebrite Physical Analyzer) and produces a polished editable notes document
-for attachment to the final forensic report.
+Inscription is a desktop capture studio in the shape of Scribe, not Steps
+Recorder. You press **Record**, do whatever workflow you want to document, and
+press **Stop**. Inscription captures:
 
-Unlike online alternatives, Inscription runs fully offline and is designed for
-air-gapped examination workstations.
+- Mouse clicks (with UI Automation element metadata where available)
+- Active window changes
+- Keyboard milestones — `Enter`, `Tab`, `Esc`, function keys
+- Screenshots taken on each click and window transition
 
-See `docs/design.md` for the full design document and phased development plan.
+The raw stream is preserved exactly as observed. A separate step generator
+groups those events into a short, readable procedure with one screenshot per
+step. Manual edits to the text are kept across regenerations; the raw capture
+layer is never mutated.
+
+Export as HTML today; Markdown/PDF/DOCX later.
+
+## Design principles
+
+- Clarity over cleverness.
+- Capture first, clean up second.
+- The generated guide is a draft, not final truth. The raw layer is.
+- Windows-native look; cross-platform dev is a nice-to-have, not a target.
 
 ## Requirements
 
@@ -39,58 +53,97 @@ python -m pip install -e ".[dev]"
 # Run from source
 python -m inscription
 
-# Run the full local check (lint + types + tests)
+# Full local check (lint + types + tests)
 .\scripts\dev.ps1 all
-
-# Individual steps
-.\scripts\dev.ps1 lint
-.\scripts\dev.ps1 typecheck
-.\scripts\dev.ps1 test
 ```
 
-## Building a distributable
+## Core workflow
 
-```powershell
-.\scripts\dev.ps1 build
-# or equivalently:
-pyinstaller packaging/inscription.spec --noconfirm
-```
+1. Launch Inscription.
+2. File → Open Session, start a new session with a name.
+3. Press **● Record**, carry out the workflow on your desktop.
+4. Press **■ Stop**. Draft steps are auto-generated from the captured events.
+5. Click a step to edit its text; remove steps that shouldn't appear in the
+   guide.
+6. File → Export as HTML.
 
-Output lands in `dist/Inscription/`. Copy the whole folder to the target
-workstation and run `Inscription.exe`. Phase 5 will replace this with a proper
-Inno Setup installer.
-
-## Project layout
+## Architecture
 
 ```
-inscription/
-├── src/inscription/          application package
-│   ├── __main__.py           `python -m inscription` entry point
-│   ├── app.py                QApplication bootstrap
-│   ├── config.py             typed QSettings wrapper
-│   ├── paths.py              filesystem path resolution
-│   ├── logging_setup.py      rotating-file logging
-│   └── ui/                   Qt widgets
-├── tests/                    pytest suite
-├── packaging/                PyInstaller spec (Inno Setup later)
-├── scripts/                  dev helpers
-├── docs/                     design and user documentation
-└── .github/workflows/        CI
+  Sources          Capture engine              Sinks
+  ───────          ──────────────              ─────
+ ┌──────────┐     ┌───────────────────┐       ┌──────────────┐
+ │ Click    │───► │  Queue → worker   │─────► │ SessionSink  │───► SQLite + PNG
+ │ Key      │───► │  + screenshot     │       │ (raw layer)  │
+ │ Window   │───► │  + UIA resolve    │       └──────────────┘
+ │ Marker   │───► │  + foreground     │       ┌──────────────┐
+ └──────────┘     └───────────────────┘─────► │ QtBridge     │───► UI updates
+                                              └──────────────┘
+
+  Step generator (post-capture)
+  ─────────────────────────────
+  raw_events ──► group / dedup ──► render ──► draft_steps (editable)
+
+  HTML exporter
+  ─────────────
+  draft_steps + screenshots ──► self-contained HTML in exports/
 ```
 
-## Runtime filesystem layout
+## Layout on disk
 
 All local data lives under `%LOCALAPPDATA%\Inscription\`:
 
 | Path              | Purpose                                              |
 |-------------------|------------------------------------------------------|
-| `config.ini`      | User preferences (QSettings, INI format)             |
+| `config.ini`      | User preferences (QSettings INI)                     |
 | `logs/`           | Rotating log files (5 MiB × 10)                      |
-| `workspace/`      | Local cache of the currently open case               |
-| `cache/`          | Thumbnails, buffered captures awaiting promotion     |
+| `workspace/`      | Root for all session folders                         |
+| `cache/`          | Reserved for thumbnails / buffered captures          |
 
-Active and archived cases live on the NAS; `workspace/` is a performance cache
-that gets flushed back on save/close.
+Each session is its own folder:
+
+```
+workspace/<slug>/
+├── session.db              SQLite: events, elements, screenshots, steps
+├── manifest.json           summary for the session picker
+├── screenshots/            PNG files referenced by events
+├── exports/                generated HTML (+ staged assets)
+└── .inscription/           internal metadata and the lockfile
+```
+
+## Package layout
+
+```
+inscription/
+├── src/inscription/
+│   ├── app.py                 QApplication bootstrap
+│   ├── __main__.py            python -m inscription entrypoint
+│   ├── model.py               Session / RawEvent / DraftStep / ...
+│   ├── config.py              typed QSettings wrapper
+│   ├── paths.py               filesystem path resolution
+│   ├── logging_setup.py       rotating-file logging
+│   ├── platform/              screen, hotkeys, foreground window
+│   ├── resolve/               UIA element lookup + fallbacks
+│   ├── capture/               engine + click/keyboard/window/marker sources
+│   ├── steps/                 event-grouping and step text generator
+│   ├── export/                HTML exporter (alpha)
+│   └── ui/                    Qt widgets + controller
+├── tests/                     pytest suite
+├── packaging/                 PyInstaller spec
+├── scripts/                   dev helpers (PowerShell + Bash)
+└── docs/                      design notes
+```
+
+## Build a distributable
+
+```powershell
+.\scripts\dev.ps1 build
+# or:
+pyinstaller packaging/inscription.spec --noconfirm
+```
+
+Output lands in `dist/Inscription/`. Copy that folder to the target machine
+and run `Inscription.exe`. An Inno Setup installer is planned for beta.
 
 ## License
 

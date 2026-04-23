@@ -1,0 +1,70 @@
+"""Windows UIA element resolver (``pywinauto`` backed).
+
+The resolver queries the UIA tree at a given screen coordinate and reports
+``name``, ``control_type``, ``automation_id``, and ``class_name`` with a
+high confidence when it succeeds. If UIA cannot resolve the point — which
+happens with custom-painted widgets, web content without accessibility
+flags, and some elevated processes — it delegates to the fallback resolver.
+
+Import-time guard: :mod:`pywinauto` is optional and Windows-only. The module
+imports lazily so non-Windows tests don't see it.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from inscription.model import ResolvedElement
+from inscription.resolve.base import ElementResolver
+
+logger = logging.getLogger(__name__)
+
+
+class UiaElementResolver(ElementResolver):
+    """Resolve UI elements via pywinauto's UIA backend."""
+
+    def __init__(self, *, fallback: ElementResolver) -> None:
+        # Import at construction time so unrelated platforms never touch it.
+        from pywinauto.uia_element_info import UIAElementInfo  # noqa: PLC0415
+
+        self._UIAElementInfo = UIAElementInfo
+        self._fallback = fallback
+
+    def resolve_at(self, x: int, y: int) -> ResolvedElement:
+        try:
+            info: Any = self._UIAElementInfo.from_point(x, y)
+        except Exception as exc:
+            logger.debug("UIA resolve failed at (%d,%d): %s", x, y, exc)
+            return self._fallback.resolve_at(x, y)
+        if info is None:
+            return self._fallback.resolve_at(x, y)
+
+        name = _safe_get(info, "name") or _safe_get(info, "rich_text")
+        control_type = _safe_get(info, "control_type")
+        automation_id = _safe_get(info, "automation_id")
+        class_name = _safe_get(info, "class_name")
+
+        if not any([name, control_type, automation_id, class_name]):
+            return self._fallback.resolve_at(x, y)
+
+        return ResolvedElement(
+            id=None,
+            name=name or None,
+            control_type=control_type or None,
+            automation_id=automation_id or None,
+            class_name=class_name or None,
+            role=control_type or None,
+            confidence=0.9 if name and control_type else 0.6,
+            method="uia",
+        )
+
+
+def _safe_get(info: Any, attr: str) -> str:
+    try:
+        value = getattr(info, attr, None)
+    except Exception:
+        return ""
+    if value is None:
+        return ""
+    return str(value).strip()

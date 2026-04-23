@@ -1,139 +1,108 @@
-"""Integration tests for the full stack.
-
-Drives :class:`CaseController` programmatically, verifies case lifecycle
-and step capture land correctly in SQLite + on disk. No user dialogs;
-we test controller methods directly.
-"""
+"""End-to-end: capture -> generate -> export."""
 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import pytest
-
-pytest.importorskip("pytestqt")
-
-from inscription.cases.models import StepKind
-from inscription.storage import CaseRepository
-from inscription.storage.repository import list_cases
-from inscription.ui.case_workspace import CaseWorkspaceWidget
+from inscription.capture import (
+    CaptureEngine,
+    RawCaptureEvent,
+    SessionSink,
+)
+from inscription.export import export_html
+from inscription.model import EventKind, ResolvedElement
+from inscription.platform import (
+    CapturedImage,
+    ForegroundInfo,
+    ForegroundInspector,
+    MonitorInfo,
+    ScreenCapturer,
+)
+from inscription.resolve import ElementResolver
+from inscription.steps import generate_steps
+from inscription.storage import SessionRepository
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
 
-@pytest.mark.gui
-def test_create_open_capture_reopen_flow(qtbot: Any, tmp_path: Path) -> None:
-    """Exercise the full Phase 1 happy path end-to-end.
+class _FakeScreen(ScreenCapturer):
+    def list_monitors(self) -> list[MonitorInfo]:
+        return [MonitorInfo(index=1, left=0, top=0, width=1, height=1)]
 
-    Creates a case, fires some captures through the repository + engine
-    stack (without dialogs), closes the case, then reopens and verifies
-    the persisted steps are all present.
-    """
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    def capture(self, monitor_index: int | None = None) -> CapturedImage:
+        # Minimal valid PNG bytes; verified-decodable 1x1.
+        data = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+            "0000000b49444154789c6360000200000500017a5eab3f0000000049454e44ae"
+            "426082"
+        )
+        return CapturedImage(png_bytes=data, width=1, height=1, monitor_index=monitor_index or 1)
 
-    # --- Create and capture.
-    repo = CaseRepository.create(
-        workspace_root=workspace,
-        case_number="HSV-2026-9000",
-        title="Integration flow",
-        examiner="James",
-    )
-    session = repo.start_session()
-    assert session.id is not None
 
-    # Simulate three captures by directly appending steps (the engine path
-    # is covered in test_capture.py; here we focus on case lifecycle).
-    for i in range(3):
-        repo.append_step(
-            session_id=session.id,
-            kind=StepKind.HOTKEY_CAPTURE,
-            title=f"Step {i + 1}",
-            screenshot_path=f"screenshots/step-{i + 1}.png",
+class _FakeForeground(ForegroundInspector):
+    def inspect(self) -> ForegroundInfo:
+        return ForegroundInfo(
+            window_title="DemoApp",
+            process_name="demo.exe",
+            process_id=123,
         )
 
-    repo.close()
 
-    # --- Verify case appears in the listing.
-    manifests = list_cases(workspace)
-    assert len(manifests) == 1
-    assert manifests[0].case_number == "HSV-2026-9000"
-    assert manifests[0].step_count == 3
-
-    # --- Reopen and verify steps persist.
-    with CaseRepository.open_existing(
-        workspace_root=workspace, case_number="HSV-2026-9000"
-    ) as reopened:
-        steps = reopened.list_steps()
-        assert len(steps) == 3
-        assert [s.title for s in steps] == ["Step 1", "Step 2", "Step 3"]
+class _FakeResolver(ElementResolver):
+    def resolve_at(self, x: int, y: int) -> ResolvedElement:
+        return ResolvedElement(
+            id=None,
+            name="Submit",
+            control_type="Button",
+            confidence=0.9,
+            method="uia",
+        )
 
 
-@pytest.mark.gui
-def test_workspace_ui_appends_steps(qtbot: Any, tmp_path: Path) -> None:
-    """Bind a repository to the workspace widget and append a step via the UI."""
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.01)
+    raise AssertionError("predicate never became true")
 
-    repo = CaseRepository.create(
-        workspace_root=workspace,
-        case_number="HSV-2026-9002",
-        title="UI flow",
-        examiner="James",
-    )
+
+def _fake_resolver(_inspector: ForegroundInspector) -> ElementResolver:
+    return _FakeResolver()
+
+
+def test_capture_generate_export(tmp_path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Integration")
     try:
-        session = repo.start_session()
-        assert session.id is not None
-
-        widget = CaseWorkspaceWidget()
-        qtbot.addWidget(widget)
-        widget.set_repository(repo)
-
-        step = repo.append_step(
-            session_id=session.id,
-            kind=StepKind.HOTKEY_CAPTURE,
-            title="First step",
+        engine = CaptureEngine(
+            screen_factory=_FakeScreen,
+            foreground_factory=_FakeForeground,
+            resolver_factory=_fake_resolver,
         )
-        widget.append_step(step)
+        sink = SessionSink(repo)
+        engine.add_sink(sink)
+        engine.start()
+        try:
+            engine.submit(RawCaptureEvent(kind=EventKind.CLICK, x=5, y=5, button="left"))
+            _wait_for(lambda: len(repo.list_events()) == 1)
+        finally:
+            engine.stop()
 
-        # Let Qt process events so the list updates.
-        qtbot.wait(50)
-        # The step list widget exposes count via its underlying QListWidget.
-        assert widget._list.count() == 1
+        events = repo.list_events()
+        assert len(events) == 1
+        assert events[0].resolved_element_id is not None
+        assert events[0].screenshot_id is not None
+
+        steps = generate_steps(repo)
+        assert steps
+        assert "Submit" in steps[0].text
+
+        doc = export_html(repo)
     finally:
         repo.close()
 
-
-def test_repository_survives_rapid_appends(tmp_path: Path) -> None:
-    """Stress the repository lock with many sequential appends."""
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    repo = CaseRepository.create(
-        workspace_root=workspace,
-        case_number="HSV-2026-9001",
-        title="Stress",
-        examiner="James",
-    )
-    try:
-        session = repo.start_session()
-        assert session.id is not None
-
-        start = time.monotonic()
-        for i in range(200):
-            repo.append_step(
-                session_id=session.id,
-                kind=StepKind.HOTKEY_CAPTURE,
-                title=f"s{i}",
-            )
-        elapsed = time.monotonic() - start
-
-        steps = repo.list_steps(session.id)
-        assert len(steps) == 200
-        assert [s.sequence for s in steps] == list(range(1, 201))
-        # Sanity: 200 inserts should be well under a second on any machine.
-        assert elapsed < 5.0, f"200 appends took {elapsed:.2f}s"
-    finally:
-        repo.close()
+    html_text = doc.path.read_text(encoding="utf-8")
+    assert "Submit" in html_text

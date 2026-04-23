@@ -1,8 +1,7 @@
 """Main application window.
 
-Phase 1: hosts the :class:`CaseWorkspaceWidget` and delegates all case
-management to :class:`CaseController`. Menus gain an "Open Case" action
-for switching cases mid-session.
+Hosts the recorder bar on top, the session workspace below, and the menus
+that drive the controller.
 """
 
 from __future__ import annotations
@@ -21,8 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from inscription.config import Config
-from inscription.ui.case_workspace import CaseWorkspaceWidget
-from inscription.ui.controller import CaseController
+from inscription.ui.controller import SessionController
+from inscription.ui.recorder_bar import RecorderBar
+from inscription.ui.workspace import SessionWorkspaceWidget
 from inscription.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -38,34 +38,40 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"Inscription {__version__}")
         self.resize(1200, 800)
 
-        self._workspace = CaseWorkspaceWidget(self)
-        self._stack = self._build_central(self._workspace)
-        self.setCentralWidget(self._stack)
+        self._recorder_bar = RecorderBar(self)
+        self._workspace = SessionWorkspaceWidget(self)
+        central = self._build_central()
+        self.setCentralWidget(central)
 
-        self._controller = CaseController(
+        self._controller = SessionController(
             workspace=self._workspace,
+            recorder_bar=self._recorder_bar,
             parent_widget=self,
             parent=self,
         )
-        self._controller.case_opened.connect(self._on_case_opened)
-        self._controller.case_closed.connect(self._on_case_closed)
+        self._controller.session_opened.connect(self._on_session_opened)
+        self._controller.session_closed.connect(self._on_session_closed)
 
         self._build_menus()
         self._build_statusbar()
         self._restore_geometry()
 
         if auto_start_controller:
-            # Deferred so tests that construct a MainWindow don't immediately
-            # pop a modal case picker.
             self.show()
             self._controller.start()
 
     # ------------------------------------------------------------------ UI
 
-    def _build_central(self, workspace: CaseWorkspaceWidget) -> QStackedWidget:
-        stack = QStackedWidget(self)
+    def _build_central(self) -> QWidget:
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._recorder_bar)
 
-        placeholder = QWidget(self)
+        self._stack = QStackedWidget(container)
+
+        placeholder = QWidget(container)
         ph_layout = QVBoxLayout(placeholder)
         ph_layout.setContentsMargins(48, 48, 48, 48)
         title = QLabel("Inscription", placeholder)
@@ -74,48 +80,56 @@ class MainWindow(QMainWindow):
         font.setPointSize(24)
         font.setBold(True)
         title.setFont(font)
-        hint = QLabel("No case open. Use File → Open Case to begin.", placeholder)
+        hint = QLabel("No session open. Use File → Open Session to begin.", placeholder)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ph_layout.addStretch(1)
         ph_layout.addWidget(title)
         ph_layout.addWidget(hint)
         ph_layout.addStretch(2)
 
-        stack.addWidget(placeholder)  # index 0
-        stack.addWidget(workspace)  # index 1
-        return stack
+        self._stack.addWidget(placeholder)
+        self._stack.addWidget(self._workspace)
+
+        layout.addWidget(self._stack, 1)
+        return container
 
     def _build_menus(self) -> None:
         menubar = self.menuBar()
 
-        # --- File ---
         file_menu = menubar.addMenu("&File")
 
-        open_action = QAction("&Open Case…", self)
+        open_action = QAction("&Open Session…", self)
         open_action.setShortcut(QKeySequence("Ctrl+O"))
-        open_action.setStatusTip("Open or create a case")
+        open_action.setStatusTip("Open or create a session")
         open_action.triggered.connect(self._controller.start)
         file_menu.addAction(open_action)
+
+        regen_action = QAction("&Regenerate Steps", self)
+        regen_action.setShortcut(QKeySequence("Ctrl+R"))
+        regen_action.setStatusTip("Rebuild draft steps from raw events")
+        regen_action.triggered.connect(self._controller.regenerate_steps)
+        file_menu.addAction(regen_action)
+
+        file_menu.addSeparator()
+
+        export_html_action = QAction("Export as &HTML…", self)
+        export_html_action.setShortcut(QKeySequence("Ctrl+E"))
+        export_html_action.setStatusTip("Export the current session as HTML")
+        export_html_action.triggered.connect(self._controller.export_html)
+        file_menu.addAction(export_html_action)
 
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        exit_action.setStatusTip("Exit Inscription")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # --- Edit (populated in Phase 2 with preferences) ---
         menubar.addMenu("&Edit")
-
-        # --- View (populated in Phase 4 with HUD toggles) ---
         menubar.addMenu("&View")
 
-        # --- Help ---
         help_menu = menubar.addMenu("&Help")
-
         about_action = QAction("&About Inscription", self)
-        about_action.setStatusTip("About this application")
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
@@ -149,21 +163,20 @@ class MainWindow(QMainWindow):
             "About Inscription",
             (
                 f"<h3>Inscription {__version__}</h3>"
-                "<p>Offline forensic examination notes and step-logging tool.</p>"
-                "<p>Phase 1 &mdash; capture MVP.</p>"
+                "<p>Record a workflow, review the draft, export a polished guide.</p>"
             ),
         )
 
     # ------------------------------------------------------------- Slots
 
-    def _on_case_opened(self, case_number: str) -> None:
-        self.setWindowTitle(f"Inscription {__version__} — {case_number}")
-        self.statusBar().showMessage(f"Case {case_number} open")
+    def _on_session_opened(self, name: str) -> None:
+        self.setWindowTitle(f"Inscription {__version__} — {name}")
+        self.statusBar().showMessage(f"Session {name!r} open")
         self._stack.setCurrentIndex(1)
 
-    def _on_case_closed(self) -> None:
+    def _on_session_closed(self) -> None:
         self.setWindowTitle(f"Inscription {__version__}")
-        self.statusBar().showMessage("No case open")
+        self.statusBar().showMessage("No session open")
         self._stack.setCurrentIndex(0)
 
     # -------------------------------------------------------------- Events
