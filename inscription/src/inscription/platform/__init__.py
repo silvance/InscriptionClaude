@@ -5,13 +5,11 @@ interfaces in this package. Each capability has a concrete implementation
 keyed off the host OS; the :func:`create_*` factory functions pick the
 right one automatically.
 
-Phase 1 ships:
-
 - :class:`ScreenCapturer` — implemented via ``mss`` on all platforms.
 - :class:`HotkeyManager` — implemented via ``pynput`` on all platforms.
-- :class:`ForegroundInspector` — a stub that returns window title and
-  process name via ``psutil``/``pynput``; Phase 3 replaces it on Windows
-  with a UIA-backed implementation for per-application context.
+- :class:`ForegroundInspector` — reads foreground window title and process
+  name. The Windows implementation uses ``ctypes`` + ``psutil``; UIA
+  element lookup sits in :mod:`inscription.resolve`, not here.
 """
 
 from inscription.platform.foreground import (

@@ -1,8 +1,7 @@
-# Phase 1 — Capture Core MVP
+# Phase 1 — Capture Core MVP (historical)
 
-**Status:** Planning → in progress
-**Depends on:** Phase 0 (project scaffolding) complete
-**Expected duration:** 3-4 weeks of focused part-time work
+**Status:** Superseded by the 0.3 Scribe-style pivot. Kept for provenance.
+See `architecture.md` for the current design.
 
 ---
 

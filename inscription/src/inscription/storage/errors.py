@@ -7,17 +7,17 @@ class StorageError(Exception):
     """Base class for all storage-layer errors."""
 
 
-class CaseAlreadyExistsError(StorageError):
-    """A case with this number already exists in the workspace."""
+class SessionAlreadyExistsError(StorageError):
+    """A session with this slug already exists in the workspace."""
 
 
-class CaseNotFoundError(StorageError):
-    """The requested case is not present in the workspace."""
+class SessionNotFoundError(StorageError):
+    """The requested session is not present in the workspace."""
 
 
-class CaseLockedError(StorageError):
-    """Another process (or a stale lockfile) is holding this case open."""
+class SessionLockedError(StorageError):
+    """Another process (or a stale lockfile) is holding this session open."""
 
 
 class SchemaVersionError(StorageError):
-    """The case was created by a newer/incompatible version of Inscription."""
+    """The session was created by a newer/incompatible version of Inscription."""

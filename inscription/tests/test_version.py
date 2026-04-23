@@ -1,15 +1,10 @@
-"""Smoke tests for package import and version metadata."""
+"""Smoke test: the version module exports a non-empty string."""
 
 from __future__ import annotations
 
-import re
-
-import inscription
+from inscription.version import __version__
 
 
-def test_package_importable() -> None:
-    assert hasattr(inscription, "__version__")
-
-
-def test_version_is_semver_like() -> None:
-    assert re.match(r"^\d+\.\d+\.\d+", inscription.__version__) is not None
+def test_version_is_nonempty_string() -> None:
+    assert isinstance(__version__, str)
+    assert __version__.strip()

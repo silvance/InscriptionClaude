@@ -7,61 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — Scribe-style pivot (alpha)
+
+### Changed
+
+- **Product pivot.** Inscription is now a Scribe-style workflow capture studio
+  that auto-generates editable step-by-step guides, not a forensic
+  examination notes tool. The underlying raw-capture layer (timestamps,
+  coordinates, UIA metadata, screenshot hashes, recorder version) is still
+  preserved separately from the editable draft-step layer, so a future
+  "evidence mode" toggle could reintroduce stricter-than-alpha behavior
+  without schema changes.
+- Domain objects replaced: `Case`, `CaseInfo`, `Session`, `Step` →
+  `Session`, `SessionInfo`, `RawEvent`, `ResolvedElement`,
+  `ScreenshotArtifact`, `DraftStep`, `ExportDocument`. Single module
+  `inscription.model`.
+- Storage layer rewritten: `session.db` with tables `session_info`,
+  `raw_events`, `resolved_elements`, `screenshot_artifacts`,
+  `draft_steps`. New `SessionRepository`. PID-based lockfile is unchanged.
+- Capture engine rewritten to enrich raw events with screenshot +
+  foreground + optional UIA resolution, then fan out to sinks. Platform
+  objects are now instantiated inside the worker thread via factories
+  because `mss` and UIA aren't thread-safe.
+- `Config` dropped the forensic-only `case_number_regex` and `nas_root`
+  keys. Only `workspace_root`, `theme`, and window geometry remain.
+
+### Added
+
+- `inscription.capture.click_source` — `pynput` mouse listener with
+  double-click detection.
+- `inscription.capture.keyboard_source` — milestone-key listener (Enter,
+  Tab, Esc, backspace, delete, F1–F12). Ordinary characters are not
+  captured; privacy and noise are both the reason.
+- `inscription.capture.window_source` — foreground-window poll (250 ms)
+  that emits events only on real transitions.
+- `inscription.capture.marker_source` — user-triggered marker bound to
+  Ctrl+Shift+M and the toolbar button.
+- `inscription.resolve` — `ElementResolver` abstraction with
+  `UiaElementResolver` (Windows + pywinauto), `ForegroundFallbackResolver`,
+  and `NullResolver`. Confidence is graded 0.0–0.9.
+- `inscription.steps` — `StepGenerator` that collapses clicks on the same
+  element within an 0.8 s window, drops window-focus events that are
+  caused by the next click, and renders draft step text that scales with
+  resolver confidence. Manual edits are preserved across regeneration when
+  the source event set is unchanged.
+- `inscription.export.html` — self-contained HTML guide written under
+  `<session>/exports/` with screenshots staged into `exports/assets/`.
+- `ScreenshotArtifact.sha256` recorded at capture time for provenance.
+- `SessionInfo.recorder_version` stamped on session creation.
+- UI: `RecorderBar` with Record/Stop + Marker + live event counter;
+  `StepListWidget` with thumbnails; `StepEditorPanel` with debounced
+  persistence and a remove/restore toggle; `SessionListDialog` +
+  `NewSessionDialog`; `SessionWorkspaceWidget`; `SessionController`
+  orchestrating the whole lifecycle.
+
+### Removed
+
+- `inscription.cases` package, `CaseRepository`, case number regex
+  validation, NAS workspace concept.
+- `inscription.capture.hotkey_source`, `inscription.capture.repository_sink`
+  (superseded by new sources and `SessionSink`).
+
 ## [0.2.0] — Phase 1 capture MVP
 
 ### Added
 
-- Domain model package (`inscription.cases`) with `Case`, `CaseInfo`, `Session`,
-  `Step`, `StepKind`, and `CaseManifest` dataclasses plus filesystem-safe slug
-  generation.
-- Persistence layer (`inscription.storage`) with `CaseRepository`, SQLite schema
-  and forward-only migration runner, JSON manifest with atomic writes, PID-based
-  lockfile with stale-lock reclamation, and a `list_cases` helper.
-- Thread-safe repository: SQLite opened with `check_same_thread=False` plus a
-  per-repository lock, so the capture engine worker thread and the Qt main
-  thread can share a connection safely.
-- Platform abstraction (`inscription.platform`) with `ScreenCapturer`
-  (`mss`-backed with a null fallback), `HotkeyManager` (`pynput`-backed with a
-  stub for headless dev), and `ForegroundInspector` (ctypes-based Win32 on
-  Windows, placeholder on Linux).
-- Capture engine (`inscription.capture`) with a producer/consumer architecture:
-  worker thread, bounded queue, `CaptureSource`/`CaptureSink` contracts
-  (`CaptureSink` is a `typing.Protocol` so Qt widgets can duck-type it without
-  metaclass fights), `HotkeySource`, and `CaseRepositorySink`.
-- UI layer (`inscription.ui`): `CaseListDialog`, `NewCaseDialog` with regex
-  validation against `Config.case_number_regex`, `CaseWorkspaceWidget`,
-  `StepListWidget` with thumbnails, `StepDetailPanel` with debounced saves,
-  `QtCaptureBridge` for cross-thread signal marshalling, and `CaseController`
-  orchestrating the whole lifecycle.
-- Bash dev helper (`scripts/dev.sh`) mirroring the existing PowerShell one.
-- 60 tests covering slug generation, repository create/open/reopen/locking,
-  manifest I/O, platform abstractions, capture engine producer/consumer flow,
-  hotkey source wiring, repository sink persistence, main window construction,
-  and end-to-end integration (create → capture → close → reopen → verify).
-
-### Fixed
-
-- Embedded placeholder PNG bytes corrected (previous hex decoded to invalid
-  PNG); regenerated via `zlib`+`struct` and verified round-trip through PIL.
-- Lockfile collision detection: any live PID holding a lock — including the
-  current process — now counts as a collision, so two `CaseRepository`
-  instances within one process can't both open the same case.
-- `pynput` import defensive on headless Linux (it tries to open an X
-  connection at import time); we now fall back to the stub hotkey manager
-  when import fails rather than crashing at startup.
+- Domain model package (`inscription.cases`) with `Case`, `CaseInfo`,
+  `Session`, `Step`, `StepKind`, and `CaseManifest` dataclasses plus
+  filesystem-safe slug generation.
+- Persistence layer (`inscription.storage`) with `CaseRepository`, SQLite
+  schema and forward-only migration runner, JSON manifest with atomic
+  writes, PID-based lockfile with stale-lock reclamation.
+- Platform abstraction (`inscription.platform`) with `ScreenCapturer`,
+  `HotkeyManager`, and `ForegroundInspector`.
+- Capture engine (`inscription.capture`) with producer/consumer architecture,
+  `CaptureSource`/`CaptureSink` contracts, `HotkeySource`, and
+  `CaseRepositorySink`.
+- UI layer (`inscription.ui`) with case list + new case dialogs, step list
+  with thumbnails, step detail with debounced saves, Qt bridge for
+  cross-thread signals, and case controller.
 
 ## [0.1.0] — Phase 0 scaffolding
 
 ### Added
 
 - Project scaffolding with src-layout and Hatchling build backend.
-- PySide6-based empty main window with menu bar, status bar, and About dialog.
-- Typed configuration wrapper around `QSettings` (INI format at
-  `%LOCALAPPDATA%\Inscription\config.ini`).
-- `paths` module resolving application directories under `%LOCALAPPDATA%`.
-- Rotating-file logging (never transmits, local disk only, 5 MiB × 10).
+- PySide6-based empty main window with menu bar, status bar, About dialog.
+- Typed configuration wrapper around `QSettings`.
+- `paths` module resolving application directories.
+- Rotating-file logging.
 - GitHub Actions CI: ruff lint + format check, mypy strict, pytest with
   coverage, packaged-exe build artifact on main.
 - PyInstaller spec for one-folder Windows build.
-- Unit tests for paths, config, and version; smoke tests for main window.
-- PowerShell dev helper script (`scripts/dev.ps1`).
+- Dev helpers (`scripts/dev.ps1`).

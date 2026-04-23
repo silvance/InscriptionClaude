@@ -1,12 +1,13 @@
-"""High-level persistence API for cases.
+"""High-level persistence API for sessions.
 
 This is the only module higher layers (controllers, UI) should use to talk
-to case storage. It wraps SQLite, the filesystem layout, manifest I/O, and
-lockfile management.
+to session storage. It wraps SQLite, the filesystem layout, manifest I/O,
+and lockfile management.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -14,28 +15,27 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from inscription.cases.models import (
+from inscription.model import (
     SCHEMA_VERSION,
-    Case,
-    CaseInfo,
-    CaseManifest,
+    DraftStep,
+    EventKind,
+    RawEvent,
+    ResolvedElement,
+    ScreenshotArtifact,
     Session,
-    Step,
-    StepKind,
+    SessionInfo,
+    SessionManifest,
     utcnow,
 )
-from inscription.cases.slug import slugify_case_number
 from inscription.storage import locking
 from inscription.storage.errors import (
-    CaseAlreadyExistsError,
-    CaseNotFoundError,
+    SessionAlreadyExistsError,
+    SessionNotFoundError,
     StorageError,
 )
 from inscription.storage.manifest import read_manifest, write_manifest
-from inscription.storage.schema import (
-    initialise_schema,
-    migrate_to_latest,
-)
+from inscription.storage.schema import initialise_schema, migrate_to_latest
+from inscription.storage.slug import slugify
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -52,325 +52,476 @@ def _parse_iso(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
-class CaseRepository:
-    """Persistence API for a single open case.
+def _dumps_rect(rect: tuple[int, int, int, int] | None) -> str | None:
+    if rect is None:
+        return None
+    return json.dumps(list(rect))
 
-    Instances are created via :meth:`create` or :meth:`open_existing` and
-    must be closed with :meth:`close` (or used as a context manager).
-    """
 
-    def __init__(self, case: Case, conn: sqlite3.Connection) -> None:
-        self._case = case
+def _loads_rect(raw: str | None) -> tuple[int, int, int, int] | None:
+    if raw is None:
+        return None
+    parts = json.loads(raw)
+    return (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
+
+
+class SessionRepository:
+    """Persistence API for a single open session."""
+
+    def __init__(self, session: Session, conn: sqlite3.Connection) -> None:
+        self._session = session
         self._conn = conn
-        # SQLite connection is opened with check_same_thread=False; this lock
-        # serialises access so the capture engine's worker thread and the UI
-        # main thread can share the same connection safely.
         self._lock = threading.Lock()
 
     # ---------------------------------------------------------- lifecycle
 
     @classmethod
     def create(
-        cls,
-        *,
-        workspace_root: Path,
-        case_number: str,
-        title: str,
-        examiner: str,
-        agency: str | None = None,
-        description: str | None = None,
-    ) -> CaseRepository:
-        """Create a new case in ``workspace_root`` and open it."""
-        slug = slugify_case_number(case_number)
-        case_root = workspace_root / slug
-        if case_root.exists():
-            msg = f"Case directory {case_root} already exists"
-            raise CaseAlreadyExistsError(msg)
+        cls, *, workspace_root: Path, name: str, recorder_version: str = ""
+    ) -> SessionRepository:
+        """Create a new session directory and open it."""
+        slug = slugify(name)
+        root = workspace_root / slug
+        if root.exists():
+            msg = f"Session directory {root} already exists"
+            raise SessionAlreadyExistsError(msg)
 
         now = utcnow()
-        info = CaseInfo(
-            case_number=case_number,
-            title=title,
-            examiner=examiner,
-            agency=agency,
-            description=description,
-            created_at=now,
-            updated_at=now,
-        )
-        case = Case(info=info, root=case_root)
+        info = SessionInfo(name=name, started_at=now, recorder_version=recorder_version)
+        session = Session(info=info, root=root)
 
-        # Lay out directories before anything else so lock acquisition
-        # has a place to write.
-        case.screenshots_dir.mkdir(parents=True, exist_ok=False)
-        case.internal_dir.mkdir(parents=True, exist_ok=False)
-        locking.acquire(case.internal_dir / "case.lock")
+        session.screenshots_dir.mkdir(parents=True, exist_ok=False)
+        session.exports_dir.mkdir(parents=True, exist_ok=False)
+        session.internal_dir.mkdir(parents=True, exist_ok=False)
+        locking.acquire(session.internal_dir / "session.lock")
 
-        conn = sqlite3.connect(case.db_path, check_same_thread=False)
+        conn = sqlite3.connect(session.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             initialise_schema(conn)
             conn.execute(
                 """
-                INSERT INTO case_info
-                    (id, case_number, title, examiner, agency, description,
-                     created_at, updated_at, schema_version)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO session_info
+                    (id, name, started_at, ended_at, recorder_version, schema_version)
+                VALUES (1, ?, ?, NULL, ?, ?)
                 """,
-                (
-                    info.case_number,
-                    info.title,
-                    info.examiner,
-                    info.agency,
-                    info.description,
-                    _iso(info.created_at),
-                    _iso(info.updated_at),
-                    SCHEMA_VERSION,
-                ),
+                (info.name, _iso(info.started_at), recorder_version, SCHEMA_VERSION),
             )
             conn.commit()
         except Exception:
             conn.close()
-            locking.release(case.internal_dir / "case.lock")
+            locking.release(session.internal_dir / "session.lock")
             raise
 
-        repo = cls(case, conn)
+        repo = cls(session, conn)
         repo._write_manifest()
-        (case.internal_dir / "version").write_text(str(SCHEMA_VERSION), encoding="utf-8")
-        logger.info("Created case %s at %s", case_number, case_root)
+        logger.info("Created session %r at %s", name, root)
         return repo
 
     @classmethod
-    def open_existing(cls, *, workspace_root: Path, case_number: str) -> CaseRepository:
-        """Open an existing case from ``workspace_root``."""
-        slug = slugify_case_number(case_number)
-        case_root = workspace_root / slug
-        if not case_root.exists():
-            msg = f"Case {case_number} not found in {workspace_root}"
-            raise CaseNotFoundError(msg)
-        return cls._open_at_root(case_root)
+    def open_existing(cls, *, workspace_root: Path, slug: str) -> SessionRepository:
+        root = workspace_root / slug
+        if not root.exists():
+            msg = f"Session {slug!r} not found in {workspace_root}"
+            raise SessionNotFoundError(msg)
+        return cls._open_at_root(root)
 
     @classmethod
-    def _open_at_root(cls, case_root: Path) -> CaseRepository:
-        if not (case_root / "case.db").exists():
-            msg = f"No case.db under {case_root}"
-            raise CaseNotFoundError(msg)
-        case_root.mkdir(exist_ok=True)
-        (case_root / "screenshots").mkdir(exist_ok=True)
-        (case_root / ".inscription").mkdir(exist_ok=True)
-        locking.acquire(case_root / ".inscription" / "case.lock")
+    def _open_at_root(cls, root: Path) -> SessionRepository:
+        if not (root / "session.db").exists():
+            msg = f"No session.db under {root}"
+            raise SessionNotFoundError(msg)
+        (root / "screenshots").mkdir(exist_ok=True)
+        (root / "exports").mkdir(exist_ok=True)
+        (root / ".inscription").mkdir(exist_ok=True)
+        locking.acquire(root / ".inscription" / "session.lock")
 
-        conn = sqlite3.connect(case_root / "case.db", check_same_thread=False)
+        conn = sqlite3.connect(root / "session.db", check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             migrate_to_latest(conn)
-            info = cls._load_case_info(conn)
+            info = cls._load_info(conn)
         except Exception:
             conn.close()
-            locking.release(case_root / ".inscription" / "case.lock")
+            locking.release(root / ".inscription" / "session.lock")
             raise
 
-        case = Case(info=info, root=case_root)
-        return cls(case, conn)
+        session = Session(info=info, root=root)
+        return cls(session, conn)
 
     def close(self) -> None:
-        """Flush manifest, close DB, release lock."""
         try:
             self._write_manifest()
         finally:
             self._conn.close()
-            locking.release(self._case.internal_dir / "case.lock")
-        logger.info("Closed case %s", self._case.info.case_number)
+            locking.release(self._session.internal_dir / "session.lock")
+        logger.info("Closed session %r", self._session.info.name)
 
-    def __enter__(self) -> CaseRepository:
+    def __enter__(self) -> SessionRepository:
         return self
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    # ------------------------------------------------------------ queries
+    # ----------------------------------------------------------- queries
 
     @property
-    def case(self) -> Case:
-        return self._case
+    def session(self) -> Session:
+        return self._session
 
     @staticmethod
-    def _load_case_info(conn: sqlite3.Connection) -> CaseInfo:
-        row = conn.execute("SELECT * FROM case_info WHERE id = 1").fetchone()
+    def _load_info(conn: sqlite3.Connection) -> SessionInfo:
+        row = conn.execute("SELECT * FROM session_info WHERE id = 1").fetchone()
         if row is None:
-            msg = "case_info row missing from database"
+            msg = "session_info row missing from database"
             raise StorageError(msg)
-        return CaseInfo(
-            case_number=row["case_number"],
-            title=row["title"],
-            examiner=row["examiner"],
-            agency=row["agency"],
-            description=row["description"],
-            created_at=_parse_iso(row["created_at"]),
-            updated_at=_parse_iso(row["updated_at"]),
+        return SessionInfo(
+            name=row["name"],
+            started_at=_parse_iso(row["started_at"]),
+            ended_at=_parse_iso(row["ended_at"]) if row["ended_at"] else None,
+            recorder_version=row["recorder_version"],
             schema_version=row["schema_version"],
         )
 
-    def list_steps(self, session_id: int | None = None) -> list[Step]:
-        """Return all steps, optionally filtered to a session, in sequence order."""
+    def list_events(self) -> list[RawEvent]:
         with self._lock:
-            if session_id is None:
-                rows = self._conn.execute(
-                    "SELECT * FROM steps ORDER BY session_id, sequence"
-                ).fetchall()
+            rows = self._conn.execute("SELECT * FROM raw_events ORDER BY sequence").fetchall()
+        return [self._row_to_event(r) for r in rows]
+
+    def list_steps(self, *, include_suppressed: bool = False) -> list[DraftStep]:
+        with self._lock:
+            if include_suppressed:
+                rows = self._conn.execute("SELECT * FROM draft_steps ORDER BY sequence").fetchall()
             else:
                 rows = self._conn.execute(
-                    "SELECT * FROM steps WHERE session_id = ? ORDER BY sequence",
-                    (session_id,),
+                    "SELECT * FROM draft_steps WHERE suppressed = 0 ORDER BY sequence"
                 ).fetchall()
         return [self._row_to_step(r) for r in rows]
 
-    def list_sessions(self) -> list[Session]:
+    def list_screenshots(self) -> list[ScreenshotArtifact]:
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM sessions ORDER BY id").fetchall()
-        return [self._row_to_session(r) for r in rows]
+            rows = self._conn.execute("SELECT * FROM screenshot_artifacts ORDER BY id").fetchall()
+        return [self._row_to_screenshot(r) for r in rows]
 
-    @staticmethod
-    def _row_to_step(row: sqlite3.Row) -> Step:
-        return Step(
-            id=row["id"],
-            session_id=row["session_id"],
-            sequence=row["sequence"],
-            captured_at=_parse_iso(row["captured_at"]),
-            kind=StepKind(row["kind"]),
-            title=row["title"],
-            body_markdown=row["body_markdown"],
-            screenshot_path=row["screenshot_path"],
-        )
-
-    @staticmethod
-    def _row_to_session(row: sqlite3.Row) -> Session:
-        return Session(
-            id=row["id"],
-            started_at=_parse_iso(row["started_at"]),
-            ended_at=_parse_iso(row["ended_at"]) if row["ended_at"] else None,
-            capture_mode=row["capture_mode"],
-        )
-
-    # ------------------------------------------------------------ mutations
-
-    def start_session(self, capture_mode: str = "hotkey") -> Session:
-        """Open a new capture session and return it."""
-        started = utcnow()
-        with self._lock:
-            cursor = self._conn.execute(
-                "INSERT INTO sessions (started_at, capture_mode) VALUES (?, ?)",
-                (_iso(started), capture_mode),
-            )
-            self._conn.commit()
-            session_id = cursor.lastrowid
-        assert session_id is not None
-        return Session(id=session_id, started_at=started, capture_mode=capture_mode)
-
-    def end_session(self, session_id: int) -> None:
-        with self._lock:
-            self._conn.execute(
-                "UPDATE sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
-                (_iso(utcnow()), session_id),
-            )
-            self._conn.commit()
-
-    def append_step(
-        self,
-        *,
-        session_id: int,
-        kind: StepKind,
-        title: str = "",
-        body_markdown: str = "",
-        screenshot_path: str | None = None,
-        captured_at: datetime | None = None,
-    ) -> Step:
-        """Append a step to the given session. Sequence is assigned automatically."""
-        captured_at = captured_at or utcnow()
+    def get_screenshot(self, screenshot_id: int) -> ScreenshotArtifact | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM steps WHERE session_id = ?",
-                (session_id,),
+                "SELECT * FROM screenshot_artifacts WHERE id = ?", (screenshot_id,)
+            ).fetchone()
+        return self._row_to_screenshot(row) if row else None
+
+    def get_resolved_element(self, element_id: int) -> ResolvedElement | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM resolved_elements WHERE id = ?", (element_id,)
+            ).fetchone()
+        return self._row_to_element(row) if row else None
+
+    # --------------------------------------------------------- mutations
+
+    def end_session(self) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE session_info SET ended_at = ? WHERE id = 1 AND ended_at IS NULL",
+                (_iso(utcnow()),),
+            )
+            self._conn.commit()
+
+    def add_screenshot(
+        self,
+        *,
+        relative_path: str,
+        captured_at: datetime,
+        width: int,
+        height: int,
+        sha256: str = "",
+        highlight_rect: tuple[int, int, int, int] | None = None,
+    ) -> ScreenshotArtifact:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO screenshot_artifacts
+                    (relative_path, captured_at, width, height, sha256, highlight_rect)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    relative_path,
+                    _iso(captured_at),
+                    width,
+                    height,
+                    sha256,
+                    _dumps_rect(highlight_rect),
+                ),
+            )
+            self._conn.commit()
+            screenshot_id = cursor.lastrowid
+        assert screenshot_id is not None
+        return ScreenshotArtifact(
+            id=screenshot_id,
+            relative_path=relative_path,
+            captured_at=captured_at,
+            width=width,
+            height=height,
+            sha256=sha256,
+            highlight_rect=highlight_rect,
+        )
+
+    def add_resolved_element(self, element: ResolvedElement) -> ResolvedElement:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO resolved_elements
+                    (name, control_type, automation_id, class_name, role,
+                     confidence, method)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    element.name,
+                    element.control_type,
+                    element.automation_id,
+                    element.class_name,
+                    element.role,
+                    element.confidence,
+                    element.method,
+                ),
+            )
+            self._conn.commit()
+            element_id = cursor.lastrowid
+        assert element_id is not None
+        return ResolvedElement(
+            id=element_id,
+            name=element.name,
+            control_type=element.control_type,
+            automation_id=element.automation_id,
+            class_name=element.class_name,
+            role=element.role,
+            confidence=element.confidence,
+            method=element.method,
+        )
+
+    def append_event(
+        self,
+        *,
+        kind: EventKind,
+        occurred_at: datetime | None = None,
+        button: str | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        key: str | None = None,
+        text: str | None = None,
+        window_title: str | None = None,
+        process_name: str | None = None,
+        screenshot_id: int | None = None,
+        resolved_element_id: int | None = None,
+    ) -> RawEvent:
+        occurred_at = occurred_at or utcnow()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM raw_events"
             ).fetchone()
             next_seq: int = row[0]
             cursor = self._conn.execute(
                 """
-                INSERT INTO steps
-                    (session_id, sequence, captured_at, kind, title,
-                     body_markdown, screenshot_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO raw_events
+                    (sequence, occurred_at, kind, button, x, y, key, text,
+                     window_title, process_name, screenshot_id,
+                     resolved_element_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    session_id,
                     next_seq,
-                    _iso(captured_at),
+                    _iso(occurred_at),
                     kind.value,
-                    title,
-                    body_markdown,
-                    screenshot_path,
+                    button,
+                    x,
+                    y,
+                    key,
+                    text,
+                    window_title,
+                    process_name,
+                    screenshot_id,
+                    resolved_element_id,
                 ),
             )
-            self._touch_updated_at_locked()
             self._conn.commit()
-            step_id = cursor.lastrowid
-        assert step_id is not None
-        return Step(
-            id=step_id,
-            session_id=session_id,
+            event_id = cursor.lastrowid
+        assert event_id is not None
+        return RawEvent(
+            id=event_id,
             sequence=next_seq,
-            captured_at=captured_at,
+            occurred_at=occurred_at,
             kind=kind,
-            title=title,
-            body_markdown=body_markdown,
-            screenshot_path=screenshot_path,
+            button=button,
+            x=x,
+            y=y,
+            key=key,
+            text=text,
+            window_title=window_title,
+            process_name=process_name,
+            screenshot_id=screenshot_id,
+            resolved_element_id=resolved_element_id,
         )
 
-    def update_step_text(self, step_id: int, *, title: str, body_markdown: str) -> None:
+    def replace_steps(self, steps: list[DraftStep]) -> list[DraftStep]:
+        """Replace every draft step with ``steps``, reassigning sequences.
+
+        Used by the step generator after grouping raw events.
+        """
+        saved: list[DraftStep] = []
+        with self._lock:
+            self._conn.execute("DELETE FROM draft_steps")
+            for i, step in enumerate(steps, start=1):
+                cursor = self._conn.execute(
+                    """
+                    INSERT INTO draft_steps
+                        (sequence, text, source_event_ids, screenshot_id,
+                         suppressed, manual_edit)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        i,
+                        step.text,
+                        json.dumps(list(step.source_event_ids)),
+                        step.screenshot_id,
+                        1 if step.suppressed else 0,
+                        1 if step.manual_edit else 0,
+                    ),
+                )
+                step_id = cursor.lastrowid
+                assert step_id is not None
+                saved.append(
+                    DraftStep(
+                        id=step_id,
+                        sequence=i,
+                        text=step.text,
+                        source_event_ids=step.source_event_ids,
+                        screenshot_id=step.screenshot_id,
+                        suppressed=step.suppressed,
+                        manual_edit=step.manual_edit,
+                    )
+                )
+            self._conn.commit()
+        return saved
+
+    def update_step_text(self, step_id: int, text: str) -> None:
         with self._lock:
             self._conn.execute(
-                "UPDATE steps SET title = ?, body_markdown = ? WHERE id = ?",
-                (title, body_markdown, step_id),
+                "UPDATE draft_steps SET text = ?, manual_edit = 1 WHERE id = ?",
+                (text, step_id),
             )
-            self._touch_updated_at_locked()
             self._conn.commit()
 
-    def _touch_updated_at_locked(self) -> None:
-        """Update the case's ``updated_at`` timestamp.
+    def set_step_suppressed(self, step_id: int, *, suppressed: bool) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE draft_steps SET suppressed = ? WHERE id = ?",
+                (1 if suppressed else 0, step_id),
+            )
+            self._conn.commit()
 
-        Caller must already hold ``self._lock``.
-        """
-        self._conn.execute(
-            "UPDATE case_info SET updated_at = ? WHERE id = 1",
-            (_iso(utcnow()),),
-        )
+    def reorder_steps(self, ordered_step_ids: list[int]) -> None:
+        """Rewrite sequence numbers to match ``ordered_step_ids``."""
+        with self._lock:
+            for i, step_id in enumerate(ordered_step_ids, start=1):
+                self._conn.execute(
+                    "UPDATE draft_steps SET sequence = ? WHERE id = ?",
+                    (i, step_id),
+                )
+            self._conn.commit()
 
-    # ------------------------------------------------------------ manifest
+    def set_step_screenshot(self, step_id: int, screenshot_id: int | None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE draft_steps SET screenshot_id = ? WHERE id = ?",
+                (screenshot_id, step_id),
+            )
+            self._conn.commit()
+
+    # ----------------------------------------------------------- manifest
 
     def _write_manifest(self) -> None:
         with self._lock:
-            count_row = self._conn.execute("SELECT COUNT(*) FROM steps").fetchone()
-            info = self._load_case_info(self._conn)
-        manifest = CaseManifest(
-            case_number=info.case_number,
-            title=info.title,
-            examiner=info.examiner,
-            created_at=info.created_at,
-            updated_at=info.updated_at,
-            step_count=count_row[0],
+            event_row = self._conn.execute("SELECT COUNT(*) FROM raw_events").fetchone()
+            step_row = self._conn.execute(
+                "SELECT COUNT(*) FROM draft_steps WHERE suppressed = 0"
+            ).fetchone()
+            info = self._load_info(self._conn)
+        manifest = SessionManifest(
+            name=info.name,
+            started_at=info.started_at,
+            ended_at=info.ended_at,
+            event_count=event_row[0],
+            step_count=step_row[0],
         )
-        write_manifest(self._case.manifest_path, manifest)
+        write_manifest(self._session.manifest_path, manifest)
 
-    # ------------------------------------------------------------ transactions
+    def flush_manifest(self) -> None:
+        """Re-derive and write the manifest. Call after bulk mutations."""
+        self._write_manifest()
+
+    # --------------------------------------------------------- row mapping
+
+    @staticmethod
+    def _row_to_event(row: sqlite3.Row) -> RawEvent:
+        return RawEvent(
+            id=row["id"],
+            sequence=row["sequence"],
+            occurred_at=_parse_iso(row["occurred_at"]),
+            kind=EventKind(row["kind"]),
+            button=row["button"],
+            x=row["x"],
+            y=row["y"],
+            key=row["key"],
+            text=row["text"],
+            window_title=row["window_title"],
+            process_name=row["process_name"],
+            screenshot_id=row["screenshot_id"],
+            resolved_element_id=row["resolved_element_id"],
+        )
+
+    @staticmethod
+    def _row_to_step(row: sqlite3.Row) -> DraftStep:
+        return DraftStep(
+            id=row["id"],
+            sequence=row["sequence"],
+            text=row["text"],
+            source_event_ids=tuple(json.loads(row["source_event_ids"])),
+            screenshot_id=row["screenshot_id"],
+            suppressed=bool(row["suppressed"]),
+            manual_edit=bool(row["manual_edit"]),
+        )
+
+    @staticmethod
+    def _row_to_screenshot(row: sqlite3.Row) -> ScreenshotArtifact:
+        return ScreenshotArtifact(
+            id=row["id"],
+            relative_path=row["relative_path"],
+            captured_at=_parse_iso(row["captured_at"]),
+            width=row["width"],
+            height=row["height"],
+            sha256=row["sha256"],
+            highlight_rect=_loads_rect(row["highlight_rect"]),
+        )
+
+    @staticmethod
+    def _row_to_element(row: sqlite3.Row) -> ResolvedElement:
+        return ResolvedElement(
+            id=row["id"],
+            name=row["name"],
+            control_type=row["control_type"],
+            automation_id=row["automation_id"],
+            class_name=row["class_name"],
+            role=row["role"],
+            confidence=row["confidence"],
+            method=row["method"],
+        )
+
+    # ------------------------------------------------------ transactions
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Yield the raw connection inside a transaction.
-
-        Use sparingly; prefer the higher-level methods. Useful for batch
-        operations added in future phases. Holds the repository's lock for
-        the duration of the transaction.
-        """
         with self._lock:
             try:
                 yield self._conn
@@ -383,21 +534,22 @@ class CaseRepository:
 # --------------------------------------------------------------- free funcs
 
 
-def list_cases(workspace_root: Path) -> list[CaseManifest]:
-    """Return a manifest for every case in ``workspace_root``.
+def list_sessions(workspace_root: Path) -> list[tuple[str, SessionManifest]]:
+    """Return ``(slug, manifest)`` pairs for every session in ``workspace_root``.
 
-    Cases without a manifest are silently skipped; we don't want a corrupt
-    directory to break the case picker.
+    Directories without a manifest are silently skipped.
     """
     if not workspace_root.exists():
         return []
-    manifests: list[CaseManifest] = []
+    out: list[tuple[str, SessionManifest]] = []
     for child in sorted(workspace_root.iterdir()):
+        if not child.is_dir():
+            continue
         manifest_path = child / "manifest.json"
         if not manifest_path.exists():
             continue
         try:
-            manifests.append(read_manifest(manifest_path))
+            out.append((child.name, read_manifest(manifest_path)))
         except (OSError, ValueError, KeyError) as exc:
             logger.warning("Skipping malformed manifest at %s: %s", manifest_path, exc)
-    return manifests
+    return out

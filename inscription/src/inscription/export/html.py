@@ -1,0 +1,183 @@
+"""HTML exporter.
+
+Produces a self-contained ``.html`` file in the session's ``exports/``
+directory. Screenshots are referenced by path relative to the HTML file
+(the exporter copies them into ``exports/assets/`` so the output folder is
+portable on its own).
+"""
+
+from __future__ import annotations
+
+import html
+import logging
+import shutil
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from inscription.model import ExportDocument, utcnow
+
+if TYPE_CHECKING:
+    from inscription.model import DraftStep, ScreenshotArtifact
+    from inscription.storage import SessionRepository
+
+logger = logging.getLogger(__name__)
+
+
+_CSS = """
+:root {
+  color-scheme: light dark;
+  --fg: #111;
+  --muted: #666;
+  --rule: #e5e5e5;
+  --accent: #1f6feb;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #f3f3f3; --muted: #aaa; --rule: #333; --accent: #58a6ff; }
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--fg);
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  line-height: 1.55;
+}
+header { border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2rem; }
+header h1 { margin: 0 0 .25rem 0; }
+header .meta { color: var(--muted); font-size: .9rem; }
+ol.steps { list-style: none; padding: 0; counter-reset: step; }
+ol.steps > li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  gap: .75rem;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+ol.steps > li::before {
+  content: counter(step);
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.step-text { margin: 0 0 .5rem 0; }
+.step-shot img {
+  max-width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+footer { color: var(--muted); font-size: .8rem; margin-top: 2rem; }
+"""
+
+
+def export_html(
+    repository: SessionRepository,
+    *,
+    destination: Path | None = None,
+) -> ExportDocument:
+    """Render the session as HTML.
+
+    Args:
+        repository: The open session.
+        destination: Output file path. Defaults to
+            ``<session>/exports/<slug>.html``.
+    """
+    session = repository.session
+    steps = repository.list_steps()
+    screenshots = {s.id: s for s in repository.list_screenshots() if s.id is not None}
+
+    if destination is None:
+        destination = session.exports_dir / f"{session.root.name}.html"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    assets_dir = destination.parent / "assets"
+    assets_dir.mkdir(exist_ok=True)
+
+    body_parts = [_render_header(session)]
+    body_parts.append('<ol class="steps">')
+    for step in steps:
+        body_parts.append(_render_step(step, screenshots, session.root, assets_dir))
+    body_parts.append("</ol>")
+    body_parts.append(_render_footer(session))
+
+    html_doc = _wrap(title=session.info.name, body="\n".join(body_parts))
+    destination.write_text(html_doc, encoding="utf-8")
+    logger.info("Exported %s to %s", session.info.name, destination)
+
+    return ExportDocument(
+        session_name=session.info.name,
+        format="html",
+        path=destination,
+        generated_at=utcnow(),
+    )
+
+
+# -------------------------------------------------------------- rendering
+
+
+def _wrap(*, title: str, body: str) -> str:
+    return (
+        "<!doctype html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        f"<title>{html.escape(title)}</title>\n"
+        f"<style>{_CSS}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        f"{body}\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def _render_header(session: object) -> str:  # session has info: SessionInfo
+    info = session.info  # type: ignore[attr-defined]
+    started = info.started_at.strftime("%Y-%m-%d %H:%M")
+    ended = info.ended_at.strftime("%Y-%m-%d %H:%M") if info.ended_at else "in progress"
+    return (
+        "<header>\n"
+        f"<h1>{html.escape(info.name)}</h1>\n"
+        f'<div class="meta">Recorded {html.escape(started)} &ndash; {html.escape(ended)}</div>\n'
+        "</header>\n"
+    )
+
+
+def _render_step(
+    step: DraftStep,
+    screenshots: dict[int, ScreenshotArtifact],
+    session_root: Path,
+    assets_dir: Path,
+) -> str:
+    text = html.escape(step.text).replace("\n", "<br>")
+    parts = [
+        "<li>",
+        '<div class="step-body">',
+        f'<p class="step-text">{text}</p>',
+    ]
+    shot = screenshots.get(step.screenshot_id) if step.screenshot_id else None
+    if shot is not None:
+        src = _stage_asset(shot, session_root, assets_dir)
+        alt = html.escape(step.text)[:120]
+        parts.append(f'<div class="step-shot"><img src="{html.escape(src)}" alt="{alt}"></div>')
+    parts.append("</div>")
+    parts.append("</li>")
+    return "\n".join(parts)
+
+
+def _render_footer(session: object) -> str:
+    info = session.info  # type: ignore[attr-defined]
+    version = info.recorder_version or "unknown"
+    return f"<footer>\nGenerated by Inscription (recorder {html.escape(version)}).\n</footer>\n"
+
+
+def _stage_asset(shot: ScreenshotArtifact, session_root: Path, assets_dir: Path) -> str:
+    """Copy the screenshot into the export's assets dir and return a relative URL."""
+    src = session_root / shot.relative_path
+    target = assets_dir / Path(shot.relative_path).name
+    if not target.exists():
+        try:
+            shutil.copyfile(src, target)
+        except OSError as exc:
+            logger.warning("Could not stage asset %s: %s", src, exc)
+            return shot.relative_path
+    return f"assets/{target.name}"
