@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- ``WindowFocusSource`` now keys "did the window change?" on the native
+  window handle (``hwnd``) rather than the window title. Typing in
+  Notepad updates the title once per keystroke
+  (``*h - Notepad`` → ``*he - Notepad`` → …), and the old keying treated
+  each title update as a new window switch. ``ForegroundInfo`` gains an
+  ``hwnd`` field; non-Windows inspectors leave it ``None`` and the source
+  falls back to title + process name.
+
 ### Fixed
 
 - ``SessionSink`` no longer crashes with

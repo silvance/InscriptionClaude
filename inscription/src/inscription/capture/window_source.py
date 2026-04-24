@@ -1,10 +1,16 @@
 """Foreground-window change capture source.
 
 Polls the foreground inspector on a timer. Whenever the active window
-(title + process) changes, submits a :data:`EventKind.WINDOW_FOCUS` event
-with a screenshot of the new foreground. Polling is fine here — UIA
-window events require per-process hooks and a 250 ms poll is invisible to
-users while still catching every practical transition.
+changes, submits a :data:`EventKind.WINDOW_FOCUS` event with a screenshot
+of the new foreground. Polling is fine here — UIA window events require
+per-process hooks and a 250 ms poll is invisible to users while still
+catching every practical transition.
+
+A window is identified by its native handle (``hwnd`` on Windows), not
+by its title. The title changes as the user types (``*h - Notepad``,
+``*he - Notepad``, …) and keying on title would produce one spurious
+"switch window" event per keystroke. When ``hwnd`` isn't available (the
+non-Windows stub inspector), the source falls back to title + process.
 
 The screenshot is captured on this source's own poll thread, matching the
 click source pattern.
@@ -23,11 +29,23 @@ from inscription.platform import create_screen_capturer
 
 if TYPE_CHECKING:
     from inscription.capture.engine import CaptureEngine
-    from inscription.platform import ForegroundInspector, ScreenCapturer
+    from inscription.platform import ForegroundInfo, ForegroundInspector, ScreenCapturer
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_POLL_INTERVAL_S = 0.25
+
+
+def _identity(info: ForegroundInfo) -> tuple[int | str, str]:
+    """Return a stable identity for a window.
+
+    Prefer the native handle (``hwnd``) so title changes inside the same
+    window don't register as transitions. Fall back to the title when no
+    handle is available (non-Windows).
+    """
+    if info.hwnd is not None:
+        return (info.hwnd, info.process_name or "")
+    return (info.window_title or "", info.process_name or "")
 
 
 class WindowFocusSource(CaptureSource):
@@ -45,7 +63,7 @@ class WindowFocusSource(CaptureSource):
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._screen: ScreenCapturer | None = None
-        self._last_key: tuple[str, str] | None = None
+        self._last_identity: tuple[int | str, str] | None = None
 
     def start(self, engine: CaptureEngine) -> None:
         self._engine = engine
@@ -81,11 +99,11 @@ class WindowFocusSource(CaptureSource):
         if engine is None:
             return
         info = self._inspector.inspect()
-        key = (info.window_title or "", info.process_name or "")
-        if key == self._last_key:
+        identity = _identity(info)
+        if identity == self._last_identity:
             return
-        previous = self._last_key
-        self._last_key = key
+        previous = self._last_identity
+        self._last_identity = identity
         # Ignore the very first observation — it's the window that was
         # already active when recording started, not a transition.
         if previous is None:

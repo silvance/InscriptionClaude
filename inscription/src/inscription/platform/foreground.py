@@ -27,6 +27,10 @@ class ForegroundInfo:
     process_id: int | None
     #: Absolute path to the executable, if resolvable.
     process_path: str | None = None
+    #: Native window handle (Windows ``HWND``). Used as the stable identity
+    #: for a window — the title can change while the user types in it, but
+    #: the handle only changes when focus moves to a different window.
+    hwnd: int | None = None
 
 
 class ForegroundInspector(ABC):
@@ -90,6 +94,7 @@ class _WindowsForegroundInspector(ForegroundInspector):
             process_name=process_name,
             process_id=process_id,
             process_path=process_path,
+            hwnd=int(hwnd),
         )
 
 
