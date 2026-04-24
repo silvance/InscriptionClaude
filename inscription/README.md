@@ -63,9 +63,39 @@ python -m inscription
 2. File → Open Session, start a new session with a name.
 3. Press **● Record**, carry out the workflow on your desktop.
 4. Press **■ Stop**. Draft steps are auto-generated from the captured events.
-5. Click a step to edit its text; remove steps that shouldn't appear in the
+5. *(optional)* File → Rewrite with AI… — hands the session to a local LLM
+   for a more natural rewrite. See [Local LLM setup](#local-llm-setup).
+6. Click a step to edit its text; remove steps that shouldn't appear in the
    guide.
-6. File → Export as HTML.
+7. File → Export as HTML.
+
+## Local LLM setup
+
+The rule-based step generator always runs; the LLM rewrite is opt-in. Any
+OpenAI-compatible chat-completions endpoint works.
+
+**Fastest path — [Ollama](https://ollama.com):**
+
+```powershell
+# Install Ollama, then pull a model.
+ollama pull granite3.3:8b     # or gemma2:9b, llama3.1:8b, etc.
+```
+
+Ollama exposes `http://localhost:11434/v1` automatically; that's the
+default Inscription points at. To change model or endpoint, edit
+`%LOCALAPPDATA%\Inscription\config.ini`:
+
+```ini
+[llm]
+base_url=http://localhost:11434/v1
+model=granite3.3:8b
+timeout_s=180
+```
+
+Inscription also works with LM Studio's local server and
+`llama.cpp --server`, and with remote providers when you set
+`llm.api_key` — point `llm.base_url` at whatever OpenAI-compatible
+endpoint you have.
 
 ## Architecture
 

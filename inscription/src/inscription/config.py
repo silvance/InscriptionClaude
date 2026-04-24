@@ -17,6 +17,19 @@ _K_WINDOW_GEOMETRY: Final = "window/geometry"
 _K_WINDOW_STATE: Final = "window/state"
 _K_WORKSPACE_ROOT: Final = "storage/workspace_root"
 _K_THEME: Final = "ui/theme"
+_K_LLM_ENABLED: Final = "llm/enabled"
+_K_LLM_BASE_URL: Final = "llm/base_url"
+_K_LLM_MODEL: Final = "llm/model"
+_K_LLM_TIMEOUT_S: Final = "llm/timeout_s"
+_K_LLM_API_KEY: Final = "llm/api_key"
+
+#: Default points at Ollama's OpenAI-compatible endpoint. Also works
+#: unchanged with LM Studio or ``llama.cpp --server`` when run on 11434.
+DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
+#: Small enough to run on a laptop, strong enough to rewrite a few dozen
+#: steps. Users with bigger hardware point at their preferred model.
+DEFAULT_LLM_MODEL: Final = "granite3.3:8b"
+DEFAULT_LLM_TIMEOUT_S: Final = 180.0
 
 
 class Config:
@@ -72,8 +85,71 @@ class Config:
     def theme(self, value: str) -> None:
         self._qs.setValue(_K_THEME, value)
 
+    # --------------------------------------------------------------- llm
+
+    @property
+    def llm_enabled(self) -> bool:
+        return _as_bool(self._qs.value(_K_LLM_ENABLED, False))
+
+    @llm_enabled.setter
+    def llm_enabled(self, value: bool) -> None:
+        self._qs.setValue(_K_LLM_ENABLED, bool(value))
+
+    @property
+    def llm_base_url(self) -> str:
+        return str(self._qs.value(_K_LLM_BASE_URL, DEFAULT_LLM_BASE_URL))
+
+    @llm_base_url.setter
+    def llm_base_url(self, value: str) -> None:
+        self._qs.setValue(_K_LLM_BASE_URL, value)
+
+    @property
+    def llm_model(self) -> str:
+        return str(self._qs.value(_K_LLM_MODEL, DEFAULT_LLM_MODEL))
+
+    @llm_model.setter
+    def llm_model(self, value: str) -> None:
+        self._qs.setValue(_K_LLM_MODEL, value)
+
+    @property
+    def llm_timeout_s(self) -> float:
+        raw = self._qs.value(_K_LLM_TIMEOUT_S, DEFAULT_LLM_TIMEOUT_S)
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        if isinstance(raw, str):
+            try:
+                return float(raw)
+            except ValueError:
+                pass
+        return DEFAULT_LLM_TIMEOUT_S
+
+    @llm_timeout_s.setter
+    def llm_timeout_s(self, value: float) -> None:
+        self._qs.setValue(_K_LLM_TIMEOUT_S, float(value))
+
+    @property
+    def llm_api_key(self) -> str | None:
+        """Optional bearer token. Local Ollama/LM Studio ignore it; set
+        this only when pointing at a remote OpenAI-compatible service.
+        """
+        val = self._qs.value(_K_LLM_API_KEY, "")
+        return str(val) if val else None
+
+    @llm_api_key.setter
+    def llm_api_key(self, value: str | None) -> None:
+        self._qs.setValue(_K_LLM_API_KEY, value or "")
+
     # ------------------------------------------------------- persistence
 
     def sync(self) -> None:
         """Flush pending writes to disk."""
         self._qs.sync()
+
+
+def _as_bool(raw: object) -> bool:
+    """QSettings round-trips bools through strings; normalise back."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(raw)

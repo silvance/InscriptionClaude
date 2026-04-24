@@ -110,6 +110,14 @@ class MainWindow(QMainWindow):
         regen_action.triggered.connect(self._controller.regenerate_steps)
         file_menu.addAction(regen_action)
 
+        # No keyboard shortcut — Ctrl+Shift+R is the global "toggle recording"
+        # hotkey registered by SessionController, and this action would
+        # collide with it.
+        rewrite_action = QAction("Rewrite with &AI…", self)
+        rewrite_action.setStatusTip("Rewrite draft steps using the configured local LLM")
+        rewrite_action.triggered.connect(self._controller.rewrite_with_llm)
+        file_menu.addAction(rewrite_action)
+
         file_menu.addSeparator()
 
         export_html_action = QAction("Export as &HTML…", self)

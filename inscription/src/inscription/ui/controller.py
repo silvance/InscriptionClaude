@@ -33,6 +33,7 @@ from inscription.capture import (
 )
 from inscription.config import Config
 from inscription.export import export_html
+from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
 from inscription.platform import (
@@ -50,6 +51,7 @@ from inscription.storage import (
     list_sessions,
 )
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
+from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
 from inscription.version import __version__
 
@@ -321,6 +323,39 @@ class SessionController(QObject):
     def regenerate_steps(self) -> None:
         """Public entry point for the File > Regenerate menu item."""
         self._regenerate_steps()
+
+    def rewrite_with_llm(self) -> None:
+        """Send the session to the configured LLM and replace draft_steps
+        with the model's rewritten version. Preserves manual edits.
+
+        Shows a modal progress dialog and runs the request on a worker
+        thread so the UI stays responsive. Any failure — connection,
+        timeout, malformed response — leaves the existing steps in place
+        and shows the error to the user.
+        """
+        if self._repository is None:
+            return
+        self._workspace.flush_pending()
+        try:
+            client = LLMClient(
+                base_url=self._config.llm_base_url,
+                model=self._config.llm_model,
+                timeout_s=self._config.llm_timeout_s,
+                api_key=self._config.llm_api_key,
+            )
+        except LLMError as exc:
+            QMessageBox.warning(self._parent_widget, "LLM not configured", str(exc))
+            return
+
+        rewriter = StepRewriter(repository=self._repository, client=client)
+        worker = RewriteWorker(rewriter)
+        dialog = RewriteProgressDialog(worker, parent=self._parent_widget)
+        dialog.succeeded.connect(lambda _steps: self._workspace.reload())
+        dialog.failed.connect(
+            lambda msg: QMessageBox.warning(self._parent_widget, "LLM rewrite failed", msg)
+        )
+        dialog.start()
+        dialog.exec()
 
     def export_html(self) -> None:
         if self._repository is None:

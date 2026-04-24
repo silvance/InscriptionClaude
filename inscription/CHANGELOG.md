@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rewrite with AI.** File → Rewrite with AI… hands the session's raw
+  events + UIA metadata to a local LLM (or any OpenAI-compatible server)
+  and replaces the rule-based draft steps with the model's rewritten
+  version. Merges related events into single imperative sentences where
+  the rule-based generator is forced to emit one step per click.
+- ``inscription.llm`` package: ``LLMClient`` (stdlib-only ``urllib``
+  POST against a chat-completions endpoint), ``build_user_prompt`` /
+  ``parse_response`` (tolerates markdown code fences, drops steps whose
+  ``source_event_ids`` don't match any real event so the guide layer's
+  provenance stays clean), ``StepRewriter`` (preserves manual edits,
+  picks each merged step's screenshot from its last source event).
+- Config keys ``llm.enabled``, ``llm.base_url`` (defaults to
+  ``http://localhost:11434/v1`` — Ollama), ``llm.model`` (defaults to
+  ``granite3.3:8b``), ``llm.timeout_s``, ``llm.api_key``.
+- Modal progress dialog + QThread worker so the rewrite runs off the
+  UI thread; any failure (connection, timeout, malformed response)
+  leaves the existing draft intact and shows the error to the user.
+
+### Added
+
 - **Crop-and-highlight screenshots** in the HTML export. Each step's
   image is a tight crop around the clicked UIA element with a red click
   ring drawn at the press point instead of a full-screen PNG. Makes
