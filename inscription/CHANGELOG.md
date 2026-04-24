@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ``SessionSink`` no longer crashes with
   ``sqlite3.IntegrityError: UNIQUE constraint failed: screenshot_artifacts.relative_path``
-  when a user stops and restarts recording on the same open session. The
-  sink seeds its counter from the repository's existing screenshot count.
+  when a user stops and restarts recording on the same open session.
+  Screenshot filenames are now derived from the event's ``processed_at``
+  timestamp (microsecond precision); the engine's single-threaded worker
+  plus the cost of ``mss.grab`` guarantees uniqueness without a seeded
+  counter.
 - Click screenshots now capture the monitor under the click point instead
   of always capturing the primary monitor. ``ScreenCapturer.capture_at(x, y)``
   walks ``list_monitors`` and picks the monitor whose bbox contains the

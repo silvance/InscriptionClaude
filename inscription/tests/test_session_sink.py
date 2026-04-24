@@ -1,8 +1,8 @@
-"""SessionSink: filename collision fix across recording restarts."""
+"""SessionSink: timestamp-based filenames survive recording restarts."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from inscription.capture import EnrichedEvent, RawCaptureEvent, SessionSink
 from inscription.model import EventKind, ResolvedElement, utcnow
@@ -10,14 +10,7 @@ from inscription.platform import ForegroundInfo
 from inscription.storage import SessionRepository
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class _Click:
-    png: bytes
-    x: int = 10
-    y: int = 10
-
-
-def _make_enriched(png: bytes) -> EnrichedEvent:
+def _make_enriched(*, png: bytes, processed_at: datetime | None = None) -> EnrichedEvent:
     return EnrichedEvent(
         raw=RawCaptureEvent(
             kind=EventKind.CLICK,
@@ -28,7 +21,7 @@ def _make_enriched(png: bytes) -> EnrichedEvent:
             png_width=1,
             png_height=1,
         ),
-        processed_at=utcnow(),
+        processed_at=processed_at or utcnow(),
         foreground=ForegroundInfo(window_title="App", process_name="app.exe", process_id=1),
         image_sha256="hash",
         resolved=ResolvedElement(
@@ -37,24 +30,22 @@ def _make_enriched(png: bytes) -> EnrichedEvent:
     )
 
 
-def test_sink_seeds_counter_from_existing_screenshots(tmp_path) -> None:
-    repo = SessionRepository.create(workspace_root=tmp_path, name="Recount")
+def test_sink_filenames_are_unique_across_recording_restarts(tmp_path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Restart")
     try:
+        t0 = datetime(2026, 4, 24, 7, 21, 50, 100000, tzinfo=UTC)
         first = SessionSink(repo)
-        first.handle(_make_enriched(b"first"))
-        first.handle(_make_enriched(b"second"))
+        first.handle(_make_enriched(png=b"first", processed_at=t0))
+        first.handle(_make_enriched(png=b"second", processed_at=t0 + timedelta(microseconds=1)))
 
-        # Simulate stop → re-start: fresh sink on the same repo.
+        # Simulate stop → re-start on the same session.
         second = SessionSink(repo)
-        # Should NOT collide with screenshots/event-000001.png or 000002.png.
-        second.handle(_make_enriched(b"third"))
+        second.handle(_make_enriched(png=b"third", processed_at=t0 + timedelta(microseconds=2)))
 
         screenshots = repo.list_screenshots()
         paths = sorted(s.relative_path for s in screenshots)
-        assert paths == [
-            "screenshots/event-000001.png",
-            "screenshots/event-000002.png",
-            "screenshots/event-000003.png",
-        ]
+        assert len(paths) == 3
+        assert len(set(paths)) == 3  # all unique
+        assert all(p.startswith("screenshots/event-") and p.endswith(".png") for p in paths)
     finally:
         repo.close()
