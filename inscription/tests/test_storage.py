@@ -103,6 +103,7 @@ def test_resolved_element_round_trip(tmp_path) -> None:
                 control_type="Button",
                 confidence=0.9,
                 method="uia",
+                bounding_rect=(100, 200, 150, 230),
             )
         )
         assert stored.id is not None
@@ -110,5 +111,20 @@ def test_resolved_element_round_trip(tmp_path) -> None:
         assert loaded is not None
         assert loaded.name == "OK"
         assert loaded.confidence == pytest.approx(0.9)
+        assert loaded.bounding_rect == (100, 200, 150, 230)
+    finally:
+        repo.close()
+
+
+def test_resolved_element_without_bounding_rect_round_trips(tmp_path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="NoRect")
+    try:
+        stored = repo.add_resolved_element(
+            ResolvedElement(id=None, name="x", confidence=0.3, method="foreground-only")
+        )
+        assert stored.id is not None
+        loaded = repo.get_resolved_element(stored.id)
+        assert loaded is not None
+        assert loaded.bounding_rect is None
     finally:
         repo.close()

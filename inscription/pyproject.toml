@@ -25,6 +25,9 @@ dependencies = [
     "mss>=9.0",
     "pynput>=1.7",
     "psutil>=5.9",
+    # Crop + click-marker rendering in the HTML exporter. Keeps the export
+    # path Qt-free so it runs without a QApplication.
+    "Pillow>=10",
     # UIA element lookup. Windows-only: pulls comtypes/pywin32 transitively,
     # which don't install on non-Windows platforms. On macOS/Linux the
     # resolver falls back to foreground-only (see inscription.resolve).

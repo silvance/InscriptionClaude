@@ -272,8 +272,8 @@ class SessionRepository:
                 """
                 INSERT INTO resolved_elements
                     (name, control_type, automation_id, class_name, role,
-                     confidence, method)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     confidence, method, bounding_rect)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     element.name,
@@ -283,6 +283,7 @@ class SessionRepository:
                     element.role,
                     element.confidence,
                     element.method,
+                    _dumps_rect(element.bounding_rect),
                 ),
             )
             self._conn.commit()
@@ -297,6 +298,7 @@ class SessionRepository:
             role=element.role,
             confidence=element.confidence,
             method=element.method,
+            bounding_rect=element.bounding_rect,
         )
 
     def append_event(
@@ -514,6 +516,7 @@ class SessionRepository:
             role=row["role"],
             confidence=row["confidence"],
             method=row["method"],
+            bounding_rect=_loads_rect(row["bounding_rect"]),
         )
 
 

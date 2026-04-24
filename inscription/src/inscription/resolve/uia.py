@@ -44,6 +44,7 @@ class UiaElementResolver(ElementResolver):
         control_type = _safe_get(info, "control_type")
         automation_id = _safe_get(info, "automation_id")
         class_name = _safe_get(info, "class_name")
+        bounding_rect = _safe_rect(info)
 
         if not any([name, control_type, automation_id, class_name]):
             return self._fallback.resolve_at(x, y)
@@ -57,6 +58,7 @@ class UiaElementResolver(ElementResolver):
             role=control_type or None,
             confidence=0.9 if name and control_type else 0.6,
             method="uia",
+            bounding_rect=bounding_rect,
         )
 
 
@@ -68,3 +70,28 @@ def _safe_get(info: Any, attr: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _safe_rect(info: Any) -> tuple[int, int, int, int] | None:
+    """Extract the element's screen-space bounding rectangle.
+
+    pywinauto's ``UIAElementInfo.rectangle`` returns a ``RECT`` with
+    ``.left/.top/.right/.bottom``. Returns ``None`` if anything in that
+    read fails or the rect is empty.
+    """
+    try:
+        rect = getattr(info, "rectangle", None)
+    except Exception:
+        return None
+    if rect is None:
+        return None
+    try:
+        left = int(rect.left)
+        top = int(rect.top)
+        right = int(rect.right)
+        bottom = int(rect.bottom)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if right <= left or bottom <= top:
+        return None
+    return (left, top, right, bottom)

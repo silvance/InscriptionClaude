@@ -42,7 +42,8 @@ CREATE TABLE resolved_elements (
     class_name      TEXT,
     role            TEXT,
     confidence      REAL    NOT NULL DEFAULT 0,
-    method          TEXT    NOT NULL DEFAULT 'none'
+    method          TEXT    NOT NULL DEFAULT 'none',
+    bounding_rect   TEXT    -- JSON [left, top, right, bottom] in screen px
 );
 
 CREATE TABLE screenshot_artifacts (
@@ -87,7 +88,14 @@ CREATE INDEX idx_draft_steps_sequence ON draft_steps(sequence);
 """
 
 
-MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """Add ``resolved_elements.bounding_rect`` for crop-and-highlight."""
+    conn.execute("ALTER TABLE resolved_elements ADD COLUMN bounding_rect TEXT")
+
+
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    2: _migrate_v1_to_v2,
+}
 
 
 def current_schema_version(conn: sqlite3.Connection) -> int:

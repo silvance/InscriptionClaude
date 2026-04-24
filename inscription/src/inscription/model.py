@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class EventKind(StrEnum):
@@ -81,6 +81,10 @@ class ResolvedElement:
     ``confidence`` is 0..1. 0 means "nothing useful"; 0.9+ means UIA gave us
     a named, typed control. Step generation uses it to decide how specific
     the draft step text can be.
+
+    ``bounding_rect`` is ``(left, top, right, bottom)`` in screen pixels
+    when UIA supplies one, letting the exporter crop the screenshot tight
+    around the clicked element.
     """
 
     id: int | None
@@ -91,6 +95,7 @@ class ResolvedElement:
     role: str | None = None
     confidence: float = 0.0
     method: str = "none"  # "uia" | "foreground-only" | "none"
+    bounding_rect: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

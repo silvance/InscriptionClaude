@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Crop-and-highlight screenshots** in the HTML export. Each step's
+  image is a tight crop around the clicked UIA element with a red click
+  ring drawn at the press point instead of a full-screen PNG. Makes
+  multi-step guides dramatically more readable on-screen and in print.
+- ``ResolvedElement.bounding_rect`` stores the UIA
+  ``BoundingRectangle`` reported at resolve time; schema bumped to v2
+  with an ALTER TABLE migration that leaves v1 sessions working.
+- New module ``inscription.render`` with ``crop_highlight`` — a pure
+  Pillow function that crops a PNG around an element rect, pads it,
+  clamps to image bounds, and draws a translucent click marker. Keeps
+  the export path Qt-free.
+- ``Pillow>=10`` dependency.
+
 ### Changed
 
 - ``WindowFocusSource`` now keys "did the window change?" on the native
