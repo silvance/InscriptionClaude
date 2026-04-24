@@ -32,7 +32,10 @@ class SessionSink:
     def __init__(self, repository: SessionRepository) -> None:
         self._repo = repository
         self._lock = threading.Lock()
-        self._counter = 0
+        # Seed from existing state so a second recording on the same session
+        # doesn't collide with filenames from the first one. The screenshots
+        # table has a UNIQUE constraint on relative_path.
+        self._counter = len(repository.list_screenshots())
 
     def handle(self, event: EnrichedEvent) -> None:
         raw = event.raw

@@ -85,7 +85,7 @@ class ClickSource(CaptureSource):
             return
         button_name = getattr(button, "name", str(button))
         kind = self._classify(x, y, button_name)
-        png, w, h = self._capture()
+        png, w, h = self._capture(int(x), int(y))
         engine.submit(
             RawCaptureEvent(
                 kind=kind,
@@ -119,8 +119,8 @@ class ClickSource(CaptureSource):
             self._last_click_button = button_name
             return EventKind.CLICK
 
-    def _capture(self) -> tuple[bytes | None, int, int]:
-        """Grab a screenshot on the listener thread.
+    def _capture(self, x: int, y: int) -> tuple[bytes | None, int, int]:
+        """Grab a screenshot of whichever monitor holds ``(x, y)``.
 
         The ``ScreenCapturer`` is created lazily on first click because
         ``mss`` must be owned by the thread that uses it, and pynput's
@@ -129,8 +129,8 @@ class ClickSource(CaptureSource):
         if self._screen is None:
             self._screen = create_screen_capturer()
         try:
-            image = self._screen.capture()
+            image = self._screen.capture_at(x, y)
         except Exception:
-            logger.exception("Screenshot failed on click")
+            logger.exception("Screenshot failed on click at (%d, %d)", x, y)
             return None, 0, 0
         return image.png_bytes, image.width, image.height

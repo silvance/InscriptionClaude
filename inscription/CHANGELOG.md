@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- ``SessionSink`` no longer crashes with
+  ``sqlite3.IntegrityError: UNIQUE constraint failed: screenshot_artifacts.relative_path``
+  when a user stops and restarts recording on the same open session. The
+  sink seeds its counter from the repository's existing screenshot count.
+- Click screenshots now capture the monitor under the click point instead
+  of always capturing the primary monitor. ``ScreenCapturer.capture_at(x, y)``
+  walks ``list_monitors`` and picks the monitor whose bbox contains the
+  point; ``ClickSource`` calls it with the pynput coordinates.
+- ``pywinauto`` is now declared as a Windows-only dependency so the UIA
+  resolver actually loads on the target platform. Previously the install
+  silently skipped it and every click fell back to "Click in the X window"
+  text.
+- ``mss`` shutdown no longer emits a spurious ``ReleaseDC`` warning on
+  Windows; the known-harmless exception is logged at DEBUG.
+
 ### Changed
 
 - **Screenshots are now captured on the source's own thread** rather than
