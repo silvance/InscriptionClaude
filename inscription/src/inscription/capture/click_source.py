@@ -1,9 +1,11 @@
 """Mouse click capture source (``pynput`` backed).
 
 Listens for mouse button presses and submits :class:`RawCaptureEvent`
-objects of kind :data:`EventKind.CLICK` to the engine. Double-clicks are
-detected by :class:`ClickSource` itself — the engine doesn't do any
-temporal correlation.
+objects to the engine. Each click carries a PNG captured on the pynput
+listener thread *before* the event is enqueued, so the image reflects the
+UI at click time rather than after queue latency.
+
+Double-clicks are detected here — the engine does no temporal correlation.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from inscription.capture.engine import CaptureSource
 from inscription.capture.events import RawCaptureEvent
 from inscription.model import EventKind, utcnow
+from inscription.platform import create_screen_capturer
 
 try:
     from pynput import mouse as _pynput_mouse
@@ -27,6 +30,7 @@ except Exception:
 
 if TYPE_CHECKING:
     from inscription.capture.engine import CaptureEngine
+    from inscription.platform import ScreenCapturer
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +47,16 @@ class ClickSource(CaptureSource):
         self._engine: CaptureEngine | None = None
         self._listener: Any = None
         self._lock = threading.Lock()
+        self._screen: ScreenCapturer | None = None
         self._last_click_ts: float = 0.0
         self._last_click_xy: tuple[int, int] | None = None
         self._last_click_button: str | None = None
 
     def start(self, engine: CaptureEngine) -> None:
+        self._engine = engine
         if not _PYNPUT_AVAILABLE:
             logger.warning("pynput.mouse unavailable; ClickSource will not fire")
-            self._engine = engine
             return
-        self._engine = engine
         listener = _pynput_mouse.Listener(on_click=self._on_click)
         listener.daemon = True
         listener.start()
@@ -65,6 +69,12 @@ class ClickSource(CaptureSource):
             except Exception as exc:
                 logger.warning("Error stopping mouse listener: %s", exc)
             self._listener = None
+        if self._screen is not None:
+            try:
+                self._screen.close()
+            except Exception as exc:
+                logger.warning("Error closing screen capturer: %s", exc)
+            self._screen = None
         self._engine = None
 
     def _on_click(self, x: int, y: int, button: Any, pressed: bool) -> None:
@@ -74,9 +84,23 @@ class ClickSource(CaptureSource):
         if engine is None:
             return
         button_name = getattr(button, "name", str(button))
+        kind = self._classify(x, y, button_name)
+        png, w, h = self._capture()
+        engine.submit(
+            RawCaptureEvent(
+                kind=kind,
+                occurred_at=utcnow(),
+                button=button_name,
+                x=int(x),
+                y=int(y),
+                png_bytes=png,
+                png_width=w,
+                png_height=h,
+            )
+        )
 
+    def _classify(self, x: int, y: int, button_name: str) -> EventKind:
         now = time.monotonic()
-        kind = EventKind.CLICK
         with self._lock:
             if (
                 self._last_click_xy is not None
@@ -85,22 +109,28 @@ class ClickSource(CaptureSource):
                 and abs(x - self._last_click_xy[0]) <= DOUBLE_CLICK_RADIUS_PX
                 and abs(y - self._last_click_xy[1]) <= DOUBLE_CLICK_RADIUS_PX
             ):
-                kind = EventKind.DOUBLE_CLICK
                 # Reset so a triple-click doesn't also count as double.
                 self._last_click_ts = 0.0
                 self._last_click_xy = None
                 self._last_click_button = None
-            else:
-                self._last_click_ts = now
-                self._last_click_xy = (x, y)
-                self._last_click_button = button_name
+                return EventKind.DOUBLE_CLICK
+            self._last_click_ts = now
+            self._last_click_xy = (x, y)
+            self._last_click_button = button_name
+            return EventKind.CLICK
 
-        engine.submit(
-            RawCaptureEvent(
-                kind=kind,
-                occurred_at=utcnow(),
-                button=button_name,
-                x=int(x),
-                y=int(y),
-            )
-        )
+    def _capture(self) -> tuple[bytes | None, int, int]:
+        """Grab a screenshot on the listener thread.
+
+        The ``ScreenCapturer`` is created lazily on first click because
+        ``mss`` must be owned by the thread that uses it, and pynput's
+        listener thread only exists after :meth:`start`.
+        """
+        if self._screen is None:
+            self._screen = create_screen_capturer()
+        try:
+            image = self._screen.capture()
+        except Exception:
+            logger.exception("Screenshot failed on click")
+            return None, 0, 0
+        return image.png_bytes, image.width, image.height

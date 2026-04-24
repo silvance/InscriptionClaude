@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Screenshots are now captured on the source's own thread** rather than
+  on the engine worker. Clicks carry the *pre-click* frame (the UI the
+  user was looking at when they pressed the button) instead of a frame
+  read several queue hops later. ``ClickSource`` and ``WindowFocusSource``
+  each own a dedicated ``ScreenCapturer`` (``mss`` is not thread-safe, so
+  per-thread instances are required).
+- ``CaptureEngine`` no longer takes a ``screen_factory``; it does
+  foreground + UIA resolution + SHA-256 of the attached bytes, and
+  nothing else. ``RawCaptureEvent`` gains ``png_bytes`` / ``png_width`` /
+  ``png_height`` and loses ``want_screenshot``.
+- Global hotkeys moved from ``MarkerSource`` into ``SessionController``:
+  **Ctrl+Shift+R** toggles recording so the user can start/stop without
+  clicking Inscription's own window (and capturing it), and
+  **Ctrl+Shift+M** drops a marker. Recording-toggle is active whenever
+  a session is open; the marker hotkey is active only while recording.
+
+### Removed
+
+- ``MarkerSource`` class (folded into the controller).
+- ``EngineStats`` counters (never surfaced anywhere).
+- ``EventKind.TEXT_INPUT`` and its render path (never emitted by any
+  source; we don't capture typed text).
+- ``ForegroundInfo.extras`` (unused).
+- ``SessionRepository.transaction()`` (unused).
+- ``_resolver_factory`` indirection in the controller — ``create_element_resolver``
+  already has the right signature.
+
 ## [0.3.0] — Scribe-style pivot (alpha)
 
 ### Changed

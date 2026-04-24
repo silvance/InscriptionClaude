@@ -27,8 +27,6 @@ class ForegroundInfo:
     process_id: int | None
     #: Absolute path to the executable, if resolvable.
     process_path: str | None = None
-    #: Free-form dict for provider-specific context.
-    extras: dict[str, str] | None = None
 
 
 class ForegroundInspector(ABC):

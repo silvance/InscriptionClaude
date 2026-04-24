@@ -60,3 +60,11 @@ class RecorderBar(QWidget):
 
     def set_event_count(self, count: int) -> None:
         self._count_label.setText(f"{count} event{'s' if count != 1 else ''}")
+
+    def toggle_record(self) -> None:
+        """Flip the record button and fire ``record_toggled``.
+
+        Used by the global Ctrl+Shift+R hotkey so the user can start and
+        stop recording without clicking on Inscription's own window.
+        """
+        self._record_btn.setChecked(not self._record_btn.isChecked())

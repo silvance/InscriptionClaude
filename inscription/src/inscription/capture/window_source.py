@@ -1,10 +1,13 @@
 """Foreground-window change capture source.
 
 Polls the foreground inspector on a timer. Whenever the active window
-(title + process) changes, submits a :data:`EventKind.WINDOW_FOCUS` event.
-Polling is fine here — UIA window events require a per-process hook that
-isn't worth the complexity for alpha, and a 250 ms poll is invisible to
+(title + process) changes, submits a :data:`EventKind.WINDOW_FOCUS` event
+with a screenshot of the new foreground. Polling is fine here — UIA
+window events require per-process hooks and a 250 ms poll is invisible to
 users while still catching every practical transition.
+
+The screenshot is captured on this source's own poll thread, matching the
+click source pattern.
 """
 
 from __future__ import annotations
@@ -16,10 +19,11 @@ from typing import TYPE_CHECKING
 from inscription.capture.engine import CaptureSource
 from inscription.capture.events import RawCaptureEvent
 from inscription.model import EventKind, utcnow
+from inscription.platform import create_screen_capturer
 
 if TYPE_CHECKING:
     from inscription.capture.engine import CaptureEngine
-    from inscription.platform import ForegroundInspector
+    from inscription.platform import ForegroundInspector, ScreenCapturer
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ class WindowFocusSource(CaptureSource):
         self._engine: CaptureEngine | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._screen: ScreenCapturer | None = None
         self._last_key: tuple[str, str] | None = None
 
     def start(self, engine: CaptureEngine) -> None:
@@ -54,9 +59,17 @@ class WindowFocusSource(CaptureSource):
         if self._thread is not None:
             self._thread.join(timeout=2 * self._interval + 0.5)
             self._thread = None
+        if self._screen is not None:
+            try:
+                self._screen.close()
+            except Exception as exc:
+                logger.warning("Error closing screen capturer: %s", exc)
+            self._screen = None
         self._engine = None
 
     def _run(self) -> None:
+        # ScreenCapturer is owned by this thread — mss isn't thread-safe.
+        self._screen = create_screen_capturer()
         while not self._stop.wait(self._interval):
             try:
                 self._tick()
@@ -77,10 +90,23 @@ class WindowFocusSource(CaptureSource):
         # already active when recording started, not a transition.
         if previous is None:
             return
+        png, w, h = self._capture()
         engine.submit(
             RawCaptureEvent(
                 kind=EventKind.WINDOW_FOCUS,
                 occurred_at=utcnow(),
-                text=info.window_title or None,
+                png_bytes=png,
+                png_width=w,
+                png_height=h,
             )
         )
+
+    def _capture(self) -> tuple[bytes | None, int, int]:
+        if self._screen is None:  # pragma: no cover - defensive
+            return None, 0, 0
+        try:
+            image = self._screen.capture()
+        except Exception:
+            logger.exception("Screenshot failed on window focus")
+            return None, 0, 0
+        return image.png_bytes, image.width, image.height

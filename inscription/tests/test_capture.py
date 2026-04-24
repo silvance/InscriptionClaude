@@ -1,4 +1,4 @@
-"""Capture engine: end-to-end with a fake screen/foreground/resolver."""
+"""Capture engine: end-to-end with a fake foreground/resolver."""
 
 from __future__ import annotations
 
@@ -13,11 +13,8 @@ from inscription.capture import (
 )
 from inscription.model import EventKind, ResolvedElement
 from inscription.platform import (
-    CapturedImage,
     ForegroundInfo,
     ForegroundInspector,
-    MonitorInfo,
-    ScreenCapturer,
 )
 from inscription.resolve import ElementResolver
 
@@ -33,25 +30,6 @@ class _CollectingSink:
     def handle(self, event: EnrichedEvent) -> None:
         with self._lock:
             self.events.append(event)
-
-
-class _FakeScreen(ScreenCapturer):
-    def __init__(self) -> None:
-        self.closed = False
-
-    def list_monitors(self) -> list[MonitorInfo]:
-        return [MonitorInfo(index=1, left=0, top=0, width=8, height=8)]
-
-    def capture(self, monitor_index: int | None = None) -> CapturedImage:
-        return CapturedImage(
-            png_bytes=b"\x89PNG-fake",
-            width=8,
-            height=8,
-            monitor_index=monitor_index or 1,
-        )
-
-    def close(self) -> None:
-        self.closed = True
 
 
 class _FakeForeground(ForegroundInspector):
@@ -89,7 +67,6 @@ def _fake_resolver(_inspector: ForegroundInspector) -> ElementResolver:
 
 def test_engine_enriches_click_with_screenshot_and_resolver() -> None:
     engine = CaptureEngine(
-        screen_factory=_FakeScreen,
         foreground_factory=_FakeForeground,
         resolver_factory=_fake_resolver,
     )
@@ -97,7 +74,17 @@ def test_engine_enriches_click_with_screenshot_and_resolver() -> None:
     engine.add_sink(sink)
     engine.start()
     try:
-        engine.submit(RawCaptureEvent(kind=EventKind.CLICK, x=42, y=13, button="left"))
+        engine.submit(
+            RawCaptureEvent(
+                kind=EventKind.CLICK,
+                x=42,
+                y=13,
+                button="left",
+                png_bytes=b"\x89PNG-fake",
+                png_width=8,
+                png_height=8,
+            )
+        )
         _wait_for(lambda: len(sink.events) == 1)
     finally:
         engine.stop()
@@ -105,7 +92,7 @@ def test_engine_enriches_click_with_screenshot_and_resolver() -> None:
     assert len(sink.events) == 1
     enriched = sink.events[0]
     assert enriched.raw.kind is EventKind.CLICK
-    assert enriched.image is not None
+    assert enriched.raw.png_bytes == b"\x89PNG-fake"
     assert enriched.image_sha256
     assert enriched.resolved is not None
     assert enriched.resolved.name == "control-at-42-13"
@@ -114,7 +101,6 @@ def test_engine_enriches_click_with_screenshot_and_resolver() -> None:
 
 def test_engine_skips_resolver_for_non_click_events() -> None:
     engine = CaptureEngine(
-        screen_factory=_FakeScreen,
         foreground_factory=_FakeForeground,
         resolver_factory=_fake_resolver,
     )
@@ -122,19 +108,19 @@ def test_engine_skips_resolver_for_non_click_events() -> None:
     engine.add_sink(sink)
     engine.start()
     try:
-        engine.submit(RawCaptureEvent(kind=EventKind.KEY_PRESS, key="enter", want_screenshot=False))
+        engine.submit(RawCaptureEvent(kind=EventKind.KEY_PRESS, key="enter"))
         _wait_for(lambda: len(sink.events) == 1)
     finally:
         engine.stop()
 
     enriched = sink.events[0]
     assert enriched.resolved is None
-    assert enriched.image is None
+    assert enriched.raw.png_bytes is None
+    assert enriched.image_sha256 == ""
 
 
 def test_engine_stops_cleanly_without_events() -> None:
     engine = CaptureEngine(
-        screen_factory=_FakeScreen,
         foreground_factory=_FakeForeground,
         resolver_factory=_fake_resolver,
     )

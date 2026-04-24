@@ -27,7 +27,6 @@ class EventKind(StrEnum):
     CLICK = "click"
     DOUBLE_CLICK = "double_click"
     KEY_PRESS = "key_press"
-    TEXT_INPUT = "text_input"
     WINDOW_FOCUS = "window_focus"
     MARKER = "marker"
 

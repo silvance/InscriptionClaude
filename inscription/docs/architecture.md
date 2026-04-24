@@ -54,26 +54,36 @@ Session
 ## Event flow (recording)
 
 ```
-Sources → engine queue → worker thread → enrichment → sink
-   │                                         │
-   │                                         ├─ screenshot (for clicks,
-   │                                         │   window-focus, markers)
-   │                                         ├─ foreground inspect (every event)
-   │                                         └─ UIA element lookup (clicks only)
+Sources (own-thread screenshot) → engine queue → worker thread → sink
+   │                                    │
+   │                                    ├─ SHA-256 of attached bytes
+   │                                    ├─ foreground inspect (every event)
+   │                                    └─ UIA element lookup (clicks only)
    ▼
-ClickSource, KeyboardMilestoneSource,
-WindowFocusSource, MarkerSource
+ClickSource, KeyboardMilestoneSource, WindowFocusSource
 ```
 
-Sources listen on pynput / polling threads. They only build
-`RawCaptureEvent` objects and call `engine.submit()` — no I/O, no
-resolution. The engine worker thread does the heavy work (screenshot,
-UIA, foreground read) so source listeners stay responsive.
+Sources listen on pynput / polling threads. A source that wants a
+screenshot associated with an event captures it **on its own thread**
+before calling `engine.submit()` — this gives clicks a pre-click frame
+(the UI as the user saw it at press time) rather than the post-queue-
+latency view. `ClickSource` and `WindowFocusSource` each own a dedicated
+`ScreenCapturer` (mss is not thread-safe, so per-thread instances are
+required). The engine worker thread does foreground inspection and UIA
+resolution.
 
-Platform objects (`ScreenCapturer`, `ForegroundInspector`,
-`ElementResolver`) are built **inside** the worker thread via factories:
-`mss` and UIA aren't thread-safe and must be owned by the thread that
-uses them.
+`ForegroundInspector` and `ElementResolver` are built **inside** the
+worker thread via factories because UIA isn't thread-safe and must be
+owned by the thread that uses it.
+
+Global hotkeys live in the controller, not in the capture pipeline:
+
+- **Ctrl+Shift+R** — toggle recording. Registered whenever a session is
+  open, so the user can start/stop without clicking Inscription's own
+  window (which would otherwise land in the first or last screenshot).
+- **Ctrl+Shift+M** — drop a marker. Registered only while recording is
+  active; the callback synthesises a `RawCaptureEvent(kind=MARKER)` and
+  submits it directly.
 
 ## Step generation
 
