@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Taskbar / Start-menu / Alt-Tab clicks no longer render misleading step
+  text. Previously UIA would correctly name the shell element (e.g.
+  *'Python 3.14 - 1 running window' Button*), but step text would glue it
+  onto whatever foreground app was still behind it —
+  *"Click the 'Python 3.14 - 1 running window' Button in World of Warcraft."*
+  ``ResolvedElement`` now carries ``owner_process_name`` (populated from
+  UIA's ``process_id``); when it differs from the foreground process, the
+  step text drops the ``in <window>`` suffix. Schema bumped 2 → 3 with an
+  ALTER TABLE migration.
 - Window-focus screenshots now grab the monitor the newly-focused
   window is actually on. Previously the source fell through to
   ``ScreenCapturer.capture()`` (no args), which always returned

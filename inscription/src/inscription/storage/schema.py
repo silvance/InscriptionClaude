@@ -35,15 +35,16 @@ CREATE TABLE session_info (
 );
 
 CREATE TABLE resolved_elements (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT,
-    control_type    TEXT,
-    automation_id   TEXT,
-    class_name      TEXT,
-    role            TEXT,
-    confidence      REAL    NOT NULL DEFAULT 0,
-    method          TEXT    NOT NULL DEFAULT 'none',
-    bounding_rect   TEXT    -- JSON [left, top, right, bottom] in screen px
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                 TEXT,
+    control_type         TEXT,
+    automation_id        TEXT,
+    class_name           TEXT,
+    role                 TEXT,
+    confidence           REAL    NOT NULL DEFAULT 0,
+    method               TEXT    NOT NULL DEFAULT 'none',
+    bounding_rect        TEXT,   -- JSON [left, top, right, bottom] in screen px
+    owner_process_name   TEXT    -- process that owns the element, for taskbar/shell
 );
 
 CREATE TABLE screenshot_artifacts (
@@ -93,8 +94,14 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE resolved_elements ADD COLUMN bounding_rect TEXT")
 
 
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Add ``resolved_elements.owner_process_name`` for cross-process click text."""
+    conn.execute("ALTER TABLE resolved_elements ADD COLUMN owner_process_name TEXT")
+
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_v1_to_v2,
+    3: _migrate_v2_to_v3,
 }
 
 

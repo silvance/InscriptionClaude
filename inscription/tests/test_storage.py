@@ -104,6 +104,7 @@ def test_resolved_element_round_trip(tmp_path) -> None:
                 confidence=0.9,
                 method="uia",
                 bounding_rect=(100, 200, 150, 230),
+                owner_process_name="notepad.exe",
             )
         )
         assert stored.id is not None
@@ -112,6 +113,7 @@ def test_resolved_element_round_trip(tmp_path) -> None:
         assert loaded.name == "OK"
         assert loaded.confidence == pytest.approx(0.9)
         assert loaded.bounding_rect == (100, 200, 150, 230)
+        assert loaded.owner_process_name == "notepad.exe"
     finally:
         repo.close()
 

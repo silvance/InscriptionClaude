@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import psutil
+
 from inscription.model import ResolvedElement
 from inscription.resolve.base import ElementResolver
 
@@ -45,6 +47,7 @@ class UiaElementResolver(ElementResolver):
         automation_id = _safe_get(info, "automation_id")
         class_name = _safe_get(info, "class_name")
         bounding_rect = _safe_rect(info)
+        owner_process_name = _safe_process_name(info)
 
         if not any([name, control_type, automation_id, class_name]):
             return self._fallback.resolve_at(x, y)
@@ -59,6 +62,7 @@ class UiaElementResolver(ElementResolver):
             confidence=0.9 if name and control_type else 0.6,
             method="uia",
             bounding_rect=bounding_rect,
+            owner_process_name=owner_process_name,
         )
 
 
@@ -70,6 +74,27 @@ def _safe_get(info: Any, attr: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _safe_process_name(info: Any) -> str | None:
+    """Return the executable name for the process that owns ``info``.
+
+    Used by step generation to tell apart "clicked a button inside the
+    foreground app" from "clicked the taskbar / Start menu / Alt-Tab
+    switcher, which lives in explorer.exe". Returns ``None`` if UIA
+    didn't surface a process id or the process is no longer around.
+    """
+    try:
+        pid = getattr(info, "process_id", None)
+    except Exception:
+        return None
+    if not pid:
+        return None
+    try:
+        name = psutil.Process(int(pid)).name()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, TypeError):
+        return None
+    return str(name) if name else None
 
 
 def _safe_rect(info: Any) -> tuple[int, int, int, int] | None:

@@ -112,18 +112,20 @@ def _build_v1_session(root: Path, name: str) -> None:
     conn.close()
 
 
-def test_v1_session_migrates_and_exposes_bounding_rect(tmp_path: Path) -> None:
+def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
+    """A v1 session DB should come up fully migrated on every new column."""
     _build_v1_session(tmp_path, "Legacy-Session")
 
     repo = SessionRepository.open_existing(workspace_root=tmp_path, slug="Legacy-Session")
     try:
-        # Existing row survives the ALTER TABLE and has None for the new column.
+        # Pre-existing row survives both ALTER TABLEs; new columns are NULL.
         legacy = repo.get_resolved_element(1)
         assert legacy is not None
         assert legacy.name == "Legacy"
         assert legacy.bounding_rect is None
+        assert legacy.owner_process_name is None
 
-        # New inserts write and read the rect end-to-end.
+        # New inserts write and read every field end-to-end.
         fresh = repo.add_resolved_element(
             ResolvedElement(
                 id=None,
@@ -132,11 +134,13 @@ def test_v1_session_migrates_and_exposes_bounding_rect(tmp_path: Path) -> None:
                 confidence=0.9,
                 method="uia",
                 bounding_rect=(10, 20, 110, 50),
+                owner_process_name="explorer.exe",
             )
         )
         assert fresh.id is not None
         reloaded = repo.get_resolved_element(fresh.id)
         assert reloaded is not None
         assert reloaded.bounding_rect == (10, 20, 110, 50)
+        assert reloaded.owner_process_name == "explorer.exe"
     finally:
         repo.close()

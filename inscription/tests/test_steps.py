@@ -31,7 +31,6 @@ def _append_click(
 
 
 def test_render_step_text_prefers_uia_name() -> None:
-
     event = type(
         "E",
         (),
@@ -40,16 +39,52 @@ def test_render_step_text_prefers_uia_name() -> None:
             "key": None,
             "text": None,
             "window_title": "Settings",
+            "process_name": "settings.exe",
             "button": "left",
         },
     )()
     resolved = ResolvedElement(
-        id=1, name="Save", control_type="Button", confidence=0.9, method="uia"
+        id=1,
+        name="Save",
+        control_type="Button",
+        confidence=0.9,
+        method="uia",
+        owner_process_name="settings.exe",
     )
     rendered = render_step_text(event, resolved)  # type: ignore[arg-type]
     assert "Save" in rendered
     assert "Button" in rendered
     assert "Settings" in rendered
+
+
+def test_render_click_drops_in_window_for_cross_process_element() -> None:
+    # Taskbar / Start-menu clicks: the element lives in explorer.exe but
+    # the foreground is still the user's previous app. Gluing them produces
+    # misleading phrases like "Click the 'Python' Button in Notepad."
+    event = type(
+        "E",
+        (),
+        {
+            "kind": EventKind.CLICK,
+            "key": None,
+            "text": None,
+            "window_title": "Notepad",
+            "process_name": "notepad.exe",
+            "button": "left",
+        },
+    )()
+    resolved = ResolvedElement(
+        id=1,
+        name="Python 3.14 - 1 running window",
+        control_type="Button",
+        confidence=0.9,
+        method="uia",
+        owner_process_name="explorer.exe",
+    )
+    rendered = render_step_text(event, resolved)  # type: ignore[arg-type]
+    assert "Python 3.14 - 1 running window" in rendered
+    assert "Button" in rendered
+    assert "Notepad" not in rendered  # the misleading "in Notepad" must be gone
 
 
 def test_generator_collapses_redundant_clicks(tmp_path) -> None:

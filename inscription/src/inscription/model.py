@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class EventKind(StrEnum):
@@ -96,6 +96,12 @@ class ResolvedElement:
     confidence: float = 0.0
     method: str = "none"  # "uia" | "foreground-only" | "none"
     bounding_rect: tuple[int, int, int, int] | None = None
+    #: Process that actually owns the element (from UIA's ``process_id``).
+    #: When this differs from the foreground process — taskbar, Start menu,
+    #: Alt-Tab switcher clicks — step generation drops the "in X window"
+    #: suffix, which would otherwise glue the shell element onto whatever
+    #: app the user was previously using.
+    owner_process_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

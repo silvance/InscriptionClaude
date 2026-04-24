@@ -49,11 +49,29 @@ def _render_click(event: RawEvent, resolved: ResolvedElement | None) -> str:
     verb = "Double-click" if event.kind is EventKind.DOUBLE_CLICK else "Click"
     if resolved and resolved.confidence >= HIGH_CONFIDENCE and resolved.name:
         control = resolved.control_type or "item"
-        in_window = f" in {event.window_title}" if event.window_title else ""
+        in_window = _in_window_clause(event, resolved)
         return f"{verb} the {resolved.name!r} {control}{in_window}.".replace("''", "'")
     if event.window_title:
         return f"{verb} in the {event.window_title} window."
     return f"{verb} the mouse."
+
+
+def _in_window_clause(event: RawEvent, resolved: ResolvedElement) -> str:
+    """Return the `` in <window>`` suffix, or `` `` when it would mislead.
+
+    The suffix is dropped when the resolved element's owning process
+    differs from the foreground process at click time. That catches the
+    common taskbar / Start menu / Alt-Tab case: UIA resolves the shell
+    element correctly, but the foreground window is whatever app the
+    user was previously in — gluing the two together produces phrases
+    like "Click the 'Python' Button in World of Warcraft."
+    """
+    if not event.window_title:
+        return ""
+    owner = resolved.owner_process_name
+    if owner and event.process_name and owner != event.process_name:
+        return ""
+    return f" in {event.window_title}"
 
 
 def _render_key_press(event: RawEvent) -> str:

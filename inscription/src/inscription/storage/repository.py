@@ -272,8 +272,8 @@ class SessionRepository:
                 """
                 INSERT INTO resolved_elements
                     (name, control_type, automation_id, class_name, role,
-                     confidence, method, bounding_rect)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     confidence, method, bounding_rect, owner_process_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     element.name,
@@ -284,6 +284,7 @@ class SessionRepository:
                     element.confidence,
                     element.method,
                     _dumps_rect(element.bounding_rect),
+                    element.owner_process_name,
                 ),
             )
             self._conn.commit()
@@ -299,6 +300,7 @@ class SessionRepository:
             confidence=element.confidence,
             method=element.method,
             bounding_rect=element.bounding_rect,
+            owner_process_name=element.owner_process_name,
         )
 
     def append_event(
@@ -517,6 +519,7 @@ class SessionRepository:
             confidence=row["confidence"],
             method=row["method"],
             bounding_rect=_loads_rect(row["bounding_rect"]),
+            owner_process_name=row["owner_process_name"],
         )
 
 
