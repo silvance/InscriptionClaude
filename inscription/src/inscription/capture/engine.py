@@ -1,16 +1,19 @@
 """Capture engine orchestration.
 
 The engine runs a worker thread that pulls :class:`RawCaptureEvent` objects
-off a queue, enriches them (screenshot + foreground inspection + optional
-UIA resolution), and fans the result out to registered sinks.
+off a queue, enriches them with foreground info and (for clicks) a resolved
+UI element, and fans the result out to registered sinks.
+
+Screenshots are captured on the source's own thread (``mss`` is not
+thread-safe) and attached to the raw event, not taken here. See
+:mod:`inscription.capture.events`.
 
 Sources (click, keyboard, window-focus) submit events via
 :meth:`CaptureEngine.submit`; they don't need to know about sinks. Sinks
 consume enriched events; they don't need to know about sources.
 
-Platform objects (``ScreenCapturer``, ``ForegroundInspector``,
-``ElementResolver``) are constructed inside the worker thread via factory
-callables because ``mss`` and UIA are not thread-safe.
+``ForegroundInspector`` and ``ElementResolver`` are constructed inside
+the worker thread via factory callables because UIA isn't thread-safe.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import logging
 import queue
 import threading
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from inscription.capture.events import RawCaptureEvent
@@ -31,12 +34,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from inscription.model import ResolvedElement
-    from inscription.platform import (
-        CapturedImage,
-        ForegroundInfo,
-        ForegroundInspector,
-        ScreenCapturer,
-    )
+    from inscription.platform import ForegroundInfo, ForegroundInspector
     from inscription.resolve import ElementResolver
 
 logger = logging.getLogger(__name__)
@@ -51,7 +49,6 @@ class EnrichedEvent:
     raw: RawCaptureEvent
     processed_at: datetime
     foreground: ForegroundInfo
-    image: CapturedImage | None = None
     image_sha256: str = ""
     resolved: ResolvedElement | None = None
 
@@ -76,40 +73,16 @@ class CaptureSink(Protocol):
         ...
 
 
-@dataclass
-class EngineStats:
-    """Diagnostic counters. Inspected by tests and the status bar."""
-
-    submitted: int = 0
-    processed: int = 0
-    dropped_queue_full: int = 0
-    screenshot_errors: int = 0
-    resolver_errors: int = 0
-    sink_errors: int = 0
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-
 class CaptureEngine:
-    """Thread-safe producer/consumer capture engine.
-
-    The engine owns:
-
-    - A bounded queue of :class:`RawCaptureEvent` objects.
-    - A dedicated worker thread that drains the queue.
-    - Platform objects (screen, foreground inspector, resolver) constructed
-      inside the worker thread via factories.
-    - A set of registered sinks invoked sequentially per event.
-    """
+    """Thread-safe producer/consumer capture engine."""
 
     def __init__(
         self,
         *,
-        screen_factory: Callable[[], ScreenCapturer],
         foreground_factory: Callable[[], ForegroundInspector],
         resolver_factory: Callable[[ForegroundInspector], ElementResolver],
         queue_maxsize: int = 256,
     ) -> None:
-        self._screen_factory = screen_factory
         self._foreground_factory = foreground_factory
         self._resolver_factory = resolver_factory
         self._queue: queue.Queue[object] = queue.Queue(maxsize=queue_maxsize)
@@ -118,7 +91,6 @@ class CaptureEngine:
         self._worker: threading.Thread | None = None
         self._stopping = threading.Event()
         self._lock = threading.Lock()
-        self.stats = EngineStats()
 
     # -------------------------------------------------------- sinks/sources
 
@@ -168,71 +140,48 @@ class CaptureEngine:
     # -------------------------------------------------------- submission
 
     def submit(self, event: RawCaptureEvent) -> bool:
-        """Enqueue a raw event. Returns False if the queue is full."""
+        """Enqueue a raw event. Returns False if the queue is full or the
+        engine is shutting down."""
         if self._stopping.is_set():
             return False
         try:
             self._queue.put_nowait(event)
         except queue.Full:
-            with self.stats._lock:
-                self.stats.dropped_queue_full += 1
             logger.warning("Capture queue full; dropping %r", event.kind)
             return False
-        with self.stats._lock:
-            self.stats.submitted += 1
         return True
 
     # -------------------------------------------------------- internals
 
     def _run(self) -> None:
-        # Create platform objects on this thread — mss/UIA aren't thread-safe.
         try:
-            screen = self._screen_factory()
             foreground = self._foreground_factory()
             resolver = self._resolver_factory(foreground)
         except Exception:
             logger.exception("Failed to initialise capture platform")
             return
 
-        try:
-            while True:
-                item = self._queue.get()
-                if item is _STOP_SENTINEL:
-                    self._queue.task_done()
-                    break
-                assert isinstance(item, RawCaptureEvent)
-                try:
-                    self._process(item, screen=screen, foreground=foreground, resolver=resolver)
-                except Exception:
-                    logger.exception("Processing failed for %r", item)
-                finally:
-                    self._queue.task_done()
-        finally:
+        while True:
+            item = self._queue.get()
+            if item is _STOP_SENTINEL:
+                self._queue.task_done()
+                break
+            assert isinstance(item, RawCaptureEvent)
             try:
-                screen.close()
-            except Exception as exc:
-                logger.warning("Error closing screen capturer: %s", exc)
+                self._process(item, foreground=foreground, resolver=resolver)
+            except Exception:
+                logger.exception("Processing failed for %r", item)
+            finally:
+                self._queue.task_done()
 
     def _process(
         self,
         raw: RawCaptureEvent,
         *,
-        screen: ScreenCapturer,
         foreground: ForegroundInspector,
         resolver: ElementResolver,
     ) -> None:
-
-        image: CapturedImage | None = None
-        sha = ""
-        if raw.want_screenshot:
-            try:
-                image = screen.capture()
-                sha = hashlib.sha256(image.png_bytes).hexdigest()
-            except Exception:
-                logger.exception("Screenshot failed for %r", raw.kind)
-                with self.stats._lock:
-                    self.stats.screenshot_errors += 1
-
+        sha = hashlib.sha256(raw.png_bytes).hexdigest() if raw.png_bytes else ""
         fg = foreground.inspect()
 
         resolved = None
@@ -242,14 +191,11 @@ class CaptureEngine:
                 resolved = resolver.resolve_at(raw.x, raw.y)
             except Exception:
                 logger.exception("Resolver failed at (%s,%s)", raw.x, raw.y)
-                with self.stats._lock:
-                    self.stats.resolver_errors += 1
 
         enriched = EnrichedEvent(
             raw=raw,
             processed_at=utcnow(),
             foreground=fg,
-            image=image,
             image_sha256=sha,
             resolved=resolved,
         )
@@ -261,8 +207,3 @@ class CaptureEngine:
                 sink.handle(enriched)
             except Exception:
                 logger.exception("Sink %r failed", sink)
-                with self.stats._lock:
-                    self.stats.sink_errors += 1
-
-        with self.stats._lock:
-            self.stats.processed += 1

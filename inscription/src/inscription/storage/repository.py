@@ -11,7 +11,6 @@ import json
 import logging
 import sqlite3
 import threading
-from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -38,7 +37,6 @@ from inscription.storage.schema import initialise_schema, migrate_to_latest
 from inscription.storage.slug import slugify
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -517,18 +515,6 @@ class SessionRepository:
             confidence=row["confidence"],
             method=row["method"],
         )
-
-    # ------------------------------------------------------ transactions
-
-    @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            try:
-                yield self._conn
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
 
 
 # --------------------------------------------------------------- free funcs

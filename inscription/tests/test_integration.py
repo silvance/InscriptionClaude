@@ -13,11 +13,8 @@ from inscription.capture import (
 from inscription.export import export_html
 from inscription.model import EventKind, ResolvedElement
 from inscription.platform import (
-    CapturedImage,
     ForegroundInfo,
     ForegroundInspector,
-    MonitorInfo,
-    ScreenCapturer,
 )
 from inscription.resolve import ElementResolver
 from inscription.steps import generate_steps
@@ -27,18 +24,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class _FakeScreen(ScreenCapturer):
-    def list_monitors(self) -> list[MonitorInfo]:
-        return [MonitorInfo(index=1, left=0, top=0, width=1, height=1)]
-
-    def capture(self, monitor_index: int | None = None) -> CapturedImage:
-        # Minimal valid PNG bytes; verified-decodable 1x1.
-        data = bytes.fromhex(
-            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-            "0000000b49444154789c6360000200000500017a5eab3f0000000049454e44ae"
-            "426082"
-        )
-        return CapturedImage(png_bytes=data, width=1, height=1, monitor_index=monitor_index or 1)
+# Minimal valid PNG bytes; verified-decodable 1x1.
+_MIN_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000b49444154789c6360000200000500017a5eab3f0000000049454e44ae"
+    "426082"
+)
 
 
 class _FakeForeground(ForegroundInspector):
@@ -78,7 +69,6 @@ def test_capture_generate_export(tmp_path) -> None:
     repo = SessionRepository.create(workspace_root=tmp_path, name="Integration")
     try:
         engine = CaptureEngine(
-            screen_factory=_FakeScreen,
             foreground_factory=_FakeForeground,
             resolver_factory=_fake_resolver,
         )
@@ -86,7 +76,17 @@ def test_capture_generate_export(tmp_path) -> None:
         engine.add_sink(sink)
         engine.start()
         try:
-            engine.submit(RawCaptureEvent(kind=EventKind.CLICK, x=5, y=5, button="left"))
+            engine.submit(
+                RawCaptureEvent(
+                    kind=EventKind.CLICK,
+                    x=5,
+                    y=5,
+                    button="left",
+                    png_bytes=_MIN_PNG,
+                    png_width=1,
+                    png_height=1,
+                )
+            )
             _wait_for(lambda: len(repo.list_events()) == 1)
         finally:
             engine.stop()

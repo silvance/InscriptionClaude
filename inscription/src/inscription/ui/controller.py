@@ -3,11 +3,20 @@
 Owns the :class:`SessionRepository`, the :class:`CaptureEngine`, and the
 session lifecycle. Dialogs and widgets emit Qt signals; the controller
 translates those into repository mutations and UI updates.
+
+Global hotkeys also live here:
+
+- Ctrl+Shift+R — toggle recording. Registered while a session is open so
+  the user can stop recording without touching the Inscription window
+  (which would otherwise land in the final screenshot).
+- Ctrl+Shift+M — drop a marker during recording. Registered only while
+  recording is active.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -18,17 +27,19 @@ from inscription.capture import (
     ClickSource,
     EnrichedEvent,
     KeyboardMilestoneSource,
-    MarkerSource,
+    RawCaptureEvent,
     SessionSink,
     WindowFocusSource,
 )
 from inscription.config import Config
 from inscription.export import export_html
+from inscription.model import EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
 from inscription.platform import (
+    HotkeyBinding,
+    HotkeyManager,
     create_foreground_inspector,
     create_hotkey_manager,
-    create_screen_capturer,
 )
 from inscription.resolve import create_element_resolver
 from inscription.steps import generate_steps
@@ -43,14 +54,13 @@ from inscription.ui.session_dialogs import SessionListDialog
 from inscription.version import __version__
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from inscription.platform import ForegroundInspector, HotkeyManager
-    from inscription.resolve import ElementResolver
     from inscription.ui.recorder_bar import RecorderBar
     from inscription.ui.workspace import SessionWorkspaceWidget
 
 logger = logging.getLogger(__name__)
+
+TOGGLE_RECORD_HOTKEY = "<ctrl>+<shift>+r"
+MARKER_HOTKEY = "<ctrl>+<shift>+m"
 
 
 class SessionController(QObject):
@@ -59,6 +69,11 @@ class SessionController(QObject):
     session_opened = Signal(str)  # session name
     session_closed = Signal()
     event_counted = Signal(int)  # total events in current session
+
+    #: Queued across threads so the pynput hotkey callback can flip state
+    #: on the Qt main thread without race conditions.
+    _toggle_requested = Signal()
+    _marker_requested = Signal()
 
     def __init__(
         self,
@@ -79,13 +94,14 @@ class SessionController(QObject):
         self._bridge: QtCaptureBridge | None = None
         self._sink: SessionSink | None = None
         self._event_count = 0
-        self._hotkeys: HotkeyManager | None = None
-        self._marker_source: MarkerSource | None = None
+        self._hotkeys: HotkeyManager = create_hotkey_manager()
 
         self._workspace.step_text_edited.connect(self._on_step_text_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
         self._recorder_bar.record_toggled.connect(self._on_record_toggled)
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
+        self._toggle_requested.connect(self._on_toggle_hotkey)
+        self._marker_requested.connect(self._on_marker_hotkey)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -97,6 +113,7 @@ class SessionController(QObject):
         self._workspace.flush_pending()
         self._stop_recording()
         self._close_session()
+        self._hotkeys.unregister_all()
 
     # --------------------------------------------------------- session picker
 
@@ -161,12 +178,17 @@ class SessionController(QObject):
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
         self._recorder_bar.set_recording(False)
+        self._hotkeys.register(
+            HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
+            self._toggle_requested.emit,
+        )
         self.session_opened.emit(repo.session.info.name)
 
     def _close_session(self) -> None:
         if self._repository is None:
             return
         self._stop_recording()
+        self._hotkeys.unregister_all()
         try:
             self._repository.end_session()
             self._repository.close()
@@ -201,13 +223,9 @@ class SessionController(QObject):
         if self._engine is not None:
             return
 
-        self._hotkeys = create_hotkey_manager()
-        inspector_for_window = create_foreground_inspector()
-
         engine = CaptureEngine(
-            screen_factory=create_screen_capturer,
             foreground_factory=create_foreground_inspector,
-            resolver_factory=_resolver_factory,
+            resolver_factory=create_element_resolver,
         )
 
         bridge = QtCaptureBridge(parent=self)
@@ -221,14 +239,16 @@ class SessionController(QObject):
 
         engine.add_source(ClickSource())
         engine.add_source(KeyboardMilestoneSource())
-        engine.add_source(WindowFocusSource(inspector=inspector_for_window))
-        marker = MarkerSource(hotkey_manager=self._hotkeys)
-        engine.add_source(marker)
+        engine.add_source(WindowFocusSource(inspector=create_foreground_inspector()))
+
+        self._hotkeys.register(
+            HotkeyBinding(sequence=MARKER_HOTKEY, name="marker"),
+            self._marker_requested.emit,
+        )
 
         self._engine = engine
         self._bridge = bridge
         self._sink = sink
-        self._marker_source = marker
         self._recorder_bar.set_recording(True)
         logger.info("Recording started for session %r", self._repository.session.info.name)
 
@@ -242,16 +262,44 @@ class SessionController(QObject):
         self._engine = None
         self._bridge = None
         self._sink = None
-        self._marker_source = None
-        self._hotkeys = None
+        # Re-register just the toggle binding so Ctrl+Shift+R still works.
+        self._hotkeys.unregister_all()
+        if self._repository is not None:
+            self._hotkeys.register(
+                HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
+                self._toggle_requested.emit,
+            )
         self._recorder_bar.set_recording(False)
 
+    @Slot()
+    def _on_toggle_hotkey(self) -> None:
+        # Queued connection from the pynput listener thread. Flip the
+        # button, which fires ``record_toggled`` and runs the same path
+        # as a click on the bar.
+        self._recorder_bar.toggle_record()
+
+    @Slot()
+    def _on_marker_hotkey(self) -> None:
+        self._submit_marker(note="")
+
     def _on_marker_requested(self) -> None:
-        if self._marker_source is None:
+        if self._engine is None:
             return
         text, ok = QInputDialog.getText(self._parent_widget, "Marker", "Note (optional):")
         if ok:
-            self._marker_source.fire(text.strip())
+            self._submit_marker(note=text.strip())
+
+    def _submit_marker(self, *, note: str) -> None:
+        engine = self._engine
+        if engine is None:
+            return
+        engine.submit(
+            RawCaptureEvent(
+                kind=EventKind.MARKER,
+                occurred_at=utcnow(),
+                text=note or None,
+            )
+        )
 
     # ---------------------------------------------------------- step actions
 
@@ -289,7 +337,7 @@ class SessionController(QObject):
         if not target:
             return
         try:
-            doc = export_html(self._repository, destination=_as_path(target))
+            doc = export_html(self._repository, destination=Path(target))
         except Exception:
             logger.exception("HTML export failed")
             QMessageBox.critical(
@@ -334,14 +382,3 @@ class SessionController(QObject):
         except Exception:
             logger.exception("Failed to persist step suppression (step_id=%d)", step_id)
         self._workspace.reload()
-
-
-def _resolver_factory(inspector: ForegroundInspector) -> ElementResolver:
-    """Indirection so the capture engine's factory signature stays typed."""
-    return create_element_resolver(inspector)
-
-
-def _as_path(text: str) -> Path:
-    from pathlib import Path as _Path  # noqa: PLC0415
-
-    return _Path(text)

@@ -98,7 +98,6 @@ class KeyboardMilestoneSource(CaptureSource):
                 kind=EventKind.KEY_PRESS,
                 occurred_at=utcnow(),
                 key=name,
-                want_screenshot=False,
             )
         )
 

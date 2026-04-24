@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _filename_for(event_seq: int, suffix: str = "png") -> str:
-    return f"event-{event_seq:06d}.{suffix}"
+def _filename_for(event_seq: int) -> str:
+    return f"event-{event_seq:06d}.png"
 
 
 class SessionSink:
@@ -41,16 +41,16 @@ class SessionSink:
             counter = self._counter
 
         screenshot_id: int | None = None
-        if event.image is not None:
+        if raw.png_bytes:
             relative = f"screenshots/{_filename_for(counter)}"
             target = self._repo.session.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(event.image.png_bytes)
+            target.write_bytes(raw.png_bytes)
             artifact = self._repo.add_screenshot(
                 relative_path=relative,
                 captured_at=event.processed_at,
-                width=event.image.width,
-                height=event.image.height,
+                width=raw.png_width,
+                height=raw.png_height,
                 sha256=event.image_sha256,
             )
             screenshot_id = artifact.id
