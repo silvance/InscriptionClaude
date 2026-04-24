@@ -29,7 +29,12 @@ from inscription.platform import create_screen_capturer
 
 if TYPE_CHECKING:
     from inscription.capture.engine import CaptureEngine
-    from inscription.platform import ForegroundInfo, ForegroundInspector, ScreenCapturer
+    from inscription.platform import (
+        CapturedImage,
+        ForegroundInfo,
+        ForegroundInspector,
+        ScreenCapturer,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +113,7 @@ class WindowFocusSource(CaptureSource):
         # already active when recording started, not a transition.
         if previous is None:
             return
-        png, w, h = self._capture()
+        png, w, h = self._capture(info)
         engine.submit(
             RawCaptureEvent(
                 kind=EventKind.WINDOW_FOCUS,
@@ -119,12 +124,27 @@ class WindowFocusSource(CaptureSource):
             )
         )
 
-    def _capture(self) -> tuple[bytes | None, int, int]:
+    def _capture(self, info: ForegroundInfo) -> tuple[bytes | None, int, int]:
+        """Capture the monitor holding ``info``'s window.
+
+        Without this, ``mss`` defaults to monitor 1 — which on many Windows
+        multi-monitor setups is *not* the display the window is on. We use
+        the window rect's center to pick the right monitor.
+        """
         if self._screen is None:  # pragma: no cover - defensive
             return None, 0, 0
         try:
-            image = self._screen.capture()
+            image = self._grab_for(info)
         except Exception:
             logger.exception("Screenshot failed on window focus")
             return None, 0, 0
         return image.png_bytes, image.width, image.height
+
+    def _grab_for(self, info: ForegroundInfo) -> CapturedImage:
+        assert self._screen is not None
+        rect = info.window_rect
+        if rect is None:
+            return self._screen.capture()
+        cx = (rect[0] + rect[2]) // 2
+        cy = (rect[1] + rect[3]) // 2
+        return self._screen.capture_at(cx, cy)

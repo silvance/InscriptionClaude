@@ -47,3 +47,88 @@ def test_process_name_distinguishes_windows_with_same_hwnd_value() -> None:
     a = _info(title="A", hwnd=0, process="a.exe")
     b = _info(title="B", hwnd=0, process="b.exe")
     assert _identity(a) != _identity(b)
+
+
+# --------------- multi-monitor capture routing ----------------
+
+
+from inscription.capture.window_source import WindowFocusSource  # noqa: E402
+from inscription.platform import (  # noqa: E402
+    CapturedImage,
+    ForegroundInspector,
+    MonitorInfo,
+    ScreenCapturer,
+)
+
+
+class _StubInspector(ForegroundInspector):
+    def __init__(self, info: ForegroundInfo) -> None:
+        self._info = info
+
+    def inspect(self) -> ForegroundInfo:
+        return self._info
+
+
+class _RecordingCapturer(ScreenCapturer):
+    """Records which monitor ``capture()`` / ``capture_at()`` chose."""
+
+    def __init__(self) -> None:
+        self.last_index: int | None = None
+
+    def list_monitors(self) -> list[MonitorInfo]:
+        # Left monitor is "secondary" (mss often enumerates it as index 1
+        # on Windows when the user's primary lives on the right).
+        return [
+            MonitorInfo(index=0, left=0, top=0, width=3840, height=1080),
+            MonitorInfo(index=1, left=0, top=0, width=1920, height=1080),
+            MonitorInfo(index=2, left=1920, top=0, width=1920, height=1080),
+        ]
+
+    def capture(self, monitor_index: int | None = None) -> CapturedImage:
+        idx = monitor_index if monitor_index is not None else 1
+        self.last_index = idx
+        return CapturedImage(png_bytes=b"x", width=1, height=1, monitor_index=idx)
+
+
+def _window_source_with(capturer: _RecordingCapturer) -> WindowFocusSource:
+    src = WindowFocusSource(inspector=_StubInspector(_info(title="", hwnd=None)))
+    # Inject the capturer directly — skip the thread to keep the unit
+    # test deterministic.
+    src._screen = capturer  # type: ignore[attr-defined]
+    return src
+
+
+def _window_info(rect: tuple[int, int, int, int]) -> ForegroundInfo:
+    return ForegroundInfo(
+        window_title="T",
+        process_name="p.exe",
+        process_id=1,
+        hwnd=123,
+        window_rect=rect,
+    )
+
+
+def test_capture_picks_monitor_under_the_window_center() -> None:
+    cap = _RecordingCapturer()
+    src = _window_source_with(cap)
+    # Window on the "right" monitor (index 2: 1920..3840 x 0..1080).
+    png, _, _ = src._capture(_window_info((2000, 100, 3000, 800)))  # type: ignore[attr-defined]
+    assert cap.last_index == 2
+    assert png == b"x"
+
+
+def test_capture_picks_left_monitor_for_left_window() -> None:
+    cap = _RecordingCapturer()
+    src = _window_source_with(cap)
+    png, _, _ = src._capture(_window_info((100, 100, 900, 800)))  # type: ignore[attr-defined]
+    assert cap.last_index == 1
+    assert png == b"x"
+
+
+def test_capture_falls_back_when_rect_is_missing() -> None:
+    cap = _RecordingCapturer()
+    src = _window_source_with(cap)
+    png, _, _ = src._capture(_info(title="x", hwnd=5))  # type: ignore[attr-defined]
+    # No rect → primary fallback path.
+    assert cap.last_index == 1
+    assert png == b"x"

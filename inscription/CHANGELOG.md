@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Window-focus screenshots now grab the monitor the newly-focused
+  window is actually on. Previously the source fell through to
+  ``ScreenCapturer.capture()`` (no args), which always returned
+  ``mss.monitors[1]`` — on many Windows multi-monitor setups that's the
+  wrong display, producing a guide where every "Switch to …" step
+  showed a screen the user wasn't actually working on. ``ForegroundInfo``
+  now carries ``window_rect`` (from Win32 ``GetWindowRect``), and
+  ``WindowFocusSource`` feeds the rect's center to ``capture_at`` to
+  pick the right monitor.
 - ``SessionSink`` no longer crashes with
   ``sqlite3.IntegrityError: UNIQUE constraint failed: screenshot_artifacts.relative_path``
   when a user stops and restarts recording on the same open session.
