@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING
 
-from inscription.model import ResolvedElement
+from inscription.model import DraftStep, EventKind, ResolvedElement
 from inscription.storage import SessionRepository
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
 
     repo = SessionRepository.open_existing(workspace_root=tmp_path, slug="Legacy-Session")
     try:
-        # Pre-existing row survives both ALTER TABLEs; new columns are NULL.
+        # Pre-existing row survives all ALTER TABLEs; new columns are NULL/0.
         legacy = repo.get_resolved_element(1)
         assert legacy is not None
         assert legacy.name == "Legacy"
@@ -142,5 +142,23 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
         assert reloaded is not None
         assert reloaded.bounding_rect == (10, 20, 110, 50)
         assert reloaded.owner_process_name == "explorer.exe"
+
+        # v3 → v4 added draft_steps.evidentiary; existing/new rows respect it.
+        event = repo.append_event(kind=EventKind.CLICK, x=1, y=1, button="left")
+        assert event.id is not None
+        saved = repo.replace_steps(
+            [
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    text="Demo",
+                    source_event_ids=(event.id,),
+                    evidentiary=True,
+                )
+            ]
+        )
+        assert saved[0].evidentiary is True
+        repo_steps = repo.list_steps()
+        assert repo_steps[0].evidentiary is True
     finally:
         repo.close()

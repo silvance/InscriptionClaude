@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class EventKind(StrEnum):
@@ -149,7 +149,9 @@ class DraftStep:
     ``source_event_ids`` records the events that contributed, so regenerating
     steps can preserve manual edits where the underlying events are unchanged.
     ``suppressed`` is a soft-delete: a suppressed step is kept for undo and
-    is excluded from export.
+    is excluded from export. ``evidentiary`` is the integration flag that
+    downstream report-builder tools query on — it's the examiner saying
+    "this step matters for the final report".
     """
 
     id: int | None
@@ -159,6 +161,7 @@ class DraftStep:
     screenshot_id: int | None = None
     suppressed: bool = False
     manual_edit: bool = False
+    evidentiary: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

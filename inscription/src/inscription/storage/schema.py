@@ -82,7 +82,8 @@ CREATE TABLE draft_steps (
     source_event_ids  TEXT    NOT NULL DEFAULT '[]',
     screenshot_id     INTEGER REFERENCES screenshot_artifacts(id),
     suppressed        INTEGER NOT NULL DEFAULT 0,
-    manual_edit       INTEGER NOT NULL DEFAULT 0
+    manual_edit       INTEGER NOT NULL DEFAULT 0,
+    evidentiary       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_draft_steps_sequence ON draft_steps(sequence);
@@ -99,9 +100,15 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE resolved_elements ADD COLUMN owner_process_name TEXT")
 
 
+def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
+    """Add ``draft_steps.evidentiary`` for downstream report-builder integration."""
+    conn.execute("ALTER TABLE draft_steps ADD COLUMN evidentiary INTEGER NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
+    4: _migrate_v3_to_v4,
 }
 
 

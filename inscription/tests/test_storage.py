@@ -215,6 +215,29 @@ def test_split_step_refuses_when_only_one_source_event(tmp_path) -> None:
         repo.close()
 
 
+def test_evidentiary_flag_round_trips(tmp_path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Evidence")
+    try:
+        e1 = repo.append_event(kind=EventKind.CLICK, x=1, y=1, button="left")
+        assert e1.id is not None
+        saved = repo.replace_steps(
+            [DraftStep(id=None, sequence=0, text="Marked", source_event_ids=(e1.id,))]
+        )
+        sid = saved[0].id
+        assert sid is not None
+        assert saved[0].evidentiary is False  # default
+
+        repo.set_step_evidentiary(sid, evidentiary=True)
+        listed = repo.list_steps()
+        assert listed[0].evidentiary is True
+
+        repo.set_step_evidentiary(sid, evidentiary=False)
+        listed = repo.list_steps()
+        assert listed[0].evidentiary is False
+    finally:
+        repo.close()
+
+
 def test_reorder_steps_updates_sequence(tmp_path) -> None:
     repo = SessionRepository.create(workspace_root=tmp_path, name="Reorder")
     try:

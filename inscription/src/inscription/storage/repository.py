@@ -373,8 +373,8 @@ class SessionRepository:
                     """
                     INSERT INTO draft_steps
                         (sequence, text, source_event_ids, screenshot_id,
-                         suppressed, manual_edit)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                         suppressed, manual_edit, evidentiary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         i,
@@ -383,6 +383,7 @@ class SessionRepository:
                         step.screenshot_id,
                         1 if step.suppressed else 0,
                         1 if step.manual_edit else 0,
+                        1 if step.evidentiary else 0,
                     ),
                 )
                 step_id = cursor.lastrowid
@@ -404,6 +405,19 @@ class SessionRepository:
             self._conn.execute(
                 "UPDATE draft_steps SET suppressed = ? WHERE id = ?",
                 (1 if suppressed else 0, step_id),
+            )
+            self._conn.commit()
+
+    def set_step_evidentiary(self, step_id: int, *, evidentiary: bool) -> None:
+        """Mark or unmark a step as evidentiary.
+
+        Downstream report-builder tools query this flag to pull the
+        examiner-curated subset of steps into the final forensic report.
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE draft_steps SET evidentiary = ? WHERE id = ?",
+                (1 if evidentiary else 0, step_id),
             )
             self._conn.commit()
 
@@ -599,6 +613,7 @@ class SessionRepository:
             screenshot_id=row["screenshot_id"],
             suppressed=bool(row["suppressed"]),
             manual_edit=bool(row["manual_edit"]),
+            evidentiary=bool(row["evidentiary"]),
         )
 
     @staticmethod
