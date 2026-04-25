@@ -124,11 +124,17 @@ def _render_step(
     assets_dirname: str,
 ) -> str:
     text = step.text.strip() or "_(empty step)_"
-    body = f"## Step {index}\n\n{text}"
+    primary = _primary_event(step, events_by_id)
+    timestamp = (
+        primary.occurred_at.astimezone().strftime("%H:%M:%S") if primary is not None else None
+    )
+    heading = f"## Step {index}"
+    if timestamp:
+        heading = f"{heading} — {timestamp}"
+    body = f"{heading}\n\n{text}"
     shot = screenshots.get(step.screenshot_id) if step.screenshot_id else None
     if shot is None:
         return body
-    primary = _primary_event(step, events_by_id)
     element = resolver(primary) if primary else None
     asset_name = _stage_step_asset(
         step=step,

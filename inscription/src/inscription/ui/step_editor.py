@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
     from inscription.model import DraftStep, ScreenshotArtifact
@@ -39,6 +40,15 @@ def _section_label(text: str, parent: QWidget) -> QLabel:
     label.setFont(font)
     label.setStyleSheet("color: #6e6e73; letter-spacing: 0.4px;")
     return label
+
+
+def _description_heading(step: DraftStep, started_at: datetime | None) -> str:
+    """Build the editor's description heading, including the step time."""
+    base = f"Step {step.sequence:02d}"
+    if started_at is None:
+        return f"{base} — description"
+    local = started_at.astimezone().strftime("%H:%M:%S")
+    return f"{base} · {local} — description"
 
 
 class StepEditorPanel(QWidget):
@@ -83,14 +93,17 @@ class StepEditorPanel(QWidget):
         controls.addStretch(1)
         controls.addWidget(self._suppress_btn)
 
+        self._description_label = _section_label("Step description", self)
+        self._screenshot_label = _section_label("Screenshot", self)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 0, 0, 0)
         layout.setSpacing(8)
-        layout.addWidget(_section_label("Step description", self))
+        layout.addWidget(self._description_label)
         layout.addWidget(self._text, 1)
         layout.addLayout(controls)
         layout.addSpacing(4)
-        layout.addWidget(_section_label("Screenshot", self))
+        layout.addWidget(self._screenshot_label)
         layout.addWidget(self._screenshot, 2)
 
         self._debounce = QTimer(self)
@@ -107,6 +120,7 @@ class StepEditorPanel(QWidget):
         step: DraftStep,
         *,
         screenshot: ScreenshotArtifact | None,
+        started_at: datetime | None = None,
         session_root: Path,
     ) -> None:
         self.flush_pending()
@@ -124,6 +138,7 @@ class StepEditorPanel(QWidget):
         self._evidentiary_cb.setChecked(step.evidentiary)
         self._evidentiary_cb.blockSignals(cb_blocked)
         self._evidentiary_cb.setEnabled(True)
+        self._description_label.setText(_description_heading(step, started_at))
         self._load_screenshot(screenshot, session_root)
 
     def clear(self) -> None:
@@ -140,6 +155,7 @@ class StepEditorPanel(QWidget):
         self._evidentiary_cb.setChecked(False)
         self._evidentiary_cb.blockSignals(cb_blocked)
         self._evidentiary_cb.setEnabled(False)
+        self._description_label.setText("Step description")
 
     def flush_pending(self) -> None:
         if self._debounce.isActive():

@@ -16,6 +16,8 @@ from inscription.ui.step_editor import StepEditorPanel
 from inscription.ui.step_list import StepListWidget
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from inscription.storage import SessionRepository
 
 
@@ -33,6 +35,7 @@ class SessionWorkspaceWidget(QWidget):
         super().__init__(parent)
 
         self._repository: SessionRepository | None = None
+        self._event_times: dict[int, datetime] = {}
 
         self._list = StepListWidget(self)
         self._editor = StepEditorPanel(self)
@@ -74,9 +77,13 @@ class SessionWorkspaceWidget(QWidget):
             return
         steps = self._repository.list_steps()
         screenshots = {s.id: s for s in self._repository.list_screenshots() if s.id is not None}
+        self._event_times = {
+            e.id: e.occurred_at for e in self._repository.list_events() if e.id is not None
+        }
         self._list.load(
             steps=steps,
             screenshots=screenshots,
+            event_times=self._event_times,
             session_root=self._repository.session.root,
         )
         self._editor.clear()
@@ -97,8 +104,13 @@ class SessionWorkspaceWidget(QWidget):
             self._editor.clear()
             return
         shot = self._repository.get_screenshot(step.screenshot_id) if step.screenshot_id else None
+        started_at = next(
+            (self._event_times[eid] for eid in step.source_event_ids if eid in self._event_times),
+            None,
+        )
         self._editor.show_step(
             step,
             screenshot=shot,
+            started_at=started_at,
             session_root=self._repository.session.root,
         )

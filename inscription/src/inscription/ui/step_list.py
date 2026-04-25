@@ -20,6 +20,7 @@ from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QWidget
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
     from inscription.model import DraftStep, ScreenshotArtifact
@@ -66,12 +67,13 @@ class StepListWidget(QListWidget):
         *,
         steps: list[DraftStep],
         screenshots: dict[int, ScreenshotArtifact],
+        event_times: dict[int, datetime],
         session_root: Path,
     ) -> None:
         self.clear()
         self._source_ids = {}
         for step in steps:
-            self.addItem(self._build_item(step, screenshots, session_root))
+            self.addItem(self._build_item(step, screenshots, event_times, session_root))
             if step.id is not None:
                 self._source_ids[step.id] = step.source_event_ids
 
@@ -97,12 +99,15 @@ class StepListWidget(QListWidget):
         self,
         step: DraftStep,
         screenshots: dict[int, ScreenshotArtifact],
+        event_times: dict[int, datetime],
         session_root: Path,
     ) -> QListWidgetItem:
+        timestamp = _step_timestamp(step, event_times)
         prefix = f"{step.sequence:02d}."
+        time_part = f"  {timestamp}" if timestamp else ""
         body = step.text or "(empty step)"
         badge = "  ★" if step.evidentiary else ""
-        item = QListWidgetItem(f"{prefix} {body}{badge}")
+        item = QListWidgetItem(f"{prefix}{time_part}  {body}{badge}")
         item.setData(Qt.ItemDataRole.UserRole, step.id)
 
         font = QFont()
@@ -193,3 +198,17 @@ class StepListWidget(QListWidget):
         menu.addAction(split)
 
         menu.exec(self.viewport().mapToGlobal(pos))
+
+
+def _step_timestamp(step: DraftStep, event_times: dict[int, datetime]) -> str | None:
+    """Return a clock-time string for ``step`` or ``None`` if unknown.
+
+    Uses the first source event whose timestamp we have. The displayed
+    time is the user's local clock, which is what an examiner expects
+    when correlating notes with other tools (event logs, video, etc.).
+    """
+    for eid in step.source_event_ids:
+        ts = event_times.get(eid)
+        if ts is not None:
+            return ts.astimezone().strftime("%H:%M:%S")
+    return None

@@ -75,6 +75,14 @@ ol.steps > li::before {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
+.step-time {
+  display: inline-block;
+  margin-bottom: .35rem;
+  color: var(--muted);
+  font-size: .8rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .03em;
+}
 .step-text { margin: 0 0 .5rem 0; }
 .step-shot img {
   max-width: 100%;
@@ -210,15 +218,15 @@ def _render_step(
     session_root: Path,
     assets_dir: Path,
 ) -> str:
+    primary = _primary_event(step, events_by_id)
     text = html.escape(step.text).replace("\n", "<br>")
-    parts = [
-        "<li>",
-        '<div class="step-body">',
-        f'<p class="step-text">{text}</p>',
-    ]
+    parts = ["<li>", '<div class="step-body">']
+    if primary is not None:
+        ts = html.escape(primary.occurred_at.astimezone().strftime("%H:%M:%S"))
+        parts.append(f'<div class="step-time">{ts}</div>')
+    parts.append(f'<p class="step-text">{text}</p>')
     shot = screenshots.get(step.screenshot_id) if step.screenshot_id else None
     if shot is not None:
-        primary = _primary_event(step, events_by_id)
         element = resolver(primary) if primary else None
         src = _stage_step_asset(
             step=step,
