@@ -9,12 +9,15 @@ stylesheet and not from grep-replacing colour codes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from PySide6.QtWidgets import QFrame, QLabel
-
-if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 def display_label(text: str, parent: QWidget | None = None) -> QLabel:
@@ -76,3 +79,57 @@ def horizontal_separator(parent: QWidget | None = None) -> QFrame:
     rule.setProperty("role", "separator")
     rule.setFrameShape(QFrame.Shape.NoFrame)
     return rule
+
+
+def empty_state(
+    *,
+    title: str,
+    body: str,
+    cta_label: str | None = None,
+    parent: QWidget | None = None,
+) -> tuple[QWidget, QPushButton | None]:
+    """A centered card with a title, supporting copy, and an optional CTA.
+
+    Returns ``(container, cta_button)``. The button is ``None`` when
+    ``cta_label`` is empty; otherwise the caller wires ``clicked``.
+    """
+    card = QFrame(parent)
+    card.setProperty("role", "card")
+    card.setMaximumWidth(540)
+    card.setMinimumWidth(360)
+
+    title_label = QLabel(title, card)
+    title_label.setProperty("role", "display-title")
+    title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    body_label = QLabel(body, card)
+    body_label.setProperty("muted", "true")
+    body_label.setWordWrap(True)
+    body_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    cta: QPushButton | None = None
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(36, 36, 36, 36)
+    layout.setSpacing(10)
+    layout.addStretch(1)
+    layout.addWidget(title_label)
+    layout.addWidget(body_label)
+    if cta_label:
+        cta = QPushButton(cta_label, card)
+        cta.setProperty("role", "primary")
+        cta.setMinimumHeight(36)
+        cta.setMinimumWidth(180)
+        cta_row = QHBoxLayout()
+        cta_row.addStretch(1)
+        cta_row.addWidget(cta)
+        cta_row.addStretch(1)
+        layout.addSpacing(6)
+        layout.addLayout(cta_row)
+    layout.addStretch(2)
+
+    container = QWidget(parent)
+    outer = QHBoxLayout(container)
+    outer.addStretch(1)
+    outer.addWidget(card)
+    outer.addStretch(1)
+    return container, cta

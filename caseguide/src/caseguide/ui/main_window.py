@@ -16,12 +16,14 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +34,7 @@ from caseguide.ui.controller import CaseGuideController
 from caseguide.ui.refine_dialog import RefineProgressDialog, RefineWorker
 from caseguide.ui.scope_panel import ScopePanel
 from caseguide.ui.suggestions_panel import SuggestionsPanel
+from caseguide.ui.widgets import empty_state
 from caseguide.version import __version__
 
 if TYPE_CHECKING:
@@ -115,8 +118,11 @@ class MainWindow(QMainWindow):
         return open_btn, generate_btn, refine_btn, save_btn
 
     def _build_central(self) -> QWidget:
-        header_row = QHBoxLayout()
-        header_row.setContentsMargins(16, 12, 16, 12)
+        # Header strip (page-header role for the QSS surface treatment).
+        header = QFrame(self)
+        header.setProperty("role", "page-header")
+        header_row = QHBoxLayout(header)
+        header_row.setContentsMargins(20, 12, 20, 12)
         header_row.setSpacing(10)
         header_row.addWidget(self._header_label, 1)
         header_row.addWidget(self._open_btn)
@@ -124,6 +130,7 @@ class MainWindow(QMainWindow):
         header_row.addWidget(self._refine_btn)
         header_row.addWidget(self._save_btn)
 
+        # The splitter (active when a case is open).
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self._scope)
         splitter.addWidget(self._suggestions)
@@ -132,12 +139,35 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(1)
 
+        # Empty state (shown when no case is open).
+        self._empty_state, empty_cta = empty_state(
+            title="Open a case to begin",
+            body=(
+                "CaseGuide reads the scope from CaseForge's case.json, "
+                "matches procedural playbooks, and drafts a tailored "
+                "exam checklist you can refine with the local LLM."
+            ),
+            cta_label="Open case folder…",
+        )
+        if empty_cta is not None:
+            empty_cta.clicked.connect(self._controller.open_from_picker)
+        empty_outer = QWidget(self)
+        empty_layout = QVBoxLayout(empty_outer)
+        empty_layout.setContentsMargins(0, 36, 0, 0)
+        empty_layout.addWidget(self._empty_state)
+        empty_layout.addStretch(1)
+
+        self._stack = QStackedWidget(self)
+        self._stack.addWidget(empty_outer)
+        self._stack.addWidget(splitter)
+        self._stack.setCurrentIndex(0)
+
         central = QWidget(self)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addLayout(header_row)
-        layout.addWidget(splitter, 1)
+        layout.addWidget(header)
+        layout.addWidget(self._stack, 1)
         return central
 
     # ------------------------------------------------------------ menus
@@ -181,6 +211,7 @@ class MainWindow(QMainWindow):
         self._header_label.setText(self._header_for(handle))
         self.statusBar().showMessage(f"Opened {case_dir}")
         self._generate_btn.setEnabled(True)
+        self._stack.setCurrentIndex(1)
 
     def _on_case_closed(self) -> None:
         self._scope.clear()
@@ -191,6 +222,7 @@ class MainWindow(QMainWindow):
         self._refine_btn.setEnabled(False)
         self._save_btn.setEnabled(False)
         self._unsaved = False
+        self._stack.setCurrentIndex(0)
 
     def _on_suggestions_loaded(self, doc: SuggestionsDocument | None) -> None:
         if doc is None:

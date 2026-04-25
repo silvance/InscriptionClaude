@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,7 +28,12 @@ from PySide6.QtWidgets import (
 from caseforge.model import Case, ExaminerIdentity, ExamScope
 from caseforge.ui.custody_tab import CustodyTab
 from caseforge.ui.sessions_view import SessionsView
-from caseforge.ui.widgets import build_primary_tool_combo, primary_tool_value, select_primary_tool
+from caseforge.ui.widgets import (
+    build_primary_tool_combo,
+    display_label,
+    primary_tool_value,
+    select_primary_tool,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,17 +64,13 @@ class CaseView(QWidget):
         self._case: Case | None = None
         self._case_dir: Path | None = None
 
-        self._title_label = QLabel("", self)
-        title_font = self._title_label.font()
-        title_font.setPointSize(title_font.pointSize() + 4)
-        title_font.setBold(True)
-        self._title_label.setFont(title_font)
+        self._title_label = display_label("", self)
 
         self._reference_label = QLabel("", self)
-        self._reference_label.setStyleSheet("color: #6e6e73;")
+        self._reference_label.setProperty("muted", "true")
 
         self._path_label = QLabel("", self)
-        self._path_label.setStyleSheet("color: #6e6e73; font-size: 11px;")
+        self._path_label.setProperty("role", "caption")
         # Allow click-and-copy of the case path from the header.
         self._path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
@@ -82,12 +84,16 @@ class CaseView(QWidget):
         header_left.addWidget(self._reference_label)
         header_left.addWidget(self._path_label)
 
-        header = QHBoxLayout()
-        header.addLayout(header_left, 1)
-        header.addWidget(self._save_btn)
-        header.addWidget(self._caseguide_btn)
-        header.addWidget(self._launch_btn)
-        header.addWidget(self._close_btn)
+        header_strip = QFrame(self)
+        header_strip.setProperty("role", "page-header")
+        header_row = QHBoxLayout(header_strip)
+        header_row.setContentsMargins(20, 14, 20, 14)
+        header_row.setSpacing(10)
+        header_row.addLayout(header_left, 1)
+        header_row.addWidget(self._save_btn)
+        header_row.addWidget(self._caseguide_btn)
+        header_row.addWidget(self._launch_btn)
+        header_row.addWidget(self._close_btn)
 
         self._sessions_view = SessionsView(self)
         self._sessions_view.refresh_requested.connect(self.refresh_sessions_requested)
@@ -103,10 +109,16 @@ class CaseView(QWidget):
         self._tabs.addTab(self._custody_tab, "Custody")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(14)
-        layout.addLayout(header)
-        layout.addWidget(self._tabs, 1)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(header_strip)
+
+        body = QWidget(self)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 16, 20, 16)
+        body_layout.setSpacing(12)
+        body_layout.addWidget(self._tabs, 1)
+        layout.addWidget(body, 1)
 
     # ------------------------------------------------------------ API
 
