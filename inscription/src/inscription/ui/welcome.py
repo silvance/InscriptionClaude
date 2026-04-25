@@ -41,6 +41,54 @@ logger = logging.getLogger(__name__)
 _RECENT_LIMIT = 6
 
 
+def _title_label(card: QWidget) -> QLabel:
+    title = QLabel("Inscription", card)
+    title_font = title.font()
+    title_font.setPointSize(28)
+    title_font.setBold(True)
+    title.setFont(title_font)
+    title.setAlignment(Qt.AlignmentFlag.AlignLeft)
+    return title
+
+
+def _subtitle_label(card: QWidget) -> QLabel:
+    label = QLabel(
+        f"Version {__version__} — record a Windows workflow, "
+        "auto-generate an editable guide.",
+        card,
+    )
+    label.setStyleSheet("color: #6e6e73;")
+    label.setWordWrap(True)
+    return label
+
+
+def _quickstart_label(card: QWidget) -> QLabel:
+    """First-time user crib sheet — the verbs they'll need most."""
+    label = QLabel(
+        "<ul style='margin:0; padding-left:18px;'>"
+        "<li>Open or create a session below.</li>"
+        "<li>Press <b>● Record</b> (or <b>Ctrl+Shift+R</b> from anywhere) to start.</li>"
+        "<li>Drop markers as you work with <b>Ctrl+Shift+M</b>.</li>"
+        "<li>Snap a manual screenshot anytime with <b>Ctrl+Shift+P</b>.</li>"
+        "<li>Notes appear live in the editor — refine action / result there.</li>"
+        "</ul>",
+        card,
+    )
+    label.setTextFormat(Qt.TextFormat.RichText)
+    label.setWordWrap(True)
+    label.setStyleSheet("color: #1d1d1f;")
+    return label
+
+
+def _recent_heading(card: QWidget) -> QLabel:
+    label = QLabel("Recent sessions", card)
+    font = label.font()
+    font.setBold(True)
+    label.setFont(font)
+    label.setStyleSheet("margin-top: 8px;")
+    return label
+
+
 class WelcomePage(QWidget):
     """Empty-state welcome with a primary CTA and a recent-sessions list."""
 
@@ -50,49 +98,11 @@ class WelcomePage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        outer = QHBoxLayout(self)
-        outer.addStretch(1)
-
         card = QFrame(self)
         card.setProperty("role", "card")
         card.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
         card.setMaximumWidth(560)
         card.setMinimumWidth(420)
-
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(36, 36, 36, 36)
-        card_layout.setSpacing(14)
-
-        title = QLabel("Inscription", card)
-        title_font = title.font()
-        title_font.setPointSize(28)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-
-        subtitle = QLabel(
-            f"Version {__version__} — record a Windows workflow, "
-            "auto-generate an editable guide.",
-            card,
-        )
-        subtitle.setStyleSheet("color: #6e6e73;")
-        subtitle.setWordWrap(True)
-
-        cta = QPushButton("Open Session…", card)
-        cta.setProperty("role", "primary")
-        cta.setMinimumHeight(36)
-        cta.setMinimumWidth(160)
-        cta.clicked.connect(self.open_session_requested)
-
-        cta_row = QHBoxLayout()
-        cta_row.addWidget(cta)
-        cta_row.addStretch(1)
-
-        recent_heading = QLabel("Recent sessions", card)
-        recent_font = recent_heading.font()
-        recent_font.setBold(True)
-        recent_heading.setFont(recent_font)
-        recent_heading.setStyleSheet("margin-top: 8px;")
 
         self._recent_list = QListWidget(card)
         self._recent_list.setMinimumHeight(180)
@@ -102,16 +112,34 @@ class WelcomePage(QWidget):
         self._empty_label.setStyleSheet("color: #6e6e73; padding: 8px;")
         self._empty_label.setVisible(False)
 
-        card_layout.addWidget(title)
-        card_layout.addWidget(subtitle)
-        card_layout.addLayout(cta_row)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(36, 36, 36, 36)
+        card_layout.setSpacing(14)
+        card_layout.addWidget(_title_label(card))
+        card_layout.addWidget(_subtitle_label(card))
+        card_layout.addSpacing(4)
+        card_layout.addWidget(_quickstart_label(card))
+        card_layout.addLayout(self._build_cta_row(card))
         card_layout.addSpacing(8)
-        card_layout.addWidget(recent_heading)
+        card_layout.addWidget(_recent_heading(card))
         card_layout.addWidget(self._recent_list, 1)
         card_layout.addWidget(self._empty_label)
 
+        outer = QHBoxLayout(self)
+        outer.addStretch(1)
         outer.addWidget(card, 1)
         outer.addStretch(1)
+
+    def _build_cta_row(self, card: QFrame) -> QHBoxLayout:
+        cta = QPushButton("Open Session…", card)
+        cta.setProperty("role", "primary")
+        cta.setMinimumHeight(36)
+        cta.setMinimumWidth(160)
+        cta.clicked.connect(self.open_session_requested)
+        row = QHBoxLayout()
+        row.addWidget(cta)
+        row.addStretch(1)
+        return row
 
     # ----------------------------------------------------------- API
 

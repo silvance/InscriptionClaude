@@ -68,7 +68,7 @@ class SessionSink:
             stored = self._repo.add_resolved_element(event.resolved)
             resolved_id = stored.id
 
-        self._repo.append_event(
+        persisted = self._repo.append_event(
             kind=raw.kind,
             occurred_at=raw.occurred_at,
             button=raw.button,
@@ -81,9 +81,15 @@ class SessionSink:
             screenshot_id=screenshot_id,
             resolved_element_id=resolved_id,
         )
+        # Stamp the ids onto the event so downstream sinks (e.g. the live
+        # step generator) can reference them without re-querying.
+        event.persisted_event_id = persisted.id
+        event.persisted_screenshot_id = screenshot_id
+        event.persisted_resolved_id = resolved_id
         logger.debug(
-            "Persisted %s event (screenshot=%s, resolved=%s)",
+            "Persisted %s event id=%s (screenshot=%s, resolved=%s)",
             raw.kind.value,
+            persisted.id,
             screenshot_id,
             resolved_id,
         )

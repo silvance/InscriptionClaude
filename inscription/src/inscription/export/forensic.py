@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 _CSS = """
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --fg: #111;
   --muted: #6b6b6b;
   --rule: #d8d8d8;
@@ -46,13 +46,19 @@ _CSS = """
   --accent: #1f6feb;
   --header-bg: #f6f6f6;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fg: #ececec; --muted: #a8a8a8; --rule: #3a3a3a; --rule-strong: #555;
-    --accent: #58a6ff; --header-bg: #232323;
+/* Print-mode constants. Forensic notes are routinely printed and signed,
+   so the print rendering is the primary view, not a fallback. We force
+   the light palette in print regardless of the OS theme. */
+@page {
+  size: Letter portrait;
+  margin: 1.5cm;
+  /* Page numbers in the top-right of every printed page. */
+  @top-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 9pt "Segoe UI", sans-serif;
+    color: #666;
   }
 }
-@page { margin: 1.5cm; }
 body {
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text",
                Roboto, sans-serif;
@@ -61,7 +67,25 @@ body {
   margin: 1.5rem auto;
   padding: 0 1.25rem;
   line-height: 1.5;
+  background: #fff;
 }
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+.toolbar button {
+  font: inherit;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  padding: .45rem .9rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.toolbar button:hover { filter: brightness(1.05); }
+.toolbar .hint { color: var(--muted); align-self: center; font-size: .85rem; }
 header.case-header {
   border: 1px solid var(--rule-strong);
   background: var(--header-bg);
@@ -148,7 +172,36 @@ footer.sign-off .signature {
   padding-top: .25rem;
   color: var(--fg);
 }
+
+/* ------------------------------------------------------------- print */
+@media print {
+  body { margin: 0; max-width: none; padding: 0; }
+  .toolbar, .no-print { display: none !important; }
+  header.case-header { break-inside: avoid; }
+  /* Repeat the column headings on every printed page. */
+  table.notes thead { display: table-header-group; }
+  table.notes tfoot { display: table-footer-group; }
+  /* Never split a row across pages — examiners want each Action and
+     Result kept together with its Time/Date and any inlined screenshot. */
+  table.notes tr { break-inside: avoid; page-break-inside: avoid; }
+  table.notes td { background: transparent !important; }
+  /* Sign-off block stays as one piece on its own page if it doesn't fit. */
+  footer.sign-off { break-inside: avoid; page-break-inside: avoid; }
+  /* Hyperlinks should not show their underline in printed notes. */
+  a { color: inherit; text-decoration: none; }
+}
 """
+
+#: Tiny on-page toolbar with a Print button. The button calls
+#: ``window.print()``; modern browsers offer "Save as PDF" as a destination
+#: from that dialog. Hidden by ``@media print`` so it never appears on
+#: the printed page.
+_TOOLBAR = (
+    '<div class="toolbar no-print">'
+    '<span class="hint">Tip: Print → "Save as PDF" produces a signed-ready document.</span>'
+    '<button onclick="window.print()" type="button">Print / Save as PDF</button>'
+    "</div>"
+)
 
 
 def export_forensic_notes(
@@ -187,6 +240,7 @@ def export_forensic_notes(
         return element_cache[eid]
 
     body_parts = [
+        _TOOLBAR,
         _render_case_header(
             session=session,
             examiner=examiner,

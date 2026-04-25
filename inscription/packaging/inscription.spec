@@ -13,18 +13,34 @@ proper installer wrapper comes in Phase 5.
 
 from pathlib import Path
 
-block_cipher = None
-
 ROOT = Path.cwd()
 SRC = ROOT / "src"
 ENTRY = SRC / "inscription" / "__main__.py"
+
+# Hidden imports — modules that PyInstaller's static analysis can miss
+# because they're loaded indirectly. Listing them defensively keeps the
+# build robust across PyInstaller versions.
+HIDDEN_IMPORTS = [
+    # PySide6 sub-modules used directly. The PySide6 hook usually picks
+    # them up but listing keeps us safe across PyInstaller upgrades.
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    # Capture stack — pynput dispatches per-OS backends at import time;
+    # comtypes underpins pywinauto's UIA bridge on Windows.
+    "pynput.mouse",
+    "pynput.keyboard",
+    "comtypes",
+    "comtypes.client",
+    "psutil",
+]
 
 a = Analysis(
     [str(ENTRY)],
     pathex=[str(SRC)],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -32,14 +48,12 @@ a = Analysis(
         # Trim obviously unused stdlib modules from the bundle.
         "tkinter",
         "unittest",
+        "test",
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,

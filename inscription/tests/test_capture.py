@@ -126,3 +126,32 @@ def test_engine_stops_cleanly_without_events() -> None:
     )
     engine.start()
     engine.stop()
+
+
+def test_engine_drops_events_from_own_process() -> None:
+    """Examiners frequently click into Inscription mid-recording. The
+    engine should silently drop those clicks so they don't pollute the
+    captured workflow."""
+    own_pid = 999  # _FakeForeground reports this as the foreground pid
+    engine = CaptureEngine(
+        foreground_factory=_FakeForeground,
+        resolver_factory=_fake_resolver,
+        own_pid=own_pid,
+    )
+    sink = _CollectingSink()
+    engine.add_sink(sink)
+    engine.start()
+    try:
+        engine.submit(RawCaptureEvent(kind=EventKind.CLICK, x=1, y=1, button="left"))
+        engine.submit(RawCaptureEvent(kind=EventKind.KEY_PRESS, key="enter"))
+        # Markers are user-intent so they should still get through even
+        # when the foreground belongs to us.
+        engine.submit(RawCaptureEvent(kind=EventKind.MARKER, text="kept"))
+        _wait_for(lambda: len(sink.events) >= 1, timeout=1.0)
+    finally:
+        engine.stop()
+
+    kinds = [e.raw.kind for e in sink.events]
+    assert EventKind.CLICK not in kinds
+    assert EventKind.KEY_PRESS not in kinds
+    assert EventKind.MARKER in kinds

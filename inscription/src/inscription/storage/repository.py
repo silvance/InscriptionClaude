@@ -393,6 +393,74 @@ class SessionRepository:
             self._conn.commit()
         return saved
 
+    def append_step(self, step: DraftStep) -> DraftStep:
+        """Insert a single step at the end of the list.
+
+        Used by the live step generator while a recording is in progress —
+        each new event either extends the previous step or starts a new
+        one via this method. Sequence is auto-assigned to ``MAX(sequence) + 1``.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) FROM draft_steps"
+            ).fetchone()
+            next_sequence = (row[0] or 0) + 1
+            cursor = self._conn.execute(
+                """
+                INSERT INTO draft_steps
+                    (sequence, action, result, source_event_ids, screenshot_id,
+                     suppressed, manual_edit, evidentiary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    next_sequence,
+                    step.action,
+                    step.result,
+                    json.dumps(list(step.source_event_ids)),
+                    step.screenshot_id,
+                    1 if step.suppressed else 0,
+                    1 if step.manual_edit else 0,
+                    1 if step.evidentiary else 0,
+                ),
+            )
+            new_id = cursor.lastrowid
+            assert new_id is not None
+            self._conn.commit()
+        return dataclasses.replace(step, id=new_id, sequence=next_sequence)
+
+    def extend_step_sources(
+        self,
+        step_id: int,
+        *,
+        extra_event_ids: tuple[int, ...],
+        screenshot_id: int | None = None,
+    ) -> None:
+        """Append more source events (and optionally a screenshot) to a step.
+
+        Used when the live generator decides a new event collapses into
+        the previous step (rapid double-click on the same UIA element).
+        Does **not** touch the action/result text — preserves whatever
+        the live generator wrote first.
+        """
+        if not extra_event_ids:
+            return
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT source_event_ids, screenshot_id FROM draft_steps WHERE id = ?",
+                (step_id,),
+            ).fetchone()
+            if row is None:
+                msg = f"extend_step_sources: no step with id {step_id}"
+                raise StorageError(msg)
+            existing = tuple(json.loads(row["source_event_ids"]))
+            combined = (*existing, *extra_event_ids)
+            shot = row["screenshot_id"] if row["screenshot_id"] is not None else screenshot_id
+            self._conn.execute(
+                "UPDATE draft_steps SET source_event_ids = ?, screenshot_id = ? WHERE id = ?",
+                (json.dumps(list(combined)), shot, step_id),
+            )
+            self._conn.commit()
+
     def update_step_fields(
         self,
         step_id: int,

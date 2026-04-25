@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QMessageBox,
     QStackedWidget,
     QVBoxLayout,
@@ -94,62 +96,56 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         menubar = self.menuBar()
+        self._build_file_menu(menubar)
+        self._build_edit_menu(menubar)
+        self._build_view_menu(menubar)
+        self._build_help_menu(menubar)
 
+    def _build_file_menu(self, menubar: QMenuBar) -> None:
         file_menu = menubar.addMenu("&File")
-
-        open_action = QAction("&Open Session…", self)
-        open_action.setShortcut(QKeySequence("Ctrl+O"))
-        open_action.setStatusTip("Open or create a session")
-        open_action.triggered.connect(self._controller.start)
-        file_menu.addAction(open_action)
-
-        regen_action = QAction("&Regenerate Steps", self)
-        regen_action.setShortcut(QKeySequence("Ctrl+R"))
-        regen_action.setStatusTip("Rebuild draft steps from raw events")
-        regen_action.triggered.connect(self._controller.regenerate_steps)
-        file_menu.addAction(regen_action)
-
+        self._add_action(
+            file_menu, "&Open Session…", self._controller.start,
+            shortcut="Ctrl+O", tip="Open or create a session",
+        )
+        self._add_action(
+            file_menu, "&Regenerate Steps", self._controller.regenerate_steps,
+            shortcut="Ctrl+R", tip="Rebuild draft steps from raw events",
+        )
         # No keyboard shortcut — Ctrl+Shift+R is the global "toggle recording"
         # hotkey registered by SessionController, and this action would
         # collide with it.
-        rewrite_action = QAction("Rewrite with &AI…", self)
-        rewrite_action.setStatusTip("Rewrite draft steps using the configured local LLM")
-        rewrite_action.triggered.connect(self._controller.rewrite_with_llm)
-        file_menu.addAction(rewrite_action)
-
-        file_menu.addSeparator()
-
-        export_html_action = QAction("Export as &HTML…", self)
-        export_html_action.setShortcut(QKeySequence("Ctrl+E"))
-        export_html_action.setStatusTip("Export the current session as HTML")
-        export_html_action.triggered.connect(self._controller.export_html)
-        file_menu.addAction(export_html_action)
-
-        export_md_action = QAction("Export as &Markdown…", self)
-        export_md_action.setStatusTip(
-            "Export the current session as Markdown (paste into tickets, wikis, PRs)"
+        self._add_action(
+            file_menu, "Rewrite with &AI…", self._controller.rewrite_with_llm,
+            tip="Rewrite draft steps using the configured local LLM",
         )
-        export_md_action.triggered.connect(self._controller.export_markdown)
-        file_menu.addAction(export_md_action)
-
-        export_notes_action = QAction("Export &Forensic notes…", self)
-        export_notes_action.setStatusTip(
-            "Export a printable Time/Date · Action · Result notes table"
-        )
-        export_notes_action.triggered.connect(self._controller.export_forensic_notes)
-        file_menu.addAction(export_notes_action)
-
         file_menu.addSeparator()
-
+        self._add_action(
+            file_menu, "Export as &HTML…", self._controller.export_html,
+            shortcut="Ctrl+E", tip="Export the current session as HTML",
+        )
+        self._add_action(
+            file_menu, "Export as &Markdown…", self._controller.export_markdown,
+            tip="Export the current session as Markdown (paste into tickets, wikis, PRs)",
+        )
+        self._add_action(
+            file_menu, "Export &Forensic notes…", self._controller.export_forensic_notes,
+            tip="Export a printable Time/Date · Action · Result notes table",
+        )
+        file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        menubar.addMenu("&Edit")
+    def _build_edit_menu(self, menubar: QMenuBar) -> None:
+        edit_menu = menubar.addMenu("&Edit")
+        self._add_action(
+            edit_menu, "&Settings…", self._controller.open_settings,
+            shortcut="Ctrl+,", tip="Examiner identity and LLM endpoint",
+        )
 
+    def _build_view_menu(self, menubar: QMenuBar) -> None:
         view_menu = menubar.addMenu("&View")
-
         self._auto_screenshot_action = QAction("Auto-screenshot every action", self)
         self._auto_screenshot_action.setCheckable(True)
         self._auto_screenshot_action.setChecked(self._controller.auto_screenshot_enabled())
@@ -160,14 +156,30 @@ class MainWindow(QMainWindow):
         self._auto_screenshot_action.toggled.connect(self._controller.set_auto_screenshot)
         view_menu.addAction(self._auto_screenshot_action)
 
+    def _build_help_menu(self, menubar: QMenuBar) -> None:
         help_menu = menubar.addMenu("&Help")
-        about_action = QAction("&About Inscription", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        self._add_action(help_menu, "&About Inscription", self._show_about)
+        self._add_action(
+            help_menu, "About &Qt", lambda: QMessageBox.aboutQt(self, "About Qt"),
+        )
 
-        about_qt_action = QAction("About &Qt", self)
-        about_qt_action.triggered.connect(lambda: QMessageBox.aboutQt(self, "About Qt"))
-        help_menu.addAction(about_qt_action)
+    def _add_action(
+        self,
+        menu: QMenu,
+        title: str,
+        slot: object,
+        *,
+        shortcut: str | None = None,
+        tip: str | None = None,
+    ) -> QAction:
+        action = QAction(title, self)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        if tip:
+            action.setStatusTip(tip)
+        action.triggered.connect(slot)
+        menu.addAction(action)
+        return action
 
     def _build_statusbar(self) -> None:
         self.statusBar().showMessage("Ready")

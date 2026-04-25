@@ -46,7 +46,7 @@ from inscription.platform import (
     safe_close,
 )
 from inscription.resolve import create_element_resolver
-from inscription.steps import generate_steps
+from inscription.steps import LiveStepGenerator, generate_steps
 from inscription.storage import (
     SessionAlreadyExistsError,
     SessionLockedError,
@@ -56,6 +56,7 @@ from inscription.storage import (
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
+from inscription.ui.settings_dialog import SettingsDialog
 from inscription.version import __version__
 
 if TYPE_CHECKING:
@@ -84,6 +85,10 @@ class SessionController(QObject):
     _toggle_requested = Signal()
     _marker_requested = Signal()
     _snapshot_requested = Signal()
+    #: Fired by the live step generator (capture worker thread) whenever
+    #: a step is appended or extended; the queued connection bounces
+    #: workspace.reload() onto the Qt main thread.
+    _live_steps_changed = Signal()
 
     def __init__(
         self,
@@ -122,6 +127,7 @@ class SessionController(QObject):
         self._toggle_requested.connect(self._on_toggle_hotkey)
         self._marker_requested.connect(self._on_marker_hotkey)
         self._snapshot_requested.connect(self._on_snapshot_hotkey)
+        self._live_steps_changed.connect(self._on_live_steps_changed)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -136,6 +142,10 @@ class SessionController(QObject):
     def workspace_root(self) -> Path:
         """Return the directory the welcome page should enumerate."""
         return self._workspace_root()
+
+    def open_settings(self) -> None:
+        """Show the Settings dialog (examiner identity + LLM endpoint)."""
+        SettingsDialog(self._config, parent=self._parent_widget).exec()
 
     def shutdown(self) -> None:
         self._workspace.flush_pending()
@@ -268,6 +278,14 @@ class SessionController(QObject):
         sink = SessionSink(self._repository)
         engine.add_sink(sink)
 
+        # LiveStepGenerator must run after SessionSink — it reads the
+        # persisted_event_id that the sink stamps onto the event.
+        live = LiveStepGenerator(
+            self._repository,
+            on_changed=self._live_steps_changed.emit,
+        )
+        engine.add_sink(live)
+
         engine.start()
 
         auto = self._config.auto_screenshot
@@ -318,6 +336,16 @@ class SessionController(QObject):
         # button, which fires ``record_toggled`` and runs the same path
         # as a click on the bar.
         self._recorder_bar.toggle_record()
+
+    @Slot()
+    def _on_live_steps_changed(self) -> None:
+        # Capture-thread → main-thread bounce. Reload the workspace so
+        # the live notes panel grows as the examiner works. Cheap enough
+        # for demo-scale workflows; we'll switch to incremental updates
+        # if a session ever gets big enough to feel sluggish.
+        if self._repository is None:
+            return
+        self._workspace.reload()
 
     @Slot()
     def _on_marker_hotkey(self) -> None:
@@ -436,11 +464,14 @@ class SessionController(QObject):
         worker = RewriteWorker(rewriter)
         dialog = RewriteProgressDialog(worker, parent=self._parent_widget)
         dialog.succeeded.connect(lambda _steps: self._workspace.reload())
-        dialog.failed.connect(
-            lambda msg: QMessageBox.warning(self._parent_widget, "LLM rewrite failed", msg)
-        )
+        dialog.failed.connect(self._show_llm_error)
         dialog.start()
         dialog.exec()
+
+    def _show_llm_error(self, raw_message: str) -> None:
+        """Surface an LLM failure with a hint pointing at Settings."""
+        friendly = _friendly_llm_error(raw_message, base_url=self._config.llm_base_url)
+        QMessageBox.warning(self._parent_widget, "LLM rewrite failed", friendly)
 
     def export_html(self) -> None:
         self._export(
@@ -459,11 +490,33 @@ class SessionController(QObject):
         )
 
     def export_forensic_notes(self) -> None:
+        examiner = self._config.examiner_name.strip() or None
+        if self._config.examiner_org.strip():
+            examiner = (
+                f"{examiner} ({self._config.examiner_org.strip()})"
+                if examiner
+                else self._config.examiner_org.strip()
+            )
+        if self._config.examiner_id.strip():
+            examiner = (
+                f"{examiner} · {self._config.examiner_id.strip()}"
+                if examiner
+                else self._config.examiner_id.strip()
+            )
+
+        def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
+            return export_forensic_notes(
+                repository,
+                destination=destination,
+                examiner=examiner,
+                case_reference=self._case_dir.name if self._case_dir is not None else None,
+            )
+
         self._export(
             kind="Forensic notes",
             extension="html",
             file_filter="HTML (*.html)",
-            renderer=export_forensic_notes,
+            renderer=render,
             suggested_suffix="-notes",
         )
 
@@ -595,3 +648,38 @@ class SessionController(QObject):
             return
         self._repository.flush_manifest()
         self._workspace.reload()
+
+
+def _friendly_llm_error(raw_message: str, *, base_url: str) -> str:
+    """Translate raw LLM exception text into a guided message.
+
+    The local-LLM-not-running case is the dominant failure mode in the
+    field — Ollama or LM Studio just isn't started. Catch the connection
+    refused / unreachable patterns and tell the user what to do, rather
+    than dumping a urllib stacktrace at them.
+    """
+    lower = raw_message.lower()
+    if "connection refused" in lower or "failed to establish" in lower:
+        return (
+            f"Couldn't reach the local LLM server at {base_url}.\n\n"
+            "Start Ollama (or LM Studio / llama.cpp --server) and try "
+            "again. If it's running on a different URL or port, open "
+            "Edit → Settings → LLM and use 'Test connection' to verify.\n\n"
+            f"Original error: {raw_message}"
+        )
+    if "timed out" in lower:
+        return (
+            "The LLM took too long to respond.\n\n"
+            "On a local model this usually means the model is large for "
+            "your hardware. Edit → Settings → LLM lets you raise the "
+            "timeout or switch to a smaller model.\n\n"
+            f"Original error: {raw_message}"
+        )
+    if "http 404" in lower or "model not found" in lower or "no such model" in lower:
+        return (
+            "The configured model isn't available on the LLM server.\n\n"
+            "Pull it (e.g. `ollama pull gemma2`) or change the model "
+            "name in Edit → Settings → LLM.\n\n"
+            f"Original error: {raw_message}"
+        )
+    return raw_message

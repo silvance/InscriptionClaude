@@ -23,6 +23,9 @@ _K_LLM_MODEL: Final = "llm/model"
 _K_LLM_TIMEOUT_S: Final = "llm/timeout_s"
 _K_LLM_API_KEY: Final = "llm/api_key"
 _K_CAPTURE_AUTO_SCREENSHOT: Final = "capture/auto_screenshot"
+_K_EXAMINER_NAME: Final = "examiner/name"
+_K_EXAMINER_ORG: Final = "examiner/org"
+_K_EXAMINER_ID: Final = "examiner/id"
 
 #: Default points at Ollama's OpenAI-compatible endpoint. Also works
 #: unchanged with LM Studio or ``llama.cpp --server`` when run on 11434.
@@ -158,6 +161,39 @@ class Config:
     @llm_api_key.setter
     def llm_api_key(self, value: str | None) -> None:
         self._qs.setValue(_K_LLM_API_KEY, value or "")
+
+    # ----------------------------------------------------------- examiner
+
+    @property
+    def examiner_name(self) -> str:
+        """Examiner's display name; auto-fills the forensic-notes header."""
+        return str(self._qs.value(_K_EXAMINER_NAME, ""))
+
+    @examiner_name.setter
+    def examiner_name(self, value: str) -> None:
+        self._qs.setValue(_K_EXAMINER_NAME, value)
+
+    @property
+    def examiner_org(self) -> str:
+        """Examiner's organisation / unit (e.g. 'Cyber Crimes Unit')."""
+        return str(self._qs.value(_K_EXAMINER_ORG, ""))
+
+    @examiner_org.setter
+    def examiner_org(self, value: str) -> None:
+        self._qs.setValue(_K_EXAMINER_ORG, value)
+
+    @property
+    def examiner_id(self) -> str:
+        """Examiner's badge / employee ID — printed on the notes header."""
+        return str(self._qs.value(_K_EXAMINER_ID, ""))
+
+    @examiner_id.setter
+    def examiner_id(self, value: str) -> None:
+        self._qs.setValue(_K_EXAMINER_ID, value)
+
+    def has_examiner_identity(self) -> bool:
+        """True once the examiner has filled in at least their name."""
+        return bool(self.examiner_name.strip())
 
     # ------------------------------------------------------- persistence
 

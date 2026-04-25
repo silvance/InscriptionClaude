@@ -16,5 +16,11 @@ from inscription.steps.generator import (
     generate_steps,
     render_step_action,
 )
+from inscription.steps.live import LiveStepGenerator
 
-__all__ = ["StepGenerator", "generate_steps", "render_step_action"]
+__all__ = [
+    "LiveStepGenerator",
+    "StepGenerator",
+    "generate_steps",
+    "render_step_action",
+]
