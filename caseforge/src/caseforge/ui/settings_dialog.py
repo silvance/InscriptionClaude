@@ -107,9 +107,20 @@ class SettingsDialog(QDialog):
         ins_row.addWidget(self._inscription_edit, 1)
         ins_row.addWidget(inscription_btn)
 
+        self._caseguide_edit = QLineEdit(self._config.caseguide_path, box)
+        self._caseguide_edit.setPlaceholderText(
+            "Leave blank to fall back to PATH or 'python -m caseguide'"
+        )
+        caseguide_btn = QPushButton("Browse…", box)
+        caseguide_btn.clicked.connect(self._pick_caseguide)
+        cg_row = QHBoxLayout()
+        cg_row.addWidget(self._caseguide_edit, 1)
+        cg_row.addWidget(caseguide_btn)
+
         form = QFormLayout()
         form.addRow("Case workspace", ws_row)
         form.addRow("Inscription executable", ins_row)
+        form.addRow("CaseGuide executable", cg_row)
 
         outer = QVBoxLayout(box)
         outer.addLayout(form)
@@ -134,6 +145,16 @@ class SettingsDialog(QDialog):
         if path:
             self._inscription_edit.setText(path)
 
+    def _pick_caseguide(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select CaseGuide executable",
+            self._caseguide_edit.text() or "",
+            "Executables (*.exe);;All files (*)",
+        )
+        if path:
+            self._caseguide_edit.setText(path)
+
     def _on_save(self) -> None:
         self._config.examiner_name = self._name_edit.text().strip()
         self._config.examiner_org = self._org_edit.text().strip()
@@ -142,5 +163,6 @@ class SettingsDialog(QDialog):
         if ws:
             self._config.workspace_root = Path(ws)
         self._config.inscription_path = self._inscription_edit.text().strip()
+        self._config.caseguide_path = self._caseguide_edit.text().strip()
         self._config.sync()
         self.accept()

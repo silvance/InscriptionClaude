@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self._case_view = CaseView(self)
         self._case_view.save_requested.connect(self._controller.save)
         self._case_view.launch_inscription_requested.connect(self._on_launch_inscription)
+        self._case_view.launch_caseguide_requested.connect(self._controller.launch_caseguide)
         self._case_view.close_requested.connect(self._controller.close_current)
         self._case_view.refresh_sessions_requested.connect(self._refresh_sessions)
 

@@ -22,6 +22,7 @@ _K_EXAMINER_NAME: Final = "examiner/name"
 _K_EXAMINER_ORG: Final = "examiner/org"
 _K_EXAMINER_BADGE: Final = "examiner/badge_id"
 _K_INSCRIPTION_PATH: Final = "launcher/inscription_path"
+_K_CASEGUIDE_PATH: Final = "launcher/caseguide_path"
 _K_RECENT_CASE_PATHS: Final = "browser/recent_case_paths"
 
 
@@ -108,6 +109,18 @@ class Config:
     @inscription_path.setter
     def inscription_path(self, value: str) -> None:
         self._qs.setValue(_K_INSCRIPTION_PATH, value)
+
+    @property
+    def caseguide_path(self) -> str:
+        """Absolute path to the CaseGuide launcher (exe or script).
+
+        Same fall-through rules as :attr:`inscription_path`.
+        """
+        return str(self._qs.value(_K_CASEGUIDE_PATH, ""))
+
+    @caseguide_path.setter
+    def caseguide_path(self, value: str) -> None:
+        self._qs.setValue(_K_CASEGUIDE_PATH, value)
 
     # ----------------------------------------------------------- browser
 

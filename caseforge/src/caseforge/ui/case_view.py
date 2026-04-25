@@ -48,6 +48,7 @@ class CaseView(QWidget):
 
     save_requested = Signal(object)  # Case
     launch_inscription_requested = Signal()
+    launch_caseguide_requested = Signal()
     close_requested = Signal()
     refresh_sessions_requested = Signal()
 
@@ -71,17 +72,9 @@ class CaseView(QWidget):
         # Allow click-and-copy of the case path from the header.
         self._path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        self._launch_btn = QPushButton("Launch Inscription", self)
-        self._launch_btn.setProperty("role", "primary")
-        self._launch_btn.setMinimumHeight(34)
-        self._launch_btn.setMinimumWidth(180)
-        self._launch_btn.clicked.connect(self.launch_inscription_requested)
-
-        self._save_btn = QPushButton("Save changes", self)
-        self._save_btn.clicked.connect(self._on_save)
-
-        self._close_btn = QPushButton("Close", self)
-        self._close_btn.clicked.connect(self.close_requested)
+        self._launch_btn, self._caseguide_btn, self._save_btn, self._close_btn = (
+            self._build_action_buttons()
+        )
 
         header_left = QVBoxLayout()
         header_left.setSpacing(2)
@@ -92,6 +85,7 @@ class CaseView(QWidget):
         header = QHBoxLayout()
         header.addLayout(header_left, 1)
         header.addWidget(self._save_btn)
+        header.addWidget(self._caseguide_btn)
         header.addWidget(self._launch_btn)
         header.addWidget(self._close_btn)
 
@@ -148,6 +142,29 @@ class CaseView(QWidget):
         self._custody_tab.set_record(case.custody)
 
     # -------------------------------------------------------- builders
+
+    def _build_action_buttons(
+        self,
+    ) -> tuple[QPushButton, QPushButton, QPushButton, QPushButton]:
+        launch = QPushButton("Launch Inscription", self)
+        launch.setProperty("role", "primary")
+        launch.setMinimumHeight(34)
+        launch.setMinimumWidth(180)
+        launch.clicked.connect(self.launch_inscription_requested)
+
+        caseguide = QPushButton("Open in CaseGuide", self)
+        caseguide.setMinimumHeight(34)
+        caseguide.setMinimumWidth(160)
+        caseguide.setToolTip(
+            "Open this case in CaseGuide to draft scope-tailored exam suggestions."
+        )
+        caseguide.clicked.connect(self.launch_caseguide_requested)
+
+        save = QPushButton("Save changes", self)
+        save.clicked.connect(self._on_save)
+        close_ = QPushButton("Close", self)
+        close_.clicked.connect(self.close_requested)
+        return launch, caseguide, save, close_
 
     def _build_case_tab(self) -> QWidget:
         page = QWidget(self)

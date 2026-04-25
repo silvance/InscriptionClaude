@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from caseforge.config import Config
 from caseforge.inscription_sessions import InscriptionSession, list_inscription_sessions
-from caseforge.launcher import launch_inscription
+from caseforge.launcher import launch_caseguide, launch_inscription
 from caseforge.model import Case, CaseSummary, ExaminerIdentity, ExamScope, utcnow
 from caseforge.paths import WORKSPACE_DIR
 from caseforge.storage import (
@@ -211,6 +211,18 @@ class CaseController(QObject):
             QMessageBox.warning(self._parent_widget, "Launch failed", result.message)
             return
         QMessageBox.information(self._parent_widget, "Inscription launched", result.message)
+
+    def launch_caseguide(self) -> None:
+        if self._case_dir is None:
+            return
+        result = launch_caseguide(
+            caseguide_path=self._config.caseguide_path,
+            case_dir=self._case_dir,
+        )
+        if not result.ok:
+            QMessageBox.warning(self._parent_widget, "Launch failed", result.message)
+            return
+        QMessageBox.information(self._parent_widget, "CaseGuide launched", result.message)
 
     # ----------------------------------------------------- helpers
 
