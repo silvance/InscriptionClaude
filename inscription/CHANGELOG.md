@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown export.** Sibling of the HTML exporter; lands in
+  File → Export as Markdown… Output is GitHub-flavoured Markdown
+  (numbered headings + image refs into a sibling assets folder), so
+  guides paste cleanly into tickets, wikis, PR descriptions, and
+  most note-taking apps. Re-uses the same crop+highlight rendering
+  as the HTML exporter.
+- **`--case-dir` CLI flag** for the upcoming CaseForge integration.
+  ``python -m inscription --case-dir <path>`` makes that path the
+  workspace root for the run; the case-folder name shows in the
+  title bar. Per-run only — does not persist to ``config.ini``.
+- **`docs/integration.md`** — the contract Inscription exposes to the
+  three-tool suite (CaseForge → Inscription → report builder):
+  session folder layout, schema v4 column-by-column, the
+  ``draft_steps.evidentiary`` query Tool 3 reads against, and the
+  forward-only-migration stability promise.
+- **Evidentiary checkbox** in the step editor wires ``DraftStep.evidentiary``
+  to a UI affordance. Toggling persists immediately via
+  ``SessionRepository.set_step_evidentiary``.
+
+### Added
+
 - **Auto-screenshot toggle + manual snapshot hotkey.** New View menu
   item *Auto-screenshot every action* (default on, persists in
   ``config.ini`` under ``capture/auto_screenshot``). When unchecked,

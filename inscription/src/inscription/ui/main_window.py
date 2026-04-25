@@ -140,6 +140,13 @@ class MainWindow(QMainWindow):
         export_html_action.triggered.connect(self._controller.export_html)
         file_menu.addAction(export_html_action)
 
+        export_md_action = QAction("Export as &Markdown…", self)
+        export_md_action.setStatusTip(
+            "Export the current session as Markdown (paste into tickets, wikis, PRs)"
+        )
+        export_md_action.triggered.connect(self._controller.export_markdown)
+        file_menu.addAction(export_md_action)
+
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)

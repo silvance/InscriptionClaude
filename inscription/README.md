@@ -80,7 +80,7 @@ name appears in the title bar.
    for a more natural rewrite. See [Local LLM setup](#local-llm-setup).
 6. Click a step to edit its text; remove steps that shouldn't appear in the
    guide.
-7. File → Export as HTML.
+7. File → Export as HTML or Markdown.
 
 ## Local LLM setup
 

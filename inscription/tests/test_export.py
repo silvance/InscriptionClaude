@@ -1,4 +1,4 @@
-"""HTML export."""
+"""HTML and Markdown export."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from inscription.export import export_html
-from inscription.model import EventKind, ResolvedElement, utcnow
+from inscription.export import export_html, export_markdown
+from inscription.model import DraftStep, EventKind, ResolvedElement, utcnow
 from inscription.steps import generate_steps
 from inscription.storage import SessionRepository
 
@@ -133,3 +133,88 @@ def _png_dimensions(data: bytes) -> tuple[int, int]:
 def test_png_dimensions_helper_works() -> None:
     data = _solid_png(7, 5, (0, 0, 0))
     assert _png_dimensions(data) == (7, 5)
+
+
+# --------------------------------------------------- markdown
+
+
+def test_export_markdown_writes_portable_document(tmp_path: Path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="MD Demo")
+    try:
+        _seed_click(repo)
+        generate_steps(repo)
+        doc = export_markdown(repo)
+    finally:
+        repo.close()
+
+    assert doc.path.exists()
+    assert doc.path.suffix == ".md"
+    text = doc.path.read_text(encoding="utf-8")
+    # Header + step heading + the resolved element name.
+    assert text.startswith("# MD Demo")
+    assert "## Step 1" in text
+    assert "Save" in text
+    # Image markdown reference into the sibling assets folder.
+    assert "](" in text
+    assets = doc.path.parent / f"{doc.path.stem}-assets"
+    assert assets.exists()
+    assert any(assets.iterdir())
+
+
+def test_markdown_skips_image_when_step_has_no_screenshot(tmp_path: Path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="NoShot")
+    try:
+        event = repo.append_event(kind=EventKind.KEY_PRESS, key="enter", window_title="Notepad")
+        assert event.id is not None
+        repo.replace_steps(
+            [
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    text="Press Enter in Notepad.",
+                    source_event_ids=(event.id,),
+                )
+            ]
+        )
+        doc = export_markdown(repo)
+    finally:
+        repo.close()
+
+    text = doc.path.read_text(encoding="utf-8")
+    assert "Press Enter in Notepad." in text
+    # No image reference for steps that have no screenshot.
+    assert "![" not in text
+
+
+def test_markdown_omits_suppressed_steps(tmp_path: Path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Hidden")
+    try:
+        e1 = repo.append_event(kind=EventKind.CLICK, x=1, y=1, button="left")
+        e2 = repo.append_event(kind=EventKind.CLICK, x=2, y=2, button="left")
+        assert e1.id is not None
+        assert e2.id is not None
+        saved = repo.replace_steps(
+            [
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    text="Visible step.",
+                    source_event_ids=(e1.id,),
+                ),
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    text="Hidden step.",
+                    source_event_ids=(e2.id,),
+                ),
+            ]
+        )
+        assert saved[1].id is not None
+        repo.set_step_suppressed(saved[1].id, suppressed=True)
+        doc = export_markdown(repo)
+    finally:
+        repo.close()
+
+    text = doc.path.read_text(encoding="utf-8")
+    assert "Visible step." in text
+    assert "Hidden step." not in text

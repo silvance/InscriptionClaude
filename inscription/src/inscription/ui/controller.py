@@ -33,7 +33,7 @@ from inscription.capture import (
     WindowFocusSource,
 )
 from inscription.config import Config
-from inscription.export import export_html
+from inscription.export import export_html, export_markdown
 from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
@@ -59,6 +59,9 @@ from inscription.ui.session_dialogs import SessionListDialog
 from inscription.version import __version__
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from inscription.model import ExportDocument
     from inscription.ui.recorder_bar import RecorderBar
     from inscription.ui.workspace import SessionWorkspaceWidget
 
@@ -432,27 +435,51 @@ class SessionController(QObject):
         dialog.exec()
 
     def export_html(self) -> None:
+        self._export(
+            kind="HTML",
+            extension="html",
+            file_filter="HTML (*.html)",
+            renderer=export_html,
+        )
+
+    def export_markdown(self) -> None:
+        self._export(
+            kind="Markdown",
+            extension="md",
+            file_filter="Markdown (*.md)",
+            renderer=export_markdown,
+        )
+
+    def _export(
+        self,
+        *,
+        kind: str,
+        extension: str,
+        file_filter: str,
+        renderer: Callable[..., ExportDocument],
+    ) -> None:
         if self._repository is None:
             return
         suggested = str(
-            self._repository.session.exports_dir / f"{self._repository.session.root.name}.html"
+            self._repository.session.exports_dir
+            / f"{self._repository.session.root.name}.{extension}"
         )
         target, _ = QFileDialog.getSaveFileName(
             self._parent_widget,
-            "Export as HTML",
+            f"Export as {kind}",
             suggested,
-            "HTML (*.html)",
+            file_filter,
         )
         if not target:
             return
         try:
-            doc = export_html(self._repository, destination=Path(target))
+            doc = renderer(self._repository, destination=Path(target))
         except Exception:
-            logger.exception("HTML export failed")
+            logger.exception("%s export failed", kind)
             QMessageBox.critical(
                 self._parent_widget,
                 "Export failed",
-                "Inscription could not export the guide. See logs for details.",
+                f"Inscription could not export the guide as {kind}. See logs for details.",
             )
             return
         QMessageBox.information(
