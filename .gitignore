@@ -1,0 +1,9 @@
+caseforge/.venv/
+caseforge/dist/
+caseforge/build/
+caseforge/.pytest_cache/
+caseforge/.mypy_cache/
+caseforge/.ruff_cache/
+caseforge/**/__pycache__/
+caseforge/*.egg-info/
+caseforge/src/*.egg-info/
