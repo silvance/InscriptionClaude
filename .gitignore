@@ -7,3 +7,13 @@ caseforge/.ruff_cache/
 caseforge/**/__pycache__/
 caseforge/*.egg-info/
 caseforge/src/*.egg-info/
+
+caseguide/.venv/
+caseguide/dist/
+caseguide/build/
+caseguide/.pytest_cache/
+caseguide/.mypy_cache/
+caseguide/.ruff_cache/
+caseguide/**/__pycache__/
+caseguide/*.egg-info/
+caseguide/src/*.egg-info/
