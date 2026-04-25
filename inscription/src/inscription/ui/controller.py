@@ -89,12 +89,17 @@ class SessionController(QObject):
         recorder_bar: RecorderBar,
         parent_widget: QWidget | None = None,
         parent: QObject | None = None,
+        case_dir: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._workspace = workspace
         self._recorder_bar = recorder_bar
         self._parent_widget = parent_widget
         self._config = Config()
+        # Per-run override; doesn't persist to config. Used by CaseForge
+        # integration: when CaseForge launches Inscription with --case-dir,
+        # all sessions for this run land inside that directory.
+        self._case_dir = case_dir
 
         self._repository: SessionRepository | None = None
         self._engine: CaptureEngine | None = None
@@ -143,6 +148,8 @@ class SessionController(QObject):
             self._create_session(choice.new_name)
 
     def _workspace_root(self) -> Path:
+        if self._case_dir is not None:
+            return self._case_dir
         return self._config.workspace_root or WORKSPACE_DIR
 
     def _open_session(self, slug: str) -> None:

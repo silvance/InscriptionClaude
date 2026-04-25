@@ -57,6 +57,19 @@ python -m inscription
 .\scripts\dev.ps1 all
 ```
 
+### CLI flags
+
+```
+python -m inscription --case-dir <path>
+```
+
+`--case-dir <path>` makes Inscription store this run's sessions inside
+`<path>` instead of the default `%LOCALAPPDATA%\Inscription\workspace\`.
+Intended for the upcoming **CaseForge** integration: CaseForge creates
+the case directory, then launches Inscription pointed at it. The flag
+does not modify the saved config — it's per-run only. The case folder
+name appears in the title bar.
+
 ## Core workflow
 
 1. Launch Inscription.

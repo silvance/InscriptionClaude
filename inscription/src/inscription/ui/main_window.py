@@ -7,6 +7,7 @@ that drive the controller.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -25,17 +26,29 @@ from inscription.ui.recorder_bar import RecorderBar
 from inscription.ui.workspace import SessionWorkspaceWidget
 from inscription.version import __version__
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
     """Top-level application window."""
 
-    def __init__(self, *, auto_start_controller: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        auto_start_controller: bool = True,
+        case_dir: Path | None = None,
+    ) -> None:
         super().__init__()
         self._config = Config()
+        self._case_dir = case_dir
 
-        self.setWindowTitle(f"Inscription {__version__}")
+        title = f"Inscription {__version__}"
+        if case_dir is not None:
+            title = f"Inscription {__version__} — Case: {case_dir.name}"
+        self.setWindowTitle(title)
         self.resize(1200, 800)
 
         self._recorder_bar = RecorderBar(self)
@@ -48,6 +61,7 @@ class MainWindow(QMainWindow):
             recorder_bar=self._recorder_bar,
             parent_widget=self,
             parent=self,
+            case_dir=case_dir,
         )
         self._controller.session_opened.connect(self._on_session_opened)
         self._controller.session_closed.connect(self._on_session_closed)
@@ -189,12 +203,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- Slots
 
     def _on_session_opened(self, name: str) -> None:
-        self.setWindowTitle(f"Inscription {__version__} — {name}")
+        case_prefix = f"Case: {self._case_dir.name} — " if self._case_dir else ""
+        self.setWindowTitle(f"Inscription {__version__} — {case_prefix}{name}")
         self.statusBar().showMessage(f"Session {name!r} open")
         self._stack.setCurrentIndex(1)
 
     def _on_session_closed(self) -> None:
-        self.setWindowTitle(f"Inscription {__version__}")
+        title = f"Inscription {__version__}"
+        if self._case_dir is not None:
+            title = f"{title} — Case: {self._case_dir.name}"
+        self.setWindowTitle(title)
         self.statusBar().showMessage("No session open")
         self._stack.setCurrentIndex(0)
 
