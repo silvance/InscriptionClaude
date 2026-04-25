@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from caseforge.ui.recents_delegate import CASE_SUMMARY_ROLE, RecentsDelegate
 from caseforge.version import __version__
 
 if TYPE_CHECKING:
@@ -55,7 +56,10 @@ class WelcomePage(QWidget):
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self._list = QListWidget(self)
-        self._list.setMinimumHeight(220)
+        self._list.setMinimumHeight(260)
+        self._list.setItemDelegate(RecentsDelegate(self._list))
+        self._list.setUniformItemSizes(True)
+        self._list.setSpacing(2)
         self._list.itemActivated.connect(self._on_activated)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
@@ -113,8 +117,12 @@ class WelcomePage(QWidget):
 
         self._list.clear()
         for summary in visible:
+            # The delegate paints the row from the CaseSummary on
+            # CASE_SUMMARY_ROLE; the visible label here is an
+            # accessibility / fallback string.
             item = QListWidgetItem(self._format_summary(summary))
             item.setData(Qt.ItemDataRole.UserRole, summary.path)
+            item.setData(CASE_SUMMARY_ROLE, summary)
             item.setToolTip(summary.path)
             self._list.addItem(item)
 

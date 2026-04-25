@@ -35,13 +35,9 @@ from caseguide.model import (
     PRIORITY_RECOMMENDED,
     Suggestion,
 )
+from caseguide.ui.suggestion_delegate import SUGGESTION_ROLE, SuggestionDelegate
 
 logger = logging.getLogger(__name__)
-
-#: Truncate the inline action preview at this length so list rows
-#: stay one line each.
-_ACTION_PREVIEW_LIMIT = 110
-_ACTION_PREVIEW_ELLIPSIS_AT = 107
 
 
 def _muted(text: str, parent: QWidget | None = None) -> QLabel:
@@ -68,6 +64,9 @@ class SuggestionsPanel(QWidget):
 
         self._list = QListWidget(self)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._list.setItemDelegate(SuggestionDelegate(self._list))
+        self._list.setUniformItemSizes(False)
+        self._list.setSpacing(2)
         self._list.itemSelectionChanged.connect(self._on_selection_changed)
 
         self._add_btn = QPushButton("Add", self)
@@ -293,20 +292,27 @@ class SuggestionsPanel(QWidget):
 
 
 def _make_item(suggestion: Suggestion) -> QListWidgetItem:
-    item = QListWidgetItem(_format_label(suggestion))
+    """Build a list item that the SuggestionDelegate paints.
+
+    The delegate reads the dataclass off ``SUGGESTION_ROLE``; we still
+    set the user-role id and an accessible-name fallback so screen
+    readers and Qt's default layout logic have something to fall back
+    to if the delegate isn't installed.
+    """
+    item = QListWidgetItem(_accessible_label(suggestion))
     item.setData(Qt.ItemDataRole.UserRole, suggestion.id)
+    item.setData(SUGGESTION_ROLE, suggestion)
     return item
 
 
 def _refresh_item(item: QListWidgetItem, suggestion: Suggestion) -> None:
-    item.setText(_format_label(suggestion))
+    item.setText(_accessible_label(suggestion))
     item.setData(Qt.ItemDataRole.UserRole, suggestion.id)
+    item.setData(SUGGESTION_ROLE, suggestion)
 
 
-def _format_label(suggestion: Suggestion) -> str:
+def _accessible_label(suggestion: Suggestion) -> str:
     badge = suggestion.priority.upper()
     body = suggestion.action.strip().splitlines()[0] if suggestion.action else "(empty)"
-    if len(body) > _ACTION_PREVIEW_LIMIT:
-        body = body[:_ACTION_PREVIEW_ELLIPSIS_AT] + "…"
     category = f"  ·  {suggestion.category}" if suggestion.category else ""
     return f"[{badge}] {body}{category}"
