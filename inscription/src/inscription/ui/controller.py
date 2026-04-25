@@ -19,8 +19,15 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox, QWidget
+from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QInputDialog,
+    QMessageBox,
+    QWidget,
+)
 
 from inscription.capture import (
     CaptureEngine,
@@ -28,11 +35,13 @@ from inscription.capture import (
     EnrichedEvent,
     KeyboardMilestoneSource,
     RawCaptureEvent,
+    ScrollSource,
     SessionSink,
     WindowFocusSource,
 )
 from inscription.config import Config
-from inscription.export import export_html
+from inscription.export import export_forensic_notes, export_html, export_markdown
+from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
 from inscription.platform import (
@@ -40,9 +49,11 @@ from inscription.platform import (
     HotkeyManager,
     create_foreground_inspector,
     create_hotkey_manager,
+    create_screen_capturer,
+    safe_close,
 )
 from inscription.resolve import create_element_resolver
-from inscription.steps import generate_steps
+from inscription.steps import LiveStepGenerator, generate_steps
 from inscription.storage import (
     SessionAlreadyExistsError,
     SessionLockedError,
@@ -50,10 +61,17 @@ from inscription.storage import (
     list_sessions,
 )
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
+from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
+from inscription.ui.settings_dialog import SettingsDialog
+from inscription.ui.verify_dialog import IntegrityResultDialog
+from inscription.verify import verify_session_integrity
 from inscription.version import __version__
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from inscription.model import ExportDocument
     from inscription.ui.recorder_bar import RecorderBar
     from inscription.ui.workspace import SessionWorkspaceWidget
 
@@ -61,6 +79,7 @@ logger = logging.getLogger(__name__)
 
 TOGGLE_RECORD_HOTKEY = "<ctrl>+<shift>+r"
 MARKER_HOTKEY = "<ctrl>+<shift>+m"
+SNAPSHOT_HOTKEY = "<ctrl>+<shift>+p"
 
 
 class SessionController(QObject):
@@ -69,11 +88,21 @@ class SessionController(QObject):
     session_opened = Signal(str)  # session name
     session_closed = Signal()
     event_counted = Signal(int)  # total events in current session
+    recording_state_changed = Signal(bool)  # True when recording started, False when stopped
+    #: Emitted after every live-generator update with (latest_step, started_at).
+    #: ``latest_step`` is a :class:`DraftStep` or None; ``started_at`` is its
+    #: first-source-event timestamp (or None when nothing's been captured).
+    latest_step_changed = Signal(object, object)
 
     #: Queued across threads so the pynput hotkey callback can flip state
     #: on the Qt main thread without race conditions.
     _toggle_requested = Signal()
     _marker_requested = Signal()
+    _snapshot_requested = Signal()
+    #: Fired by the live step generator (capture worker thread) whenever
+    #: a step is appended or extended; the queued connection bounces
+    #: workspace.reload() onto the Qt main thread.
+    _live_steps_changed = Signal()
 
     def __init__(
         self,
@@ -82,12 +111,17 @@ class SessionController(QObject):
         recorder_bar: RecorderBar,
         parent_widget: QWidget | None = None,
         parent: QObject | None = None,
+        case_dir: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._workspace = workspace
         self._recorder_bar = recorder_bar
         self._parent_widget = parent_widget
         self._config = Config()
+        # Per-run override; doesn't persist to config. Used by CaseForge
+        # integration: when CaseForge launches Inscription with --case-dir,
+        # all sessions for this run land inside that directory.
+        self._case_dir = case_dir
 
         self._repository: SessionRepository | None = None
         self._engine: CaptureEngine | None = None
@@ -96,18 +130,65 @@ class SessionController(QObject):
         self._event_count = 0
         self._hotkeys: HotkeyManager = create_hotkey_manager()
 
-        self._workspace.step_text_edited.connect(self._on_step_text_edited)
+        self._workspace.step_fields_edited.connect(self._on_step_fields_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
+        self._workspace.step_evidentiary_toggled.connect(self._on_step_evidentiary_toggled)
+        self._workspace.steps_reordered.connect(self._on_steps_reordered)
+        self._workspace.merge_requested.connect(self._on_merge_requested)
+        self._workspace.split_requested.connect(self._on_split_requested)
         self._recorder_bar.record_toggled.connect(self._on_record_toggled)
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
         self._toggle_requested.connect(self._on_toggle_hotkey)
         self._marker_requested.connect(self._on_marker_hotkey)
+        self._snapshot_requested.connect(self._on_snapshot_hotkey)
+        self._live_steps_changed.connect(self._on_live_steps_changed)
 
     # ------------------------------------------------------------ lifecycle
 
     def start(self) -> None:
         """Show the session picker. Called from the main window on launch."""
         self._show_session_picker()
+
+    def open_session_by_slug(self, slug: str) -> None:
+        """Open the session identified by ``slug`` from the welcome page."""
+        self._open_session(slug)
+
+    def workspace_root(self) -> Path:
+        """Return the directory the welcome page should enumerate."""
+        return self._workspace_root()
+
+    def open_settings(self) -> None:
+        """Show the Settings dialog (examiner identity + LLM endpoint)."""
+        SettingsDialog(self._config, parent=self._parent_widget).exec()
+
+    def verify_integrity(self) -> None:
+        """Re-hash every screenshot in the open session and report drift.
+
+        Disabled when no session is open; the menu wiring already
+        guards against that, but we double-check here to keep this
+        method safe for callers (hotkeys, scripts) that might not.
+        """
+        if self._repository is None:
+            QMessageBox.information(
+                self._parent_widget,
+                "No session",
+                "Open a session before running an integrity check.",
+            )
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = verify_session_integrity(self._repository)
+        except Exception:
+            logger.exception("Integrity check failed")
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(
+                self._parent_widget,
+                "Integrity check failed",
+                "Could not run the check. See logs for details.",
+            )
+            return
+        QApplication.restoreOverrideCursor()
+        IntegrityResultDialog(result, parent=self._parent_widget).exec()
 
     def shutdown(self) -> None:
         self._workspace.flush_pending()
@@ -131,6 +212,8 @@ class SessionController(QObject):
             self._create_session(choice.new_name)
 
     def _workspace_root(self) -> Path:
+        if self._case_dir is not None:
+            return self._case_dir
         return self._config.workspace_root or WORKSPACE_DIR
 
     def _open_session(self, slug: str) -> None:
@@ -178,11 +261,14 @@ class SessionController(QObject):
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
         self._recorder_bar.set_recording(False)
+        self._register_toggle_hotkey()
+        self.session_opened.emit(repo.session.info.name)
+
+    def _register_toggle_hotkey(self) -> None:
         self._hotkeys.register(
             HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
             self._toggle_requested.emit,
         )
-        self.session_opened.emit(repo.session.info.name)
 
     def _close_session(self) -> None:
         if self._repository is None:
@@ -235,21 +321,41 @@ class SessionController(QObject):
         sink = SessionSink(self._repository)
         engine.add_sink(sink)
 
+        # LiveStepGenerator must run after SessionSink — it reads the
+        # persisted_event_id that the sink stamps onto the event.
+        live = LiveStepGenerator(
+            self._repository,
+            on_changed=self._live_steps_changed.emit,
+        )
+        engine.add_sink(live)
+
         engine.start()
 
-        engine.add_source(ClickSource())
+        auto = self._config.auto_screenshot
+        engine.add_source(ClickSource(auto_screenshot=auto))
         engine.add_source(KeyboardMilestoneSource())
-        engine.add_source(WindowFocusSource(inspector=create_foreground_inspector()))
+        engine.add_source(ScrollSource())
+        engine.add_source(
+            WindowFocusSource(
+                inspector=create_foreground_inspector(),
+                auto_screenshot=auto,
+            )
+        )
 
         self._hotkeys.register(
             HotkeyBinding(sequence=MARKER_HOTKEY, name="marker"),
             self._marker_requested.emit,
+        )
+        self._hotkeys.register(
+            HotkeyBinding(sequence=SNAPSHOT_HOTKEY, name="snapshot"),
+            self._snapshot_requested.emit,
         )
 
         self._engine = engine
         self._bridge = bridge
         self._sink = sink
         self._recorder_bar.set_recording(True)
+        self.recording_state_changed.emit(True)
         logger.info("Recording started for session %r", self._repository.session.info.name)
 
     def _stop_recording(self) -> None:
@@ -265,11 +371,9 @@ class SessionController(QObject):
         # Re-register just the toggle binding so Ctrl+Shift+R still works.
         self._hotkeys.unregister_all()
         if self._repository is not None:
-            self._hotkeys.register(
-                HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
-                self._toggle_requested.emit,
-            )
+            self._register_toggle_hotkey()
         self._recorder_bar.set_recording(False)
+        self.recording_state_changed.emit(False)
 
     @Slot()
     def _on_toggle_hotkey(self) -> None:
@@ -277,6 +381,38 @@ class SessionController(QObject):
         # button, which fires ``record_toggled`` and runs the same path
         # as a click on the bar.
         self._recorder_bar.toggle_record()
+
+    @Slot()
+    def _on_live_steps_changed(self) -> None:
+        # Capture-thread → main-thread bounce. Reload the workspace so
+        # the live notes panel grows as the examiner works. Cheap enough
+        # for demo-scale workflows; we'll switch to incremental updates
+        # if a session ever gets big enough to feel sluggish.
+        if self._repository is None:
+            return
+        self._workspace.reload()
+        self._broadcast_latest_step()
+
+    def _broadcast_latest_step(self) -> None:
+        """Notify the compact dock (and any other listener) of the newest step."""
+        if self._repository is None:
+            self.latest_step_changed.emit(None, None)
+            return
+        steps = self._repository.list_steps()
+        if not steps:
+            self.latest_step_changed.emit(None, None)
+            return
+        latest = steps[-1]
+        events_by_id = {e.id: e for e in self._repository.list_events() if e.id is not None}
+        started_at = next(
+            (
+                events_by_id[eid].occurred_at
+                for eid in latest.source_event_ids
+                if eid in events_by_id
+            ),
+            None,
+        )
+        self.latest_step_changed.emit(latest, started_at)
 
     @Slot()
     def _on_marker_hotkey(self) -> None:
@@ -301,6 +437,39 @@ class SessionController(QObject):
             )
         )
 
+    @Slot()
+    def _on_snapshot_hotkey(self) -> None:
+        """Capture the current screen and submit it as a marker event.
+
+        Works in either auto- or manual-screenshot mode — handy when the
+        examiner wants to mark *this* exact moment with a frozen frame
+        even if the surrounding events would normally produce screenshots
+        anyway.
+        """
+        engine = self._engine
+        if engine is None:
+            return
+        # mss must be owned by the calling thread; the queued signal puts
+        # this on the Qt main thread, where a fresh capturer is fine.
+        capturer = create_screen_capturer()
+        try:
+            image = capturer.capture()
+        except Exception:
+            logger.exception("Snapshot hotkey failed to capture screen")
+            return
+        finally:
+            safe_close(capturer)
+        engine.submit(
+            RawCaptureEvent(
+                kind=EventKind.MARKER,
+                occurred_at=utcnow(),
+                text="Manual snapshot.",
+                png_bytes=image.png_bytes,
+                png_width=image.width,
+                png_height=image.height,
+            )
+        )
+
     # ---------------------------------------------------------- step actions
 
     def _regenerate_steps(self) -> None:
@@ -322,28 +491,133 @@ class SessionController(QObject):
         """Public entry point for the File > Regenerate menu item."""
         self._regenerate_steps()
 
+    def auto_screenshot_enabled(self) -> bool:
+        return self._config.auto_screenshot
+
+    def set_auto_screenshot(self, enabled: bool) -> None:
+        """Persist the auto-screenshot preference.
+
+        Takes effect the next time recording starts; an in-flight session
+        keeps whatever mode it was started under so the source threads
+        stay consistent.
+        """
+        self._config.auto_screenshot = enabled
+        self._config.sync()
+
+    def rewrite_with_llm(self) -> None:
+        """Send the session to the configured LLM and replace draft_steps
+        with the model's rewritten version. Preserves manual edits.
+
+        Shows a modal progress dialog and runs the request on a worker
+        thread so the UI stays responsive. Any failure — connection,
+        timeout, malformed response — leaves the existing steps in place
+        and shows the error to the user.
+        """
+        if self._repository is None:
+            return
+        self._workspace.flush_pending()
+        try:
+            client = LLMClient(
+                base_url=self._config.llm_base_url,
+                model=self._config.llm_model,
+                timeout_s=self._config.llm_timeout_s,
+                api_key=self._config.llm_api_key,
+            )
+        except LLMError as exc:
+            QMessageBox.warning(self._parent_widget, "LLM not configured", str(exc))
+            return
+
+        rewriter = StepRewriter(repository=self._repository, client=client)
+        worker = RewriteWorker(rewriter)
+        dialog = RewriteProgressDialog(worker, parent=self._parent_widget)
+        dialog.succeeded.connect(lambda _steps: self._workspace.reload())
+        dialog.failed.connect(self._show_llm_error)
+        dialog.start()
+        dialog.exec()
+
+    def _show_llm_error(self, raw_message: str) -> None:
+        """Surface an LLM failure with a hint pointing at Settings."""
+        friendly = _friendly_llm_error(raw_message, base_url=self._config.llm_base_url)
+        QMessageBox.warning(self._parent_widget, "LLM rewrite failed", friendly)
+
     def export_html(self) -> None:
+        self._export(
+            kind="HTML",
+            extension="html",
+            file_filter="HTML (*.html)",
+            renderer=export_html,
+        )
+
+    def export_markdown(self) -> None:
+        self._export(
+            kind="Markdown",
+            extension="md",
+            file_filter="Markdown (*.md)",
+            renderer=export_markdown,
+        )
+
+    def export_forensic_notes(self) -> None:
+        examiner = self._config.examiner_name.strip() or None
+        if self._config.examiner_org.strip():
+            examiner = (
+                f"{examiner} ({self._config.examiner_org.strip()})"
+                if examiner
+                else self._config.examiner_org.strip()
+            )
+        if self._config.examiner_id.strip():
+            examiner = (
+                f"{examiner} · {self._config.examiner_id.strip()}"
+                if examiner
+                else self._config.examiner_id.strip()
+            )
+
+        def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
+            return export_forensic_notes(
+                repository,
+                destination=destination,
+                examiner=examiner,
+                case_reference=self._case_dir.name if self._case_dir is not None else None,
+            )
+
+        self._export(
+            kind="Forensic notes",
+            extension="html",
+            file_filter="HTML (*.html)",
+            renderer=render,
+            suggested_suffix="-notes",
+        )
+
+    def _export(
+        self,
+        *,
+        kind: str,
+        extension: str,
+        file_filter: str,
+        renderer: Callable[..., ExportDocument],
+        suggested_suffix: str = "",
+    ) -> None:
         if self._repository is None:
             return
         suggested = str(
-            self._repository.session.exports_dir / f"{self._repository.session.root.name}.html"
+            self._repository.session.exports_dir
+            / f"{self._repository.session.root.name}{suggested_suffix}.{extension}"
         )
         target, _ = QFileDialog.getSaveFileName(
             self._parent_widget,
-            "Export as HTML",
+            f"Export as {kind}",
             suggested,
-            "HTML (*.html)",
+            file_filter,
         )
         if not target:
             return
         try:
-            doc = export_html(self._repository, destination=Path(target))
+            doc = renderer(self._repository, destination=Path(target))
         except Exception:
-            logger.exception("HTML export failed")
+            logger.exception("%s export failed", kind)
             QMessageBox.critical(
                 self._parent_widget,
                 "Export failed",
-                "Inscription could not export the guide. See logs for details.",
+                f"Inscription could not export the guide as {kind}. See logs for details.",
             )
             return
         QMessageBox.information(
@@ -364,12 +638,12 @@ class SessionController(QObject):
         self._recorder_bar.set_event_count(self._event_count)
         self.event_counted.emit(self._event_count)
 
-    @Slot(int, str)
-    def _on_step_text_edited(self, step_id: int, text: str) -> None:
+    @Slot(int, str, str)
+    def _on_step_fields_edited(self, step_id: int, action: str, result: str) -> None:
         if self._repository is None:
             return
         try:
-            self._repository.update_step_text(step_id, text)
+            self._repository.update_step_fields(step_id, action=action, result=result)
         except Exception:
             logger.exception("Failed to persist step edit (step_id=%d)", step_id)
 
@@ -382,3 +656,97 @@ class SessionController(QObject):
         except Exception:
             logger.exception("Failed to persist step suppression (step_id=%d)", step_id)
         self._workspace.reload()
+
+    @Slot(int, bool)
+    def _on_step_evidentiary_toggled(self, step_id: int, evidentiary: bool) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.set_step_evidentiary(step_id, evidentiary=evidentiary)
+        except Exception:
+            logger.exception("Failed to persist evidentiary flag (step_id=%d)", step_id)
+        # No reload — the editor's checkbox is already in the right state
+        # and reloading would re-trigger selection logic for no benefit.
+
+    @Slot(list)
+    def _on_steps_reordered(self, ordered_ids: list[int]) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.reorder_steps(ordered_ids)
+        except Exception:
+            logger.exception("Failed to persist reorder")
+            self._workspace.reload()  # snap UI back to truth on failure
+            return
+        # Re-derive the manifest so the session picker reflects the new
+        # ordering on next launch.
+        self._repository.flush_manifest()
+
+    @Slot(int, int)
+    def _on_merge_requested(self, primary_id: int, other_id: int) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.merge_steps(primary_id=primary_id, other_id=other_id)
+        except Exception:
+            logger.exception("Failed to merge steps %d and %d", primary_id, other_id)
+            QMessageBox.warning(
+                self._parent_widget,
+                "Merge failed",
+                "Could not merge those two steps. See logs for details.",
+            )
+            return
+        self._repository.flush_manifest()
+        self._workspace.reload()
+
+    @Slot(int)
+    def _on_split_requested(self, step_id: int) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.split_step(step_id)
+        except Exception:
+            logger.exception("Failed to split step %d", step_id)
+            QMessageBox.warning(
+                self._parent_widget,
+                "Split failed",
+                "Could not split that step. See logs for details.",
+            )
+            return
+        self._repository.flush_manifest()
+        self._workspace.reload()
+
+
+def _friendly_llm_error(raw_message: str, *, base_url: str) -> str:
+    """Translate raw LLM exception text into a guided message.
+
+    The local-LLM-not-running case is the dominant failure mode in the
+    field — Ollama or LM Studio just isn't started. Catch the connection
+    refused / unreachable patterns and tell the user what to do, rather
+    than dumping a urllib stacktrace at them.
+    """
+    lower = raw_message.lower()
+    if "connection refused" in lower or "failed to establish" in lower:
+        return (
+            f"Couldn't reach the local LLM server at {base_url}.\n\n"
+            "Start Ollama (or LM Studio / llama.cpp --server) and try "
+            "again. If it's running on a different URL or port, open "
+            "Edit → Settings → LLM and use 'Test connection' to verify.\n\n"
+            f"Original error: {raw_message}"
+        )
+    if "timed out" in lower:
+        return (
+            "The LLM took too long to respond.\n\n"
+            "On a local model this usually means the model is large for "
+            "your hardware. Edit → Settings → LLM lets you raise the "
+            "timeout or switch to a smaller model.\n\n"
+            f"Original error: {raw_message}"
+        )
+    if "http 404" in lower or "model not found" in lower or "no such model" in lower:
+        return (
+            "The configured model isn't available on the LLM server.\n\n"
+            "Pull it (e.g. `ollama pull gemma2`) or change the model "
+            "name in Edit → Settings → LLM.\n\n"
+            f"Original error: {raw_message}"
+        )
+    return raw_message

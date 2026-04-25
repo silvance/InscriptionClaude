@@ -7,6 +7,7 @@ and lockfile management.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import sqlite3
@@ -61,6 +62,10 @@ def _loads_rect(raw: str | None) -> tuple[int, int, int, int] | None:
         return None
     parts = json.loads(raw)
     return (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
+
+
+#: A step needs at least this many source events to be splittable in two.
+_MIN_SOURCE_IDS_TO_SPLIT = 2
 
 
 class SessionRepository:
@@ -272,8 +277,8 @@ class SessionRepository:
                 """
                 INSERT INTO resolved_elements
                     (name, control_type, automation_id, class_name, role,
-                     confidence, method)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     confidence, method, bounding_rect, owner_process_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     element.name,
@@ -283,21 +288,14 @@ class SessionRepository:
                     element.role,
                     element.confidence,
                     element.method,
+                    _dumps_rect(element.bounding_rect),
+                    element.owner_process_name,
                 ),
             )
             self._conn.commit()
             element_id = cursor.lastrowid
         assert element_id is not None
-        return ResolvedElement(
-            id=element_id,
-            name=element.name,
-            control_type=element.control_type,
-            automation_id=element.automation_id,
-            class_name=element.class_name,
-            role=element.role,
-            confidence=element.confidence,
-            method=element.method,
-        )
+        return dataclasses.replace(element, id=element_id)
 
     def append_event(
         self,
@@ -374,40 +372,122 @@ class SessionRepository:
                 cursor = self._conn.execute(
                     """
                     INSERT INTO draft_steps
-                        (sequence, text, source_event_ids, screenshot_id,
-                         suppressed, manual_edit)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (sequence, action, result, source_event_ids, screenshot_id,
+                         suppressed, manual_edit, evidentiary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         i,
-                        step.text,
+                        step.action,
+                        step.result,
                         json.dumps(list(step.source_event_ids)),
                         step.screenshot_id,
                         1 if step.suppressed else 0,
                         1 if step.manual_edit else 0,
+                        1 if step.evidentiary else 0,
                     ),
                 )
                 step_id = cursor.lastrowid
                 assert step_id is not None
-                saved.append(
-                    DraftStep(
-                        id=step_id,
-                        sequence=i,
-                        text=step.text,
-                        source_event_ids=step.source_event_ids,
-                        screenshot_id=step.screenshot_id,
-                        suppressed=step.suppressed,
-                        manual_edit=step.manual_edit,
-                    )
-                )
+                saved.append(dataclasses.replace(step, id=step_id, sequence=i))
             self._conn.commit()
         return saved
 
-    def update_step_text(self, step_id: int, text: str) -> None:
+    def append_step(self, step: DraftStep) -> DraftStep:
+        """Insert a single step at the end of the list.
+
+        Used by the live step generator while a recording is in progress —
+        each new event either extends the previous step or starts a new
+        one via this method. Sequence is auto-assigned to ``MAX(sequence) + 1``.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) FROM draft_steps"
+            ).fetchone()
+            next_sequence = (row[0] or 0) + 1
+            cursor = self._conn.execute(
+                """
+                INSERT INTO draft_steps
+                    (sequence, action, result, source_event_ids, screenshot_id,
+                     suppressed, manual_edit, evidentiary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    next_sequence,
+                    step.action,
+                    step.result,
+                    json.dumps(list(step.source_event_ids)),
+                    step.screenshot_id,
+                    1 if step.suppressed else 0,
+                    1 if step.manual_edit else 0,
+                    1 if step.evidentiary else 0,
+                ),
+            )
+            new_id = cursor.lastrowid
+            assert new_id is not None
+            self._conn.commit()
+        return dataclasses.replace(step, id=new_id, sequence=next_sequence)
+
+    def extend_step_sources(
+        self,
+        step_id: int,
+        *,
+        extra_event_ids: tuple[int, ...],
+        screenshot_id: int | None = None,
+    ) -> None:
+        """Append more source events (and optionally a screenshot) to a step.
+
+        Used when the live generator decides a new event collapses into
+        the previous step (rapid double-click on the same UIA element).
+        Does **not** touch the action/result text — preserves whatever
+        the live generator wrote first.
+        """
+        if not extra_event_ids:
+            return
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT source_event_ids, screenshot_id FROM draft_steps WHERE id = ?",
+                (step_id,),
+            ).fetchone()
+            if row is None:
+                msg = f"extend_step_sources: no step with id {step_id}"
+                raise StorageError(msg)
+            existing = tuple(json.loads(row["source_event_ids"]))
+            combined = (*existing, *extra_event_ids)
+            shot = row["screenshot_id"] if row["screenshot_id"] is not None else screenshot_id
+            self._conn.execute(
+                "UPDATE draft_steps SET source_event_ids = ?, screenshot_id = ? WHERE id = ?",
+                (json.dumps(list(combined)), shot, step_id),
+            )
+            self._conn.commit()
+
+    def update_step_fields(
+        self,
+        step_id: int,
+        *,
+        action: str | None = None,
+        result: str | None = None,
+    ) -> None:
+        """Update the action and/or result columns and mark the step manual.
+
+        Either or both fields may be supplied; ``None`` means "leave alone".
+        """
+        if action is None and result is None:
+            return
+        sets: list[str] = []
+        params: list[object] = []
+        if action is not None:
+            sets.append("action = ?")
+            params.append(action)
+        if result is not None:
+            sets.append("result = ?")
+            params.append(result)
+        sets.append("manual_edit = 1")
+        params.append(step_id)
         with self._lock:
             self._conn.execute(
-                "UPDATE draft_steps SET text = ?, manual_edit = 1 WHERE id = ?",
-                (text, step_id),
+                f"UPDATE draft_steps SET {', '.join(sets)} WHERE id = ?",
+                params,
             )
             self._conn.commit()
 
@@ -416,6 +496,19 @@ class SessionRepository:
             self._conn.execute(
                 "UPDATE draft_steps SET suppressed = ? WHERE id = ?",
                 (1 if suppressed else 0, step_id),
+            )
+            self._conn.commit()
+
+    def set_step_evidentiary(self, step_id: int, *, evidentiary: bool) -> None:
+        """Mark or unmark a step as evidentiary.
+
+        Downstream report-builder tools query this flag to pull the
+        examiner-curated subset of steps into the final forensic report.
+        """
+        with self._lock:
+            self._conn.execute(
+                "UPDATE draft_steps SET evidentiary = ? WHERE id = ?",
+                (1 if evidentiary else 0, step_id),
             )
             self._conn.commit()
 
@@ -428,6 +521,125 @@ class SessionRepository:
                     (i, step_id),
                 )
             self._conn.commit()
+
+    def merge_steps(self, *, primary_id: int, other_id: int) -> DraftStep:
+        """Merge ``other_id`` into ``primary_id``; delete the other row.
+
+        The merged step keeps ``primary_id`` and its screenshot. Source
+        event ids are concatenated (primary first, other appended). The
+        action and result strings are joined with a space; empties on
+        either side are dropped. Marks the result as ``manual_edit``
+        because the user has clearly intervened.
+        """
+        with self._lock:
+            primary_row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (primary_id,)
+            ).fetchone()
+            other_row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (other_id,)
+            ).fetchone()
+            if primary_row is None or other_row is None:
+                msg = f"merge_steps: missing step ({primary_id=}, {other_id=})"
+                raise StorageError(msg)
+
+            primary = self._row_to_step(primary_row)
+            other = self._row_to_step(other_row)
+
+            combined_ids = (*primary.source_event_ids, *other.source_event_ids)
+            merged_action = _join_text(primary.action, other.action)
+            merged_result = _join_text(primary.result, other.result)
+
+            self._conn.execute(
+                """
+                UPDATE draft_steps
+                SET action = ?, result = ?, source_event_ids = ?, manual_edit = 1
+                WHERE id = ?
+                """,
+                (merged_action, merged_result, json.dumps(list(combined_ids)), primary_id),
+            )
+            self._conn.execute("DELETE FROM draft_steps WHERE id = ?", (other_id,))
+            self._conn.commit()
+        return dataclasses.replace(
+            primary,
+            action=merged_action,
+            result=merged_result,
+            source_event_ids=combined_ids,
+            manual_edit=True,
+        )
+
+    def split_step(self, step_id: int) -> tuple[DraftStep, DraftStep]:
+        """Split ``step_id`` into two: first source event vs the rest.
+
+        The original step keeps its ``id`` and screenshot but loses every
+        source event after the first. A new row is inserted directly after
+        with the remaining source events. Both halves are marked
+        ``manual_edit``.
+
+        Raises :class:`StorageError` if the step has fewer than two
+        source events (nothing to split).
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (step_id,)
+            ).fetchone()
+            if row is None:
+                msg = f"split_step: no step with id {step_id}"
+                raise StorageError(msg)
+            step = self._row_to_step(row)
+            if len(step.source_event_ids) < _MIN_SOURCE_IDS_TO_SPLIT:
+                count = len(step.source_event_ids)
+                msg = f"split_step: step {step_id} has only {count} source event(s); cannot split"
+                raise StorageError(msg)
+
+            head = (step.source_event_ids[0],)
+            tail = step.source_event_ids[1:]
+
+            # Bump every later step's sequence by 1 so we can insert the
+            # tail half directly after this one without sequence collisions.
+            self._conn.execute(
+                "UPDATE draft_steps SET sequence = sequence + 1 WHERE sequence > ?",
+                (step.sequence,),
+            )
+
+            cursor = self._conn.execute(
+                """
+                INSERT INTO draft_steps
+                    (sequence, action, result, source_event_ids, screenshot_id,
+                     suppressed, manual_edit)
+                VALUES (?, ?, ?, ?, ?, 0, 1)
+                """,
+                (
+                    step.sequence + 1,
+                    step.action,
+                    step.result,
+                    json.dumps(list(tail)),
+                    step.screenshot_id,
+                ),
+            )
+            new_id = cursor.lastrowid
+            assert new_id is not None
+
+            # Trim the original to just the first event; keep its text so
+            # the user can edit each half independently.
+            self._conn.execute(
+                """
+                UPDATE draft_steps
+                SET source_event_ids = ?, manual_edit = 1
+                WHERE id = ?
+                """,
+                (json.dumps(list(head)), step_id),
+            )
+            self._conn.commit()
+
+        first = dataclasses.replace(step, source_event_ids=head, manual_edit=True)
+        second = dataclasses.replace(
+            step,
+            id=new_id,
+            sequence=step.sequence + 1,
+            source_event_ids=tail,
+            manual_edit=True,
+        )
+        return first, second
 
     def set_step_screenshot(self, step_id: int, screenshot_id: int | None) -> None:
         with self._lock:
@@ -484,11 +696,13 @@ class SessionRepository:
         return DraftStep(
             id=row["id"],
             sequence=row["sequence"],
-            text=row["text"],
+            action=row["action"],
+            result=row["result"],
             source_event_ids=tuple(json.loads(row["source_event_ids"])),
             screenshot_id=row["screenshot_id"],
             suppressed=bool(row["suppressed"]),
             manual_edit=bool(row["manual_edit"]),
+            evidentiary=bool(row["evidentiary"]),
         )
 
     @staticmethod
@@ -514,10 +728,18 @@ class SessionRepository:
             role=row["role"],
             confidence=row["confidence"],
             method=row["method"],
+            bounding_rect=_loads_rect(row["bounding_rect"]),
+            owner_process_name=row["owner_process_name"],
         )
 
 
 # --------------------------------------------------------------- free funcs
+
+
+def _join_text(left: str, right: str) -> str:
+    """Concatenate two step texts, dropping empties."""
+    parts = [s.strip() for s in (left, right) if s and s.strip()]
+    return " ".join(parts)
 
 
 def list_sessions(workspace_root: Path) -> list[tuple[str, SessionManifest]]:

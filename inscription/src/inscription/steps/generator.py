@@ -42,18 +42,37 @@ class _Action:
     kind: EventKind
     source_event_ids: tuple[int, ...]
     screenshot_id: int | None
-    text: str
+    action: str
+    result: str = ""
 
 
 def _render_click(event: RawEvent, resolved: ResolvedElement | None) -> str:
     verb = "Double-click" if event.kind is EventKind.DOUBLE_CLICK else "Click"
     if resolved and resolved.confidence >= HIGH_CONFIDENCE and resolved.name:
         control = resolved.control_type or "item"
-        in_window = f" in {event.window_title}" if event.window_title else ""
+        in_window = _in_window_clause(event, resolved)
         return f"{verb} the {resolved.name!r} {control}{in_window}.".replace("''", "'")
     if event.window_title:
         return f"{verb} in the {event.window_title} window."
     return f"{verb} the mouse."
+
+
+def _in_window_clause(event: RawEvent, resolved: ResolvedElement) -> str:
+    """Return the `` in <window>`` suffix, or `` `` when it would mislead.
+
+    The suffix is dropped when the resolved element's owning process
+    differs from the foreground process at click time. That catches the
+    common taskbar / Start menu / Alt-Tab case: UIA resolves the shell
+    element correctly, but the foreground window is whatever app the
+    user was previously in — gluing the two together produces phrases
+    like "Click the 'Python' Button in World of Warcraft."
+    """
+    if not event.window_title:
+        return ""
+    owner = resolved.owner_process_name
+    if owner and event.process_name and owner != event.process_name:
+        return ""
+    return f" in {event.window_title}"
 
 
 def _render_key_press(event: RawEvent) -> str:
@@ -73,11 +92,18 @@ def _render_marker(event: RawEvent) -> str:
     return event.text or "Marker placed."
 
 
-def render_step_text(
+def _render_scroll(event: RawEvent) -> str:
+    descriptor = event.text or "scroll"
+    if event.window_title:
+        return f"Scroll {descriptor} in {event.window_title}."
+    return f"Scroll {descriptor}."
+
+
+def render_step_action(
     event: RawEvent,
     resolved: ResolvedElement | None,
 ) -> str:
-    """Build a single-step text string from an event + its resolved element.
+    """Build a single-step Action string from an event + its resolved element.
 
     The wording scales with resolver confidence:
 
@@ -93,6 +119,8 @@ def render_step_text(
         return _render_window_focus(event)
     if event.kind is EventKind.MARKER:
         return _render_marker(event)
+    if event.kind is EventKind.SCROLL:
+        return _render_scroll(event)
     return f"{event.kind.value}."
 
 
@@ -123,7 +151,8 @@ class StepGenerator:
                     DraftStep(
                         id=None,
                         sequence=0,  # reassigned by replace_steps
-                        text=preserved.text,
+                        action=preserved.action,
+                        result=preserved.result,
                         source_event_ids=action.source_event_ids,
                         screenshot_id=action.screenshot_id,
                         manual_edit=True,
@@ -134,7 +163,8 @@ class StepGenerator:
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text=action.text,
+                    action=action.action,
+                    result=action.result,
                     source_event_ids=action.source_event_ids,
                     screenshot_id=action.screenshot_id,
                     manual_edit=False,
@@ -172,7 +202,8 @@ class StepGenerator:
                         kind=last.kind,
                         source_event_ids=(*last.source_event_ids, event.id or 0),
                         screenshot_id=last.screenshot_id or event.screenshot_id,
-                        text=last.text,
+                        action=last.action,
+                        result=last.result,
                     )
                     previous_click_ts = ts
                     continue
@@ -184,7 +215,7 @@ class StepGenerator:
                     kind=event.kind,
                     source_event_ids=(event.id or 0,),
                     screenshot_id=event.screenshot_id,
-                    text=render_step_text(event, resolved),
+                    action=render_step_action(event, resolved),
                 )
             )
         return actions

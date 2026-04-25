@@ -6,6 +6,10 @@ Inscription's design and user-facing documentation.
 
 - `architecture.md` — canonical architecture reference (layers, data model,
   event flow).
+- `integration.md` — the contract Inscription exposes to the planned
+  three-tool suite (CaseForge → Inscription → report builder): session
+  folder layout, SQLite schema, the `evidentiary` flag, and the
+  forward-only-migration stability promise.
 - `phase1-plan.md` — historical record of the earlier forensic-focused Phase
   1. Kept for provenance; superseded by the Scribe-style pivot in 0.3.
 - `user-guide.md` — planned for beta.

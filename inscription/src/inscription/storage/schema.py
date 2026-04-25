@@ -35,14 +35,16 @@ CREATE TABLE session_info (
 );
 
 CREATE TABLE resolved_elements (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT,
-    control_type    TEXT,
-    automation_id   TEXT,
-    class_name      TEXT,
-    role            TEXT,
-    confidence      REAL    NOT NULL DEFAULT 0,
-    method          TEXT    NOT NULL DEFAULT 'none'
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                 TEXT,
+    control_type         TEXT,
+    automation_id        TEXT,
+    class_name           TEXT,
+    role                 TEXT,
+    confidence           REAL    NOT NULL DEFAULT 0,
+    method               TEXT    NOT NULL DEFAULT 'none',
+    bounding_rect        TEXT,   -- JSON [left, top, right, bottom] in screen px
+    owner_process_name   TEXT    -- process that owns the element, for taskbar/shell
 );
 
 CREATE TABLE screenshot_artifacts (
@@ -76,18 +78,55 @@ CREATE INDEX idx_raw_events_sequence ON raw_events(sequence);
 CREATE TABLE draft_steps (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     sequence          INTEGER NOT NULL,
-    text              TEXT    NOT NULL DEFAULT '',
+    action            TEXT    NOT NULL DEFAULT '',
+    result            TEXT    NOT NULL DEFAULT '',
     source_event_ids  TEXT    NOT NULL DEFAULT '[]',
     screenshot_id     INTEGER REFERENCES screenshot_artifacts(id),
     suppressed        INTEGER NOT NULL DEFAULT 0,
-    manual_edit       INTEGER NOT NULL DEFAULT 0
+    manual_edit       INTEGER NOT NULL DEFAULT 0,
+    evidentiary       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_draft_steps_sequence ON draft_steps(sequence);
 """
 
 
-MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """Add ``resolved_elements.bounding_rect`` for crop-and-highlight."""
+    conn.execute("ALTER TABLE resolved_elements ADD COLUMN bounding_rect TEXT")
+
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Add ``resolved_elements.owner_process_name`` for cross-process click text."""
+    conn.execute("ALTER TABLE resolved_elements ADD COLUMN owner_process_name TEXT")
+
+
+def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
+    """Add ``draft_steps.evidentiary`` for downstream report-builder integration."""
+    conn.execute("ALTER TABLE draft_steps ADD COLUMN evidentiary INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
+    """Split draft_steps.text into action + result columns.
+
+    Forensic exam notes are kept as Time/Date / Action / Result; the
+    single ``text`` field can't carry the Action vs. Result semantics
+    cleanly, so we split it. Existing rows get their full text moved into
+    ``action`` and an empty ``result``; the user can then fill in
+    observations as needed.
+    """
+    conn.execute("ALTER TABLE draft_steps ADD COLUMN action TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE draft_steps ADD COLUMN result TEXT NOT NULL DEFAULT ''")
+    conn.execute("UPDATE draft_steps SET action = text")
+    conn.execute("ALTER TABLE draft_steps DROP COLUMN text")
+
+
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    2: _migrate_v1_to_v2,
+    3: _migrate_v2_to_v3,
+    4: _migrate_v3_to_v4,
+    5: _migrate_v4_to_v5,
+}
 
 
 def current_schema_version(conn: sqlite3.Connection) -> int:

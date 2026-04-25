@@ -7,12 +7,13 @@ that drive the controller.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
-    QLabel,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QMessageBox,
     QStackedWidget,
     QVBoxLayout,
@@ -20,10 +21,17 @@ from PySide6.QtWidgets import (
 )
 
 from inscription.config import Config
+from inscription.ui.app_icon import build_app_icon
 from inscription.ui.controller import SessionController
+from inscription.ui.mini_dock import MiniDock
 from inscription.ui.recorder_bar import RecorderBar
+from inscription.ui.tray import SystemTrayController, quit_application
+from inscription.ui.welcome import WelcomePage
 from inscription.ui.workspace import SessionWorkspaceWidget
 from inscription.version import __version__
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +39,25 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """Top-level application window."""
 
-    def __init__(self, *, auto_start_controller: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        auto_start_controller: bool = True,
+        case_dir: Path | None = None,
+    ) -> None:
         super().__init__()
         self._config = Config()
+        self._case_dir = case_dir
 
-        self.setWindowTitle(f"Inscription {__version__}")
+        title = f"Inscription {__version__}"
+        if case_dir is not None:
+            title = f"Inscription {__version__} — Case: {case_dir.name}"
+        self.setWindowTitle(title)
         self.resize(1200, 800)
 
         self._recorder_bar = RecorderBar(self)
         self._workspace = SessionWorkspaceWidget(self)
+        self._welcome = WelcomePage(self)
         central = self._build_central()
         self.setCentralWidget(central)
 
@@ -48,17 +66,43 @@ class MainWindow(QMainWindow):
             recorder_bar=self._recorder_bar,
             parent_widget=self,
             parent=self,
+            case_dir=case_dir,
         )
         self._controller.session_opened.connect(self._on_session_opened)
         self._controller.session_closed.connect(self._on_session_closed)
+        self._welcome.open_session_requested.connect(self._controller.start)
+        self._welcome.open_existing_requested.connect(self._controller.open_session_by_slug)
+
+        # Compact-overlay + tray bring-up. Both stay hidden until the
+        # examiner asks for them (or the close-to-tray path triggers).
+        self._force_quit = False
+        self._mini_dock = MiniDock()
+        self._mini_dock.expand_requested.connect(self._on_dock_expand)
+        self._mini_dock.hide_requested.connect(self._mini_dock.hide)
+        self._mini_dock.moved.connect(self._on_dock_moved)
+        self._restore_dock_position()
+        self._controller.latest_step_changed.connect(self._mini_dock.show_step)
+        self._controller.recording_state_changed.connect(self._mini_dock.set_recording)
+        self._controller.session_opened.connect(self._mini_dock.set_session_name)
+        self._controller.session_closed.connect(lambda: self._mini_dock.set_session_name(None))
+
+        self._tray = SystemTrayController(icon=build_app_icon(), parent=self)
+        self._tray.show_window_requested.connect(self._on_tray_show_window)
+        self._tray.compact_mode_requested.connect(self.enter_compact_mode)
+        self._tray.toggle_recording_requested.connect(self._recorder_bar.toggle_record)
+        self._tray.quit_requested.connect(self._on_tray_quit)
+        self._controller.session_opened.connect(self._tray.set_session)
+        self._controller.session_closed.connect(lambda: self._tray.set_session(None))
+        if self._tray.is_supported():
+            self._tray.show()
 
         self._build_menus()
         self._build_statusbar()
         self._restore_geometry()
+        self._welcome.refresh(self._controller.workspace_root())
 
         if auto_start_controller:
             self.show()
-            self._controller.start()
 
     # ------------------------------------------------------------------ UI
 
@@ -70,24 +114,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._recorder_bar)
 
         self._stack = QStackedWidget(container)
-
-        placeholder = QWidget(container)
-        ph_layout = QVBoxLayout(placeholder)
-        ph_layout.setContentsMargins(48, 48, 48, 48)
-        title = QLabel("Inscription", placeholder)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = title.font()
-        font.setPointSize(24)
-        font.setBold(True)
-        title.setFont(font)
-        hint = QLabel("No session open. Use File → Open Session to begin.", placeholder)
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ph_layout.addStretch(1)
-        ph_layout.addWidget(title)
-        ph_layout.addWidget(hint)
-        ph_layout.addStretch(2)
-
-        self._stack.addWidget(placeholder)
+        self._stack.addWidget(self._welcome)
         self._stack.addWidget(self._workspace)
 
         layout.addWidget(self._stack, 1)
@@ -95,47 +122,105 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         menubar = self.menuBar()
+        self._build_file_menu(menubar)
+        self._build_edit_menu(menubar)
+        self._build_view_menu(menubar)
+        self._build_help_menu(menubar)
 
+    def _build_file_menu(self, menubar: QMenuBar) -> None:
         file_menu = menubar.addMenu("&File")
-
-        open_action = QAction("&Open Session…", self)
-        open_action.setShortcut(QKeySequence("Ctrl+O"))
-        open_action.setStatusTip("Open or create a session")
-        open_action.triggered.connect(self._controller.start)
-        file_menu.addAction(open_action)
-
-        regen_action = QAction("&Regenerate Steps", self)
-        regen_action.setShortcut(QKeySequence("Ctrl+R"))
-        regen_action.setStatusTip("Rebuild draft steps from raw events")
-        regen_action.triggered.connect(self._controller.regenerate_steps)
-        file_menu.addAction(regen_action)
-
+        self._add_action(
+            file_menu, "&Open Session…", self._controller.start,
+            shortcut="Ctrl+O", tip="Open or create a session",
+        )
+        self._add_action(
+            file_menu, "&Regenerate Steps", self._controller.regenerate_steps,
+            shortcut="Ctrl+R", tip="Rebuild draft steps from raw events",
+        )
+        # No keyboard shortcut — Ctrl+Shift+R is the global "toggle recording"
+        # hotkey registered by SessionController, and this action would
+        # collide with it.
+        self._add_action(
+            file_menu, "Rewrite with &AI…", self._controller.rewrite_with_llm,
+            tip="Rewrite draft steps using the configured local LLM",
+        )
         file_menu.addSeparator()
-
-        export_html_action = QAction("Export as &HTML…", self)
-        export_html_action.setShortcut(QKeySequence("Ctrl+E"))
-        export_html_action.setStatusTip("Export the current session as HTML")
-        export_html_action.triggered.connect(self._controller.export_html)
-        file_menu.addAction(export_html_action)
-
+        self._add_action(
+            file_menu, "Export as &HTML…", self._controller.export_html,
+            shortcut="Ctrl+E", tip="Export the current session as HTML",
+        )
+        self._add_action(
+            file_menu, "Export as &Markdown…", self._controller.export_markdown,
+            tip="Export the current session as Markdown (paste into tickets, wikis, PRs)",
+        )
+        self._add_action(
+            file_menu, "Export &Forensic notes…", self._controller.export_forensic_notes,
+            tip="Export a printable Time/Date · Action · Result notes table",
+        )
         file_menu.addSeparator()
-
+        self._add_action(
+            file_menu, "&Verify integrity…", self._controller.verify_integrity,
+            tip="Re-hash every screenshot and compare to the stored SHA-256",
+        )
+        file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        menubar.addMenu("&Edit")
-        menubar.addMenu("&View")
+    def _build_edit_menu(self, menubar: QMenuBar) -> None:
+        edit_menu = menubar.addMenu("&Edit")
+        self._add_action(
+            edit_menu, "&Settings…", self._controller.open_settings,
+            shortcut="Ctrl+,", tip="Examiner identity and LLM endpoint",
+        )
 
+    def _build_view_menu(self, menubar: QMenuBar) -> None:
+        view_menu = menubar.addMenu("&View")
+        self._auto_screenshot_action = QAction("Auto-screenshot every action", self)
+        self._auto_screenshot_action.setCheckable(True)
+        self._auto_screenshot_action.setChecked(self._controller.auto_screenshot_enabled())
+        self._auto_screenshot_action.setStatusTip(
+            "When off, only the Ctrl+Shift+P snapshot hotkey produces images. "
+            "Takes effect on the next recording."
+        )
+        self._auto_screenshot_action.toggled.connect(self._controller.set_auto_screenshot)
+        view_menu.addAction(self._auto_screenshot_action)
+        view_menu.addSeparator()
+        self._add_action(
+            view_menu, "&Compact mode", self.enter_compact_mode,
+            shortcut="Ctrl+Shift+D",
+            tip="Hide the main window and show a small always-on-top step tracker",
+        )
+        self._add_action(
+            view_menu, "Hide to system tray", self._hide_to_tray,
+            tip="Close the main window — Inscription keeps running in the tray",
+        )
+
+    def _build_help_menu(self, menubar: QMenuBar) -> None:
         help_menu = menubar.addMenu("&Help")
-        about_action = QAction("&About Inscription", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        self._add_action(help_menu, "&About Inscription", self._show_about)
+        self._add_action(
+            help_menu, "About &Qt", lambda: QMessageBox.aboutQt(self, "About Qt"),
+        )
 
-        about_qt_action = QAction("About &Qt", self)
-        about_qt_action.triggered.connect(lambda: QMessageBox.aboutQt(self, "About Qt"))
-        help_menu.addAction(about_qt_action)
+    def _add_action(
+        self,
+        menu: QMenu,
+        title: str,
+        slot: object,
+        *,
+        shortcut: str | None = None,
+        tip: str | None = None,
+    ) -> QAction:
+        action = QAction(title, self)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        if tip:
+            action.setStatusTip(tip)
+        action.triggered.connect(slot)
+        menu.addAction(action)
+        return action
 
     def _build_statusbar(self) -> None:
         self.statusBar().showMessage("Ready")
@@ -170,18 +255,97 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- Slots
 
     def _on_session_opened(self, name: str) -> None:
-        self.setWindowTitle(f"Inscription {__version__} — {name}")
+        case_prefix = f"Case: {self._case_dir.name} — " if self._case_dir else ""
+        self.setWindowTitle(f"Inscription {__version__} — {case_prefix}{name}")
         self.statusBar().showMessage(f"Session {name!r} open")
         self._stack.setCurrentIndex(1)
 
     def _on_session_closed(self) -> None:
-        self.setWindowTitle(f"Inscription {__version__}")
+        title = f"Inscription {__version__}"
+        if self._case_dir is not None:
+            title = f"{title} — Case: {self._case_dir.name}"
+        self.setWindowTitle(title)
         self.statusBar().showMessage("No session open")
+        self._welcome.refresh(self._controller.workspace_root())
         self._stack.setCurrentIndex(0)
+
+    # ----------------------------------------------------- Tray / dock
+
+    def enter_compact_mode(self) -> None:
+        """Hide the main window and float the dock; expanded by clicking it."""
+        self._mini_dock.show()
+        self._mini_dock.raise_()
+        self.hide()
+
+    def _on_dock_expand(self) -> None:
+        self._mini_dock.hide()
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _on_dock_moved(self, x: int, y: int) -> None:
+        self._config.mini_dock_position = (x, y)
+        self._config.sync()
+
+    def _restore_dock_position(self) -> None:
+        saved = self._config.mini_dock_position
+        if saved is None:
+            # First-run default: top-right of the primary screen.
+            screen = self.screen() or self._mini_dock.screen()
+            geometry = screen.availableGeometry() if screen is not None else None
+            if geometry is not None:
+                self._mini_dock.adjustSize()
+                margin = 24
+                self._mini_dock.move(
+                    geometry.right() - self._mini_dock.width() - margin,
+                    geometry.top() + margin,
+                )
+            return
+        self._mini_dock.move(saved[0], saved[1])
+
+    def _on_tray_show_window(self) -> None:
+        self._mini_dock.hide()
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _hide_to_tray(self) -> None:
+        """Same path the X button takes when the tray is available."""
+        if not self._tray.is_supported():
+            return
+        self.hide()
+        self._maybe_show_first_close_hint()
+
+    def _maybe_show_first_close_hint(self) -> None:
+        if self._config.tray_close_hint_shown:
+            return
+        self._tray.show_message(
+            "Inscription is still running",
+            "The recorder lives in the system tray. Right-click the tray "
+            "icon to bring the window back or quit.",
+        )
+        self._config.tray_close_hint_shown = True
+        self._config.sync()
+
+    def _on_tray_quit(self) -> None:
+        self._force_quit = True
+        self.close()
+        quit_application()
 
     # -------------------------------------------------------------- Events
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802  (Qt API)
+        # X-button on the title bar: hide-to-tray instead of quit, so a
+        # mid-recording examiner who reflexively closes the window
+        # doesn't lose their session. The tray menu's Quit sets
+        # ``_force_quit`` to break out of this path.
+        if not self._force_quit and self._tray.is_supported():
+            event.ignore()
+            self.hide()
+            self._maybe_show_first_close_hint()
+            return
+        self._mini_dock.hide()
+        self._tray.hide()
         self._controller.shutdown()
         self._save_geometry()
         logger.info("Main window closing")

@@ -3,46 +3,54 @@
 The sink writes the PNG to disk, inserts a ``screenshot_artifacts`` row,
 inserts a ``resolved_elements`` row (when a click resolved something), and
 finally inserts the ``raw_events`` row that references them.
+
+Screenshot filenames are derived from the event's ``processed_at``
+timestamp with microsecond precision. The engine worker processes events
+serially and each ``mss.grab`` takes milliseconds, so two events cannot
+land in the same microsecond. That makes filenames unique without a
+sink-local counter that has to be seeded correctly across recording
+restarts.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from inscription.capture.engine import EnrichedEvent
     from inscription.storage import SessionRepository
 
 logger = logging.getLogger(__name__)
 
 
-def _filename_for(event_seq: int) -> str:
-    return f"event-{event_seq:06d}.png"
+def _filename_for(processed_at: datetime) -> str:
+    """Return a sortable, collision-resistant PNG filename.
+
+    Example: ``event-20260424T072150-123456.png``.
+    """
+    return "event-" + processed_at.strftime("%Y%m%dT%H%M%S-%f") + ".png"
 
 
 class SessionSink:
     """Persists captures to a live :class:`SessionRepository`.
 
     Implements the :class:`inscription.capture.engine.CaptureSink` protocol
-    by duck-typing — it provides a ``handle`` method with the right signature.
+    by duck-typing — it provides a ``handle`` method with the right
+    signature.
     """
 
     def __init__(self, repository: SessionRepository) -> None:
         self._repo = repository
-        self._lock = threading.Lock()
-        self._counter = 0
 
     def handle(self, event: EnrichedEvent) -> None:
         raw = event.raw
-        with self._lock:
-            self._counter += 1
-            counter = self._counter
 
         screenshot_id: int | None = None
         if raw.png_bytes:
-            relative = f"screenshots/{_filename_for(counter)}"
+            relative = f"screenshots/{_filename_for(event.processed_at)}"
             target = self._repo.session.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(raw.png_bytes)
@@ -60,7 +68,7 @@ class SessionSink:
             stored = self._repo.add_resolved_element(event.resolved)
             resolved_id = stored.id
 
-        self._repo.append_event(
+        persisted = self._repo.append_event(
             kind=raw.kind,
             occurred_at=raw.occurred_at,
             button=raw.button,
@@ -73,9 +81,15 @@ class SessionSink:
             screenshot_id=screenshot_id,
             resolved_element_id=resolved_id,
         )
+        # Stamp the ids onto the event so downstream sinks (e.g. the live
+        # step generator) can reference them without re-querying.
+        event.persisted_event_id = persisted.id
+        event.persisted_screenshot_id = screenshot_id
+        event.persisted_resolved_id = resolved_id
         logger.debug(
-            "Persisted %s event (screenshot=%s, resolved=%s)",
+            "Persisted %s event id=%s (screenshot=%s, resolved=%s)",
             raw.kind.value,
+            persisted.id,
             screenshot_id,
             resolved_id,
         )

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from inscription.capture.engine import CaptureSource
 from inscription.capture.events import RawCaptureEvent
 from inscription.model import EventKind, utcnow
-from inscription.platform import create_screen_capturer
+from inscription.platform import create_screen_capturer, safe_close
 
 try:
     from pynput import mouse as _pynput_mouse
@@ -43,7 +43,8 @@ DOUBLE_CLICK_RADIUS_PX = 4
 class ClickSource(CaptureSource):
     """Convert pynput mouse press events into :class:`RawCaptureEvent`."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, auto_screenshot: bool = True) -> None:
+        self._auto_screenshot = auto_screenshot
         self._engine: CaptureEngine | None = None
         self._listener: Any = None
         self._lock = threading.Lock()
@@ -69,12 +70,8 @@ class ClickSource(CaptureSource):
             except Exception as exc:
                 logger.warning("Error stopping mouse listener: %s", exc)
             self._listener = None
-        if self._screen is not None:
-            try:
-                self._screen.close()
-            except Exception as exc:
-                logger.warning("Error closing screen capturer: %s", exc)
-            self._screen = None
+        safe_close(self._screen)
+        self._screen = None
         self._engine = None
 
     def _on_click(self, x: int, y: int, button: Any, pressed: bool) -> None:
@@ -85,7 +82,10 @@ class ClickSource(CaptureSource):
             return
         button_name = getattr(button, "name", str(button))
         kind = self._classify(x, y, button_name)
-        png, w, h = self._capture()
+        if self._auto_screenshot:
+            png, w, h = self._capture(int(x), int(y))
+        else:
+            png, w, h = None, 0, 0
         engine.submit(
             RawCaptureEvent(
                 kind=kind,
@@ -119,8 +119,8 @@ class ClickSource(CaptureSource):
             self._last_click_button = button_name
             return EventKind.CLICK
 
-    def _capture(self) -> tuple[bytes | None, int, int]:
-        """Grab a screenshot on the listener thread.
+    def _capture(self, x: int, y: int) -> tuple[bytes | None, int, int]:
+        """Grab a screenshot of whichever monitor holds ``(x, y)``.
 
         The ``ScreenCapturer`` is created lazily on first click because
         ``mss`` must be owned by the thread that uses it, and pynput's
@@ -129,8 +129,8 @@ class ClickSource(CaptureSource):
         if self._screen is None:
             self._screen = create_screen_capturer()
         try:
-            image = self._screen.capture()
+            image = self._screen.capture_at(x, y)
         except Exception:
-            logger.exception("Screenshot failed on click")
+            logger.exception("Screenshot failed on click at (%d, %d)", x, y)
             return None, 0, 0
         return image.png_bytes, image.width, image.height

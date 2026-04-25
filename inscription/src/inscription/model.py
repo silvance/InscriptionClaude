@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 5
 
 
 class EventKind(StrEnum):
@@ -27,6 +27,7 @@ class EventKind(StrEnum):
     CLICK = "click"
     DOUBLE_CLICK = "double_click"
     KEY_PRESS = "key_press"
+    SCROLL = "scroll"
     WINDOW_FOCUS = "window_focus"
     MARKER = "marker"
 
@@ -81,6 +82,10 @@ class ResolvedElement:
     ``confidence`` is 0..1. 0 means "nothing useful"; 0.9+ means UIA gave us
     a named, typed control. Step generation uses it to decide how specific
     the draft step text can be.
+
+    ``bounding_rect`` is ``(left, top, right, bottom)`` in screen pixels
+    when UIA supplies one, letting the exporter crop the screenshot tight
+    around the clicked element.
     """
 
     id: int | None
@@ -91,6 +96,13 @@ class ResolvedElement:
     role: str | None = None
     confidence: float = 0.0
     method: str = "none"  # "uia" | "foreground-only" | "none"
+    bounding_rect: tuple[int, int, int, int] | None = None
+    #: Process that actually owns the element (from UIA's ``process_id``).
+    #: When this differs from the foreground process — taskbar, Start menu,
+    #: Alt-Tab switcher clicks — step generation drops the "in X window"
+    #: suffix, which would otherwise glue the shell element onto whatever
+    #: app the user was previously using.
+    owner_process_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -134,19 +146,29 @@ class RawEvent:
 class DraftStep:
     """A draft step produced from one or more raw events.
 
+    ``action`` is what the examiner did, in imperative voice — the same
+    column forensic exam notes use ("Loaded E01 file into FTK Imager").
+    ``result`` is the outcome or observation — the second column on those
+    notes ("Hash verified"). ``result`` is optional; many steps are pure
+    actions without a separate observation.
+
     ``source_event_ids`` records the events that contributed, so regenerating
     steps can preserve manual edits where the underlying events are unchanged.
     ``suppressed`` is a soft-delete: a suppressed step is kept for undo and
-    is excluded from export.
+    is excluded from export. ``evidentiary`` is the integration flag that
+    downstream report-builder tools query on — it's the examiner saying
+    "this step matters for the final report".
     """
 
     id: int | None
     sequence: int
-    text: str
+    action: str
+    result: str = ""
     source_event_ids: tuple[int, ...] = ()
     screenshot_id: int | None = None
     suppressed: bool = False
     manual_edit: bool = False
+    evidentiary: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

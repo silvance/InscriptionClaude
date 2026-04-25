@@ -28,6 +28,7 @@ from inscription.platform.screen import (
     MonitorInfo,
     ScreenCapturer,
     create_screen_capturer,
+    safe_close,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "create_foreground_inspector",
     "create_hotkey_manager",
     "create_screen_capturer",
+    "safe_close",
 ]

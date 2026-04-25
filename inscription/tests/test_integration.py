@@ -98,7 +98,7 @@ def test_capture_generate_export(tmp_path) -> None:
 
         steps = generate_steps(repo)
         assert steps
-        assert "Submit" in steps[0].text
+        assert "Submit" in steps[0].action
 
         doc = export_html(repo)
     finally:

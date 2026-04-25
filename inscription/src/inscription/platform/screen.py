@@ -60,6 +60,22 @@ class ScreenCapturer(ABC):
                 ``None`` means primary monitor (typically index 1).
         """
 
+    def capture_at(self, x: int, y: int) -> CapturedImage:
+        """Capture whichever monitor contains ``(x, y)``.
+
+        Useful for click events on multi-monitor setups: the default
+        implementation scans :meth:`list_monitors` for the monitor whose
+        bbox covers the point and calls :meth:`capture` with that index.
+        Falls back to the primary monitor if no monitor matches.
+        """
+        for mon in self.list_monitors():
+            if mon.index == 0:
+                # Index 0 is the virtual "all monitors" entry in mss; skip.
+                continue
+            if mon.left <= x < mon.left + mon.width and mon.top <= y < mon.top + mon.height:
+                return self.capture(monitor_index=mon.index)
+        return self.capture()
+
     def capture_to_file(self, target: Path, monitor_index: int | None = None) -> CapturedImage:
         """Capture and write the PNG bytes to ``target``.
 
@@ -127,7 +143,9 @@ class MssScreenCapturer(ScreenCapturer):
         try:
             self._sct.close()
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Error closing mss: %s", exc)
+            # mss on Windows routinely fails ReleaseDC on shutdown — the DC
+            # is already gone by the time cleanup runs. It's harmless.
+            logger.debug("mss close raised %s (harmless on Windows)", exc)
 
 
 class _NullScreenCapturer(ScreenCapturer):
@@ -164,3 +182,18 @@ def create_screen_capturer() -> ScreenCapturer:
             exc,
         )
         return _NullScreenCapturer()
+
+
+def safe_close(capturer: ScreenCapturer | None) -> None:
+    """Close ``capturer`` if non-None, swallowing any error.
+
+    Sources call this from their ``stop()`` paths — losing the capturer
+    cleanly should never propagate up and trip the engine's source-stop
+    handler.
+    """
+    if capturer is None:
+        return
+    try:
+        capturer.close()
+    except Exception as exc:
+        logger.warning("Error closing screen capturer: %s", exc)

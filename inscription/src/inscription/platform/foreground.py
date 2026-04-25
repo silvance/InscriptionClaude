@@ -27,6 +27,15 @@ class ForegroundInfo:
     process_id: int | None
     #: Absolute path to the executable, if resolvable.
     process_path: str | None = None
+    #: Native window handle (Windows ``HWND``). Used as the stable identity
+    #: for a window — the title can change while the user types in it, but
+    #: the handle only changes when focus moves to a different window.
+    hwnd: int | None = None
+    #: Screen-space rectangle ``(left, top, right, bottom)`` of the
+    #: foreground window, when resolvable. Lets the window-focus capture
+    #: source grab the monitor the window actually lives on instead of
+    #: always falling back to the primary display.
+    window_rect: tuple[int, int, int, int] | None = None
 
 
 class ForegroundInspector(ABC):
@@ -85,11 +94,18 @@ class _WindowsForegroundInspector(ForegroundInspector):
             except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
                 logger.debug("psutil lookup failed for PID %d: %s", process_id, exc)
 
+        rect = wintypes.RECT()
+        window_rect: tuple[int, int, int, int] | None = None
+        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            window_rect = (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+
         return ForegroundInfo(
             window_title=title,
             process_name=process_name,
             process_id=process_id,
             process_path=process_path,
+            hwnd=int(hwnd),
+            window_rect=window_rect,
         )
 
 

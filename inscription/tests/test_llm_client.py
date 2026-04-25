@@ -1,0 +1,183 @@
+"""LLMClient: HTTP against a stdlib http.server fixture.
+
+The real thing talks to Ollama / LM Studio. We spin up a tiny handler
+that returns a canned OpenAI-compatible response (or an error) and
+assert the client parses it, surfaces useful errors, and bails cleanly
+on timeouts.
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import threading
+import time
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import TYPE_CHECKING
+
+import pytest
+
+from inscription.llm.client import LLMClient, LLMConfigError, LLMRequestError, LLMResponseError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
+
+def _ok_response(content: str) -> dict[str, object]:
+    return {
+        "choices": [{"message": {"role": "assistant", "content": content}, "index": 0}],
+    }
+
+
+@contextmanager
+def _server(
+    handler_fn: Callable[[BaseHTTPRequestHandler], None],
+) -> Iterator[str]:
+    """Run a single-threaded HTTP server and yield its base URL."""
+
+    class _H(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            handler_fn(self)
+
+        def log_message(self, *args: object) -> None:  # silence stderr
+            return
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    server = HTTPServer(("127.0.0.1", port), _H)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}/v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def _send_json(handler: BaseHTTPRequestHandler, status: int, body: dict[str, object]) -> None:
+    payload = json.dumps(body).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
+# ----------------------------------------------------------- happy path
+
+
+def test_client_returns_assistant_content() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        length = int(h.headers["Content-Length"])
+        captured["body"] = json.loads(h.rfile.read(length))
+        captured["auth"] = h.headers.get("Authorization")
+        _send_json(h, 200, _ok_response('{"steps":[]}'))
+
+    with _server(handler) as url:
+        client = LLMClient(base_url=url, model="granite3.3:8b", timeout_s=5, api_key="sk-x")
+        content = client.chat(system="sys", user="usr")
+
+    assert content == '{"steps":[]}'
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["model"] == "granite3.3:8b"
+    assert body["messages"][0]["role"] == "system"
+    assert body["messages"][1]["content"] == "usr"
+    assert body["response_format"] == {"type": "json_object"}
+    assert captured["auth"] == "Bearer sk-x"
+
+
+# ----------------------------------------------------------- error paths
+
+
+def test_client_surfaces_http_5xx_as_request_error() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        _send_json(h, 500, {"error": "boom"})
+
+    with _server(handler) as url:
+        client = LLMClient(base_url=url, model="m", timeout_s=5)
+        with pytest.raises(LLMRequestError, match="500"):
+            client.chat(system="s", user="u")
+
+
+def test_client_surfaces_connection_refused() -> None:
+    # Bind then close a port to guarantee it's unoccupied.
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    client = LLMClient(base_url=f"http://127.0.0.1:{port}/v1", model="m", timeout_s=2)
+    with pytest.raises(LLMRequestError):
+        client.chat(system="s", user="u")
+
+
+def test_client_surfaces_malformed_json() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        payload = b"not a json body"
+        h.send_response(200)
+        h.send_header("Content-Type", "application/json")
+        h.send_header("Content-Length", str(len(payload)))
+        h.end_headers()
+        h.wfile.write(payload)
+
+    with _server(handler) as url:
+        client = LLMClient(base_url=url, model="m", timeout_s=5)
+        with pytest.raises(LLMResponseError, match="non-JSON"):
+            client.chat(system="s", user="u")
+
+
+def test_client_surfaces_missing_choices() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        _send_json(h, 200, {"unexpected": "shape"})
+
+    with _server(handler) as url:
+        client = LLMClient(base_url=url, model="m", timeout_s=5)
+        with pytest.raises(LLMResponseError, match="missing"):
+            client.chat(system="s", user="u")
+
+
+def test_client_surfaces_empty_content() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        _send_json(h, 200, _ok_response(""))
+
+    with _server(handler) as url:
+        client = LLMClient(base_url=url, model="m", timeout_s=5)
+        with pytest.raises(LLMResponseError, match="empty"):
+            client.chat(system="s", user="u")
+
+
+# ----------------------------------------------------------- config
+
+
+def test_empty_base_url_rejected() -> None:
+    with pytest.raises(LLMConfigError):
+        LLMClient(base_url="", model="m", timeout_s=5)
+
+
+def test_empty_model_rejected() -> None:
+    with pytest.raises(LLMConfigError):
+        LLMClient(base_url="http://x/v1", model="", timeout_s=5)
+
+
+def test_bad_timeout_rejected() -> None:
+    with pytest.raises(LLMConfigError):
+        LLMClient(base_url="http://x/v1", model="m", timeout_s=0)
+
+
+# ----------------------------------------------------------- timeout
+
+
+def test_client_times_out_on_slow_server() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        time.sleep(0.8)
+        _send_json(h, 200, _ok_response("{}"))
+
+    with _server(handler) as url:
+        client = LLMClient(base_url=url, model="m", timeout_s=0.15)
+        with pytest.raises(LLMRequestError, match="timed out"):
+            client.chat(system="s", user="u")

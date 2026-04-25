@@ -7,6 +7,166 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Markdown export.** Sibling of the HTML exporter; lands in
+  File → Export as Markdown… Output is GitHub-flavoured Markdown
+  (numbered headings + image refs into a sibling assets folder), so
+  guides paste cleanly into tickets, wikis, PR descriptions, and
+  most note-taking apps. Re-uses the same crop+highlight rendering
+  as the HTML exporter.
+- **`--case-dir` CLI flag** for the upcoming CaseForge integration.
+  ``python -m inscription --case-dir <path>`` makes that path the
+  workspace root for the run; the case-folder name shows in the
+  title bar. Per-run only — does not persist to ``config.ini``.
+- **`docs/integration.md`** — the contract Inscription exposes to the
+  three-tool suite (CaseForge → Inscription → report builder):
+  session folder layout, schema v4 column-by-column, the
+  ``draft_steps.evidentiary`` query Tool 3 reads against, and the
+  forward-only-migration stability promise.
+- **Evidentiary checkbox** in the step editor wires ``DraftStep.evidentiary``
+  to a UI affordance. Toggling persists immediately via
+  ``SessionRepository.set_step_evidentiary``.
+
+### Added
+
+- **Auto-screenshot toggle + manual snapshot hotkey.** New View menu
+  item *Auto-screenshot every action* (default on, persists in
+  ``config.ini`` under ``capture/auto_screenshot``). When unchecked,
+  ``ClickSource`` and ``WindowFocusSource`` skip their screenshot
+  grab — only the new **Ctrl+Shift+P** snapshot hotkey produces
+  images. Useful for forensic workflows where the examiner wants
+  screenshots only at deliberate moments (hash verifications, registry
+  entries, etc.) and for keeping session sizes lean. The LLM rewrite
+  is unaffected either way — it never consumed screenshots in the
+  first place.
+- ``EventKind.MARKER`` events from the snapshot hotkey carry the
+  captured PNG, so the manual snapshot lands as a normal step in the
+  draft list with a screenshot attached.
+- **Evidentiary flag on draft steps** (storage layer). New
+  ``DraftStep.evidentiary`` / ``SessionRepository.set_step_evidentiary``;
+  schema bumped 3 → 4 with an ALTER TABLE. Designed for the upcoming
+  three-tool suite — the report builder will query this flag to pull
+  the examiner-curated subset of steps into the final forensic report.
+  The UI toggle for this lands in a follow-up.
+
+### Added
+
+- **Editor upgrades.** Three new affordances on the step list:
+  - **Drag-to-reorder.** Move steps with the mouse; sequence numbers
+    persist via ``SessionRepository.reorder_steps``.
+  - **Merge with next step.** Right-click a step → "Merge with next
+    step" combines its ``source_event_ids`` with the following step,
+    deletes the second row, marks the result ``manual_edit``.
+  - **Split off first event.** Right-click a step that covers more
+    than one source event → "Split off first event" peels the first
+    event into its own step and keeps the rest in a sibling row
+    inserted directly after.
+- ``SessionRepository.merge_steps`` and ``split_step`` back the new
+  context-menu actions; both mark touched rows as ``manual_edit`` so
+  later AI/regenerate passes preserve them verbatim.
+
+### Added
+
+- **Scroll capture.** New ``ScrollSource`` (``pynput.on_scroll``)
+  records mouse-wheel scrolling. Continuous scrolling is debounced —
+  a flick produces one ``EventKind.SCROLL`` event with the cumulative
+  amount encoded as ``"down 8"`` / ``"up 3, right 2"``. No screenshot
+  (scrolling is fluid; a frozen mid-scroll frame isn't useful), but
+  the engine still attaches foreground info so the rendered step
+  reads *"Scroll down 8 in Google Chrome."*. Closes the gap that was
+  causing the LLM to fabricate "navigated through tabs" when the user
+  was just scrolling.
+
+### Changed
+
+- **LLM system prompt is stricter** about not inventing actions that
+  aren't in the input timeline. Specifically forbids fabricating
+  scrolling, tab switching, or navigation when no events back them up.
+
+### Added
+
+- **Rewrite with AI.** File → Rewrite with AI… hands the session's raw
+  events + UIA metadata to a local LLM (or any OpenAI-compatible server)
+  and replaces the rule-based draft steps with the model's rewritten
+  version. Merges related events into single imperative sentences where
+  the rule-based generator is forced to emit one step per click.
+- ``inscription.llm`` package: ``LLMClient`` (stdlib-only ``urllib``
+  POST against a chat-completions endpoint), ``build_user_prompt`` /
+  ``parse_response`` (tolerates markdown code fences, drops steps whose
+  ``source_event_ids`` don't match any real event so the guide layer's
+  provenance stays clean), ``StepRewriter`` (preserves manual edits,
+  picks each merged step's screenshot from its last source event).
+- Config keys ``llm.enabled``, ``llm.base_url`` (defaults to
+  ``http://localhost:11434/v1`` — Ollama), ``llm.model`` (defaults to
+  ``granite3.3:8b``), ``llm.timeout_s``, ``llm.api_key``.
+- Modal progress dialog + QThread worker so the rewrite runs off the
+  UI thread; any failure (connection, timeout, malformed response)
+  leaves the existing draft intact and shows the error to the user.
+
+### Added
+
+- **Crop-and-highlight screenshots** in the HTML export. Each step's
+  image is a tight crop around the clicked UIA element with a red click
+  ring drawn at the press point instead of a full-screen PNG. Makes
+  multi-step guides dramatically more readable on-screen and in print.
+- ``ResolvedElement.bounding_rect`` stores the UIA
+  ``BoundingRectangle`` reported at resolve time; schema bumped to v2
+  with an ALTER TABLE migration that leaves v1 sessions working.
+- New module ``inscription.render`` with ``crop_highlight`` — a pure
+  Pillow function that crops a PNG around an element rect, pads it,
+  clamps to image bounds, and draws a translucent click marker. Keeps
+  the export path Qt-free.
+- ``Pillow>=10`` dependency.
+
+### Changed
+
+- ``WindowFocusSource`` now keys "did the window change?" on the native
+  window handle (``hwnd``) rather than the window title. Typing in
+  Notepad updates the title once per keystroke
+  (``*h - Notepad`` → ``*he - Notepad`` → …), and the old keying treated
+  each title update as a new window switch. ``ForegroundInfo`` gains an
+  ``hwnd`` field; non-Windows inspectors leave it ``None`` and the source
+  falls back to title + process name.
+
+### Fixed
+
+- Taskbar / Start-menu / Alt-Tab clicks no longer render misleading step
+  text. Previously UIA would correctly name the shell element (e.g.
+  *'Python 3.14 - 1 running window' Button*), but step text would glue it
+  onto whatever foreground app was still behind it —
+  *"Click the 'Python 3.14 - 1 running window' Button in World of Warcraft."*
+  ``ResolvedElement`` now carries ``owner_process_name`` (populated from
+  UIA's ``process_id``); when it differs from the foreground process, the
+  step text drops the ``in <window>`` suffix. Schema bumped 2 → 3 with an
+  ALTER TABLE migration.
+- Window-focus screenshots now grab the monitor the newly-focused
+  window is actually on. Previously the source fell through to
+  ``ScreenCapturer.capture()`` (no args), which always returned
+  ``mss.monitors[1]`` — on many Windows multi-monitor setups that's the
+  wrong display, producing a guide where every "Switch to …" step
+  showed a screen the user wasn't actually working on. ``ForegroundInfo``
+  now carries ``window_rect`` (from Win32 ``GetWindowRect``), and
+  ``WindowFocusSource`` feeds the rect's center to ``capture_at`` to
+  pick the right monitor.
+- ``SessionSink`` no longer crashes with
+  ``sqlite3.IntegrityError: UNIQUE constraint failed: screenshot_artifacts.relative_path``
+  when a user stops and restarts recording on the same open session.
+  Screenshot filenames are now derived from the event's ``processed_at``
+  timestamp (microsecond precision); the engine's single-threaded worker
+  plus the cost of ``mss.grab`` guarantees uniqueness without a seeded
+  counter.
+- Click screenshots now capture the monitor under the click point instead
+  of always capturing the primary monitor. ``ScreenCapturer.capture_at(x, y)``
+  walks ``list_monitors`` and picks the monitor whose bbox contains the
+  point; ``ClickSource`` calls it with the pynput coordinates.
+- ``pywinauto`` is now declared as a Windows-only dependency so the UIA
+  resolver actually loads on the target platform. Previously the install
+  silently skipped it and every click fell back to "Click in the X window"
+  text.
+- ``mss`` shutdown no longer emits a spurious ``ReleaseDC`` warning on
+  Windows; the known-harmless exception is logged at DEBUG.
+
 ### Changed
 
 - **Screenshots are now captured on the source's own thread** rather than
