@@ -1,19 +1,19 @@
 # Inscription integration surface
 
-Inscription is the middle tool of a planned three-tool forensic-exam
-suite:
+Inscription is the capture / notes tool inside a planned multi-tool
+forensic-exam suite:
 
 | Tool         | Role                                                                         |
 |--------------|------------------------------------------------------------------------------|
 | **CaseForge**   | Builds the case folder, captures examiner identity / org / exam metadata. |
+| **CaseGuide**   | Reads the customer scope, generates a best-practice action checklist that Inscription surfaces as suggestions. |
 | **Inscription** | Records the examiner's actual desktop work into editable, exportable steps. |
 | **Tool 3**      | Pulls evidentiary-marked notes from Inscription + admin data from CaseForge into the final report template. |
 
-This document is the contract Inscription exposes to the other two
-tools. As long as the rules below hold, CaseForge and the report
-builder can integrate against Inscription's filesystem layout and
-SQLite schema directly — no IPC, no shared library, no cross-process
-calls required.
+This document is the contract Inscription exposes to the other tools.
+As long as the rules below hold, the rest of the suite can integrate
+against Inscription's filesystem layout and SQLite schema directly —
+no IPC, no shared library, no cross-process calls required.
 
 ---
 
@@ -26,6 +26,8 @@ folders inside it; the report builder reads both.
 ```
 <case-root>/
 ├── case.json                        ← written by CaseForge (admin metadata)
+├── .caseguide/
+│   └── suggestions.json             ← written by CaseGuide (recommended actions)
 ├── <session-slug>/                  ← one folder per Inscription session
 │   ├── session.db                   ← SQLite — see "Schema" below
 │   ├── manifest.json
@@ -60,6 +62,99 @@ read it either, but is reserving the filename for the future "Case:
 <name>" indicator to pull a friendlier title from. CaseForge is free
 to define the schema for this file; Tool 3 reads it for admin metadata
 when assembling the report.
+
+### `.caseguide/suggestions.json` (CaseGuide owns this)
+
+CaseGuide is the LLM-assisted exam coach: it reads the customer scope
+out of `case.json`, picks the relevant procedural playbooks (NIST
+SP 800-86, SWGDE, vendor-specific guides, internal SOPs, …), and
+emits a tailored checklist of recommended actions. Inscription reads
+this file **read-only** and surfaces the entries as a "Suggested next
+actions" panel in the workspace; clicking a suggestion creates a
+pre-filled draft step in the open session.
+
+The contract:
+
+- **Path**: `<case-root>/.caseguide/suggestions.json`. The hidden
+  `.caseguide/` directory is reserved for this tool, the same way
+  `.inscription/` is reserved for Inscription's per-session lock.
+- **Inscription never writes** to this directory. CaseGuide may
+  rewrite the file when scope changes (e.g. additional evidence
+  found mid-exam); Inscription should re-read on file change.
+- **Missing file is fine**. Inscription's suggestions panel is
+  optional UI that hides itself when the file isn't present, so a
+  case that runs without CaseGuide just looks like the regular
+  Inscription experience.
+
+#### File schema
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-04-25T14:30:00+00:00",
+  "scope_summary": "CSAM possession; Windows 11 laptop; full-disk image acquired.",
+  "playbooks": ["NIST SP 800-86", "Internal SOP DF-CSAM-2024"],
+  "suggestions": [
+    {
+      "id": "verify-image-hash",
+      "category": "verification",
+      "priority": "required",
+      "action": "Verify the SHA-256 of the acquired E01 against the acquisition log.",
+      "expected_result": "Hash matches the value recorded at acquisition time.",
+      "rationale": "Establishes evidence integrity before any analysis touches the image.",
+      "references": ["NIST SP 800-86 §5.2.2"],
+      "depends_on": []
+    },
+    {
+      "id": "export-registry-hives",
+      "category": "acquisition",
+      "priority": "recommended",
+      "action": "Export SYSTEM, SOFTWARE, NTUSER.DAT, and UsrClass.dat for offline analysis.",
+      "expected_result": "Hives written to <case-root>/derived/registry/ with SHA-256 logged.",
+      "rationale": "Registry artefacts feed timeline reconstruction and user-activity analysis.",
+      "references": ["SWGDE Best Practices for Computer Forensic Acquisitions §4.7"],
+      "depends_on": ["verify-image-hash"]
+    }
+  ]
+}
+```
+
+Field-by-field:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `schema_version` | int | Bumps when this contract changes. v1 today. |
+| `generated_at` | ISO 8601 string | When CaseGuide produced this file. |
+| `scope_summary` | string | Short, human-readable; shown as the panel header. |
+| `playbooks` | string[] | Display-only; identifies which standards / SOPs the suggestions came from. |
+| `suggestions[].id` | string | Stable across regenerations; used by completion tracking (see below). |
+| `suggestions[].category` | string | Free-form bucket for grouping (`acquisition`, `verification`, `analysis`, `reporting`, …). |
+| `suggestions[].priority` | enum | `required` \| `recommended` \| `optional`. Drives visual weight. |
+| `suggestions[].action` | string | Imperative sentence — drops directly into the step's Action field. |
+| `suggestions[].expected_result` | string | Optional placeholder for the step's Result field; the examiner overwrites with the real observation. |
+| `suggestions[].rationale` | string | Optional one-liner the panel can show as a tooltip / expandable. |
+| `suggestions[].references` | string[] | Optional citations to the standard / SOP / vendor doc. |
+| `suggestions[].depends_on` | string[] | Optional list of other `id`s. Inscription may grey out a suggestion until its dependencies are completed. |
+
+#### Completion tracking (deferred)
+
+The first iteration is **read-only on Inscription's side**: the panel
+shows suggestions and creates draft steps from them, but does not
+write back which suggestions have been acted on. CaseGuide can
+approximate completeness by scanning sessions and matching draft-step
+text against suggestion `action` strings.
+
+When that's not good enough, the next revision of this contract will
+add either:
+
+- a `suggestion_id` column on `draft_steps` (schema bump), or
+- a `<case-root>/.caseguide/completion.json` written by Inscription
+  mapping `suggestion_id → {session_slug, step_id, completed_at}`.
+
+The second option is preferred because it stays additive — no schema
+bump, no migration — and is symmetric with how CaseGuide writes its
+own file. This is left unimplemented until CaseGuide actually exists
+and the real shape of "completion" is clear.
 
 ---
 
@@ -254,6 +349,8 @@ schema is **v5** as of this writing. Past version surfaces:
 ## What Inscription does NOT do
 
 - Write to `case.json` (CaseForge's territory).
+- Write to `.caseguide/` (CaseGuide's territory; reads only, and the
+  panel hides itself when no `suggestions.json` is present).
 - Move sessions between case directories. CaseForge or a separate tool
   should handle this if it's ever needed.
 - Listen on a network port. All integration is via the filesystem.
