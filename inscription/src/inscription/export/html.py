@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from inscription.model import ExportDocument, utcnow
 from inscription.render import crop_highlight
+from inscription.util.timefmt import format_clock_time
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -228,7 +229,7 @@ def _render_step(
     action_text = html.escape(step.action).replace("\n", "<br>")
     parts = ["<li>", '<div class="step-body">']
     if primary is not None:
-        ts = html.escape(primary.occurred_at.astimezone().strftime("%H:%M:%S"))
+        ts = html.escape(format_clock_time(primary.occurred_at))
         parts.append(f'<div class="step-time">{ts}</div>')
     parts.append(f'<p class="step-action">{action_text}</p>')
     if step.result.strip():

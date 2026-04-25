@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from inscription.export.html import _primary_event, _stage_step_asset
 from inscription.model import ExportDocument, utcnow
+from inscription.util.timefmt import format_local
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -304,10 +305,8 @@ def _render_case_header(
     case_reference: str | None,
 ) -> str:
     info = session.info
-    started = info.started_at.astimezone().strftime("%d %B %Y · %H:%M")
-    ended = (
-        info.ended_at.astimezone().strftime("%d %B %Y · %H:%M") if info.ended_at else "in progress"
-    )
+    started = format_local(info.started_at, "%d %B %Y · %H:%M")
+    ended = format_local(info.ended_at, "%d %B %Y · %H:%M") if info.ended_at else "in progress"
     return (
         '<header class="case-header">\n'
         f"<h1>{html.escape(info.name)}</h1>\n"
@@ -334,9 +333,10 @@ def _render_row(
 ) -> tuple[str, str | None]:
     """Render one ``<tr>`` row plus the updated date-rollover state."""
     primary = _primary_event(step, events_by_id)
-    when = primary.occurred_at.astimezone() if primary is not None else None
-    date_label = when.strftime("%d %b %Y") if when is not None else None
-    time_label = when.strftime("%H:%M:%S") if when is not None else "—"
+    date_label = (
+        format_local(primary.occurred_at, "%d %b %Y") if primary is not None else None
+    )
+    time_label = format_local(primary.occurred_at, "%H:%M:%S") if primary is not None else "—"
 
     new_date: str | None = last_date_label
     if date_label and date_label != last_date_label:

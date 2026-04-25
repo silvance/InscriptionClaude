@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from inscription.model import ExportDocument, utcnow
 from inscription.render import crop_highlight
+from inscription.util.timefmt import format_clock_time
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -125,9 +126,7 @@ def _render_step(
 ) -> str:
     action_text = step.action.strip() or "_(empty step)_"
     primary = _primary_event(step, events_by_id)
-    timestamp = (
-        primary.occurred_at.astimezone().strftime("%H:%M:%S") if primary is not None else None
-    )
+    timestamp = format_clock_time(primary.occurred_at) if primary is not None else None
     heading = f"## Step {index}"
     if timestamp:
         heading = f"{heading} — {timestamp}"

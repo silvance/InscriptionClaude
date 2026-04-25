@@ -19,6 +19,8 @@ from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QWidget
 
+from inscription.util.timefmt import format_clock_time
+
 if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
@@ -211,5 +213,5 @@ def _step_timestamp(step: DraftStep, event_times: dict[int, datetime]) -> str | 
     for eid in step.source_event_ids:
         ts = event_times.get(eid)
         if ts is not None:
-            return ts.astimezone().strftime("%H:%M:%S")
+            return format_clock_time(ts)
     return None

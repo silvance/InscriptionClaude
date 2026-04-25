@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inscription.util.timefmt import format_clock_time
+
 if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
@@ -51,8 +53,7 @@ def _heading_for(step: DraftStep, started_at: datetime | None) -> str:
     base = f"Step {step.sequence:02d}"
     if started_at is None:
         return base
-    local = started_at.astimezone().strftime("%H:%M:%S")
-    return f"{base} · {local}"
+    return f"{base} · {format_clock_time(started_at)}"
 
 
 class StepEditorPanel(QWidget):
