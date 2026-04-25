@@ -188,6 +188,58 @@ pyinstaller packaging/inscription.spec --noconfirm
 Output lands in `dist/Inscription/`. Copy that folder to the target machine
 and run `Inscription.exe`. An Inno Setup installer is planned for beta.
 
+## Deployment topologies
+
+Forensic exam workflows often involve a host workstation plus one or
+more analysis VMs. Inscription is designed to run wherever the work is
+happening — install it on the box that owns the keyboard and mouse for
+the workflow you want to capture.
+
+### 1. Bare metal (recommended for demos and host-side work)
+
+Install Inscription on the workstation directly. UIA element resolution,
+screenshots, and hotkeys all work as designed against any application
+on that machine. No extra setup.
+
+### 2. Inside a VM (recommended for live exam work)
+
+When the actual examination happens inside a Windows VM (analysis
+sandbox, mounted-image host, isolated network), install Inscription
+**inside the VM**. UIA can only see controls in the OS it's running in,
+so this is the only way to get full-fidelity step text for actions
+performed against tools running in the VM.
+
+Two operational tips that pay for themselves on the first case:
+
+- **Put the case directory on a shared folder** between host and VM
+  (VirtualBox shared folders / VMware HGFS / Hyper-V Enhanced Session
+  redirect). Launch with
+  `python -m inscription --case-dir "Z:\Cases\HSV-2026-0317"` (or
+  whatever the shared mount is). Notes, screenshots, and the forensic
+  PDF land on the host filesystem in real time, survive VM reverts,
+  and the report builder running on the host can read from the same
+  path.
+- **Local LLM placement**: install Ollama / LM Studio inside the VM
+  for the simplest setup, *or* run it on the host and point the VM's
+  `llm.base_url` at the host's IP if your VM has host-only networking.
+  The latter avoids a second model download but requires you to open
+  the LLM port to the VM.
+
+### 3. Inscription on host while you work in a VM (not recommended)
+
+This works mechanically — the host's mouse and keyboard listeners fire
+when you click into the VM viewer window, and screenshots include the
+VM's display pixels — but step text quality drops noticeably because
+UIA can't see inside the guest. Actions read as
+*"Click in the VirtualBox window"* instead of
+*"Click the 'Save' button"*. Acceptable as a stopgap, not a recommended
+mode.
+
+A future enhancement could ship a thin in-VM agent that streams
+events back to a host-side Inscription, getting the best of both
+worlds. The integration contract for that is reserved but unbuilt;
+see `docs/integration.md`.
+
 ## License
 
 TBD — pending decision on distribution scope.
