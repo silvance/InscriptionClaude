@@ -1,16 +1,21 @@
 """Tiny reusable Qt builders for CaseForge.
 
-Centralises a couple of small forms-and-dialogs idioms — the
-``primary_tool`` combo box especially, since two screens (NewCaseDialog
-and CaseView) need to render the same picker against the same
-:data:`caseforge.model.PRIMARY_TOOL_CHOICES` list.
+Two clusters of helpers:
+
+- The primary-tool combo box — used by both NewCaseDialog and
+  CaseView so the picker stays consistent against
+  :data:`caseforge.model.PRIMARY_TOOL_CHOICES`.
+- A typography / chip palette (display title, section heading,
+  muted text, caption, badge) backed by QSS role properties in
+  :mod:`caseforge.ui.style`. Mirrors Inscription's and CaseGuide's
+  helpers so the three suite tools share a visual vocabulary.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QFrame, QLabel
 
 from caseforge.model import PRIMARY_TOOL_CHOICES
 
@@ -44,3 +49,67 @@ def primary_tool_value(combo: QComboBox) -> str:
     """Return the stable id of the currently-selected primary tool."""
     data = combo.currentData()
     return str(data) if data is not None else ""
+
+
+# -------------------------------------------------------- typography
+
+
+def display_label(text: str, parent: QWidget | None = None) -> QLabel:
+    """The largest text on a page — the page or pane title."""
+    label = QLabel(text, parent)
+    label.setProperty("role", "display-title")
+    return label
+
+
+def page_subtitle(text: str, parent: QWidget | None = None, *, wrap: bool = True) -> QLabel:
+    """One-line muted subtitle that sits under a display-title."""
+    label = QLabel(text, parent)
+    label.setProperty("role", "page-subtitle")
+    label.setWordWrap(wrap)
+    return label
+
+
+def section_label(text: str, parent: QWidget | None = None) -> QLabel:
+    """A small uppercase heading used to title editor / form sections."""
+    label = QLabel(text, parent)
+    font = label.font()
+    font.setBold(True)
+    label.setFont(font)
+    label.setProperty("role", "section-title")
+    return label
+
+
+def muted_label(text: str, parent: QWidget | None = None, *, wrap: bool = True) -> QLabel:
+    """A label rendered in the palette's muted text colour."""
+    label = QLabel(text, parent)
+    label.setProperty("muted", "true")
+    label.setWordWrap(wrap)
+    return label
+
+
+def caption_label(text: str, parent: QWidget | None = None, *, wrap: bool = True) -> QLabel:
+    """Smaller-than-body muted text — captions, timestamps, footnotes."""
+    label = QLabel(text, parent)
+    label.setProperty("role", "caption")
+    label.setWordWrap(wrap)
+    return label
+
+
+def badge_label(
+    text: str,
+    parent: QWidget | None = None,
+    *,
+    role: str = "badge",
+) -> QLabel:
+    """A small chip label used for tags and inline status."""
+    label = QLabel(text, parent)
+    label.setProperty("role", role)
+    return label
+
+
+def horizontal_separator(parent: QWidget | None = None) -> QFrame:
+    """One-pixel horizontal rule styled by the QSS."""
+    rule = QFrame(parent)
+    rule.setProperty("role", "separator")
+    rule.setFrameShape(QFrame.Shape.NoFrame)
+    return rule

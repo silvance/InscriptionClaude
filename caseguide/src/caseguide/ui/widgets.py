@@ -1,10 +1,10 @@
-"""Tiny reusable Qt widget builders.
+"""Tiny reusable Qt builders for CaseGuide.
 
-Centralises the recurring label shapes — display titles, section
-headings, muted hints, captions, badges. Each builder sets a single
-property (``role`` or ``muted``) that the QSS in
-:mod:`inscription.ui.style` styles, so theme tweaks flow from the
-stylesheet instead of from grep-replacing colour codes.
+Mirror of Inscription's / CaseForge's typography palette so the
+three suite tools share a visual vocabulary. Each helper sets a
+single ``role`` (or ``muted``) property that the QSS in
+:mod:`caseguide.ui.style` styles, so theme tweaks flow from the
+stylesheet and not from grep-replacing colour codes.
 """
 
 from __future__ import annotations
@@ -43,11 +43,7 @@ def section_label(text: str, parent: QWidget | None = None) -> QLabel:
 
 
 def muted_label(text: str, parent: QWidget | None = None, *, wrap: bool = True) -> QLabel:
-    """A label rendered in the palette's muted text colour.
-
-    Used for hints, secondary timestamps, and counts that should sit
-    visually behind the primary content.
-    """
+    """A label rendered in the palette's muted text colour."""
     label = QLabel(text, parent)
     label.setProperty("muted", "true")
     label.setWordWrap(wrap)
@@ -68,12 +64,7 @@ def badge_label(
     *,
     role: str = "badge",
 ) -> QLabel:
-    """A small chip label used for tags, priority levels, and inline status.
-
-    ``role`` is one of ``"badge"`` (neutral), ``"badge-accent"``
-    (accent-coloured for "selected" / "primary" status), or
-    ``"badge-danger"`` (red for required / critical).
-    """
+    """A small chip label used for tags, priority levels, and inline status."""
     label = QLabel(text, parent)
     label.setProperty("role", role)
     return label
