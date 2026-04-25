@@ -27,9 +27,10 @@ CONFIG_FILE: Final = DATA_ROOT / "config.ini"
 LOG_DIR: Final = DATA_ROOT / "logs"
 WORKSPACE_DIR: Final = DATA_ROOT / "workspace"
 CACHE_DIR: Final = DATA_ROOT / "cache"
+TEMPLATES_DIR: Final = DATA_ROOT / "templates"
 
 
 def ensure_dirs() -> None:
     """Create all CaseForge data directories if they don't exist yet."""
-    for path in (DATA_ROOT, LOG_DIR, WORKSPACE_DIR, CACHE_DIR):
+    for path in (DATA_ROOT, LOG_DIR, WORKSPACE_DIR, CACHE_DIR, TEMPLATES_DIR):
         path.mkdir(parents=True, exist_ok=True)

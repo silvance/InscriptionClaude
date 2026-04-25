@@ -9,6 +9,7 @@ can hit Save after typing the name.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from caseforge.model import Case, ExaminerIdentity, ExamScope, utcnow
+from caseforge.templates import is_no_template, list_templates
 
 
 def _split_csv(text: str) -> list[str]:
@@ -161,7 +163,24 @@ class NewCaseDialog(QDialog):
         self._notes_edit.setPlaceholderText("Free-form intake notes for the examiner.")
         self._notes_edit.setMaximumHeight(120)
 
+        # Template picker drives all six fields below; selecting one
+        # overwrites whatever the user has typed so far.
+        self._templates = list_templates()
+        self._template_combo = QComboBox(page)
+        for template in self._templates:
+            self._template_combo.addItem(template.label, template.id)
+        self._template_combo.currentIndexChanged.connect(self._on_template_changed)
+
+        template_hint = QLabel(
+            "Picking a template fills the fields below — edit freely after.",
+            page,
+        )
+        template_hint.setStyleSheet("color: #6e6e73;")
+        template_hint.setWordWrap(True)
+
         form = QFormLayout()
+        form.addRow("Apply template", self._template_combo)
+        form.addRow("", template_hint)
         form.addRow("Exam type", self._exam_type_edit)
         form.addRow("Device classes", self._device_classes_edit)
         form.addRow("Evidence items", self._evidence_items_edit)
@@ -173,6 +192,22 @@ class NewCaseDialog(QDialog):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addLayout(form)
         return page
+
+    def _on_template_changed(self, index: int) -> None:
+        if index < 0 or index >= len(self._templates):
+            return
+        template = self._templates[index]
+        if is_no_template(template):
+            return
+        self._apply_scope(template.scope)
+
+    def _apply_scope(self, scope: ExamScope) -> None:
+        self._exam_type_edit.setText(scope.exam_type)
+        self._device_classes_edit.setText(_join_csv(scope.device_classes))
+        self._evidence_items_edit.setText(_join_csv(scope.evidence_items))
+        self._agencies_edit.setText(_join_csv(scope.agencies))
+        self._summary_edit.setPlainText(scope.summary)
+        self._notes_edit.setPlainText(scope.notes)
 
     # ------------------------------------------------------------- accept
 
