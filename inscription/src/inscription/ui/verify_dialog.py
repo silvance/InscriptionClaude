@@ -44,7 +44,7 @@ class IntegrityResultDialog(QDialog):
         )
 
         counts = QLabel(_counts_line(result), self)
-        counts.setStyleSheet("color: #6e6e73;")
+        counts.setProperty("muted", True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)

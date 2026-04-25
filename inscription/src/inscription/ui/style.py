@@ -120,6 +120,15 @@ QLabel {{
     color: {p.text};
 }}
 
+QLabel[muted="true"] {{
+    color: {p.text_muted};
+}}
+
+QLabel[role="section-title"] {{
+    color: {p.text_muted};
+    letter-spacing: 0.4px;
+}}
+
 *[role="card"] {{
     background-color: {p.surface};
     border: {BORDER_PX}px solid {p.border};

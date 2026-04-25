@@ -80,7 +80,8 @@ class SessionListDialog(QDialog):
             self,
         )
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty.setStyleSheet("color: #6e6e73; padding: 32px;")
+        self._empty.setStyleSheet("padding: 32px;")
+        self._empty.setProperty("muted", True)
         self._empty.setProperty("role", "card")
 
         self._stack = QStackedWidget(self)
@@ -185,7 +186,7 @@ class NewSessionDialog(QDialog):
             "by editing the manifest.",
             self,
         )
-        hint.setStyleSheet("color: #6e6e73;")
+        hint.setProperty("muted", True)
         hint.setWordWrap(True)
 
         buttons = QDialogButtonBox(

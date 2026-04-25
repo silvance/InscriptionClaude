@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inscription.ui.widgets import section_label
 from inscription.util.timefmt import format_clock_time
 
 if TYPE_CHECKING:
@@ -36,16 +37,6 @@ if TYPE_CHECKING:
 
 
 DEBOUNCE_MS = 600
-
-
-def _section_label(text: str, parent: QWidget) -> QLabel:
-    """A small bold heading used to title the editor's sections."""
-    label = QLabel(text, parent)
-    font = label.font()
-    font.setBold(True)
-    label.setFont(font)
-    label.setStyleSheet("color: #6e6e73; letter-spacing: 0.4px;")
-    return label
 
 
 def _heading_for(step: DraftStep, started_at: datetime | None) -> str:
@@ -76,10 +67,10 @@ class StepEditorPanel(QWidget):
         self._evidentiary_cb = self._build_evidentiary_cb()
         self._suppress_btn = self._build_suppress_btn()
 
-        self._heading_label = _section_label("Step", self)
-        self._action_label = _section_label("Action", self)
-        self._result_label = _section_label("Result", self)
-        self._screenshot_label = _section_label("Screenshot", self)
+        self._heading_label = section_label("Step", self)
+        self._action_label = section_label("Action", self)
+        self._result_label = section_label("Result", self)
+        self._screenshot_label = section_label("Screenshot", self)
 
         self._build_layout()
 

@@ -57,7 +57,7 @@ def _subtitle_label(card: QWidget) -> QLabel:
         "auto-generate an editable guide.",
         card,
     )
-    label.setStyleSheet("color: #6e6e73;")
+    label.setProperty("muted", True)
     label.setWordWrap(True)
     return label
 
@@ -109,7 +109,8 @@ class WelcomePage(QWidget):
         self._recent_list.itemActivated.connect(self._on_activated)
 
         self._empty_label = QLabel("No sessions yet — start one above.", card)
-        self._empty_label.setStyleSheet("color: #6e6e73; padding: 8px;")
+        self._empty_label.setProperty("muted", True)
+        self._empty_label.setStyleSheet("padding: 8px;")
         self._empty_label.setVisible(False)
 
         card_layout = QVBoxLayout(card)
