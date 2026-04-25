@@ -19,8 +19,15 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox, QWidget
+from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QInputDialog,
+    QMessageBox,
+    QWidget,
+)
 
 from inscription.capture import (
     CaptureEngine,
@@ -57,6 +64,8 @@ from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
 from inscription.ui.settings_dialog import SettingsDialog
+from inscription.ui.verify_dialog import IntegrityResultDialog
+from inscription.verify import verify_session_integrity
 from inscription.version import __version__
 
 if TYPE_CHECKING:
@@ -151,6 +160,35 @@ class SessionController(QObject):
     def open_settings(self) -> None:
         """Show the Settings dialog (examiner identity + LLM endpoint)."""
         SettingsDialog(self._config, parent=self._parent_widget).exec()
+
+    def verify_integrity(self) -> None:
+        """Re-hash every screenshot in the open session and report drift.
+
+        Disabled when no session is open; the menu wiring already
+        guards against that, but we double-check here to keep this
+        method safe for callers (hotkeys, scripts) that might not.
+        """
+        if self._repository is None:
+            QMessageBox.information(
+                self._parent_widget,
+                "No session",
+                "Open a session before running an integrity check.",
+            )
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = verify_session_integrity(self._repository)
+        except Exception:
+            logger.exception("Integrity check failed")
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(
+                self._parent_widget,
+                "Integrity check failed",
+                "Could not run the check. See logs for details.",
+            )
+            return
+        QApplication.restoreOverrideCursor()
+        IntegrityResultDialog(result, parent=self._parent_widget).exec()
 
     def shutdown(self) -> None:
         self._workspace.flush_pending()

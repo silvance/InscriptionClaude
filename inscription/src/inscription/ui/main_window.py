@@ -158,6 +158,11 @@ class MainWindow(QMainWindow):
             tip="Export a printable Time/Date · Action · Result notes table",
         )
         file_menu.addSeparator()
+        self._add_action(
+            file_menu, "&Verify integrity…", self._controller.verify_integrity,
+            tip="Re-hash every screenshot and compare to the stored SHA-256",
+        )
+        file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
