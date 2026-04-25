@@ -181,11 +181,14 @@ class SessionController(QObject):
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
         self._recorder_bar.set_recording(False)
+        self._register_toggle_hotkey()
+        self.session_opened.emit(repo.session.info.name)
+
+    def _register_toggle_hotkey(self) -> None:
         self._hotkeys.register(
             HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
             self._toggle_requested.emit,
         )
-        self.session_opened.emit(repo.session.info.name)
 
     def _close_session(self) -> None:
         if self._repository is None:
@@ -269,10 +272,7 @@ class SessionController(QObject):
         # Re-register just the toggle binding so Ctrl+Shift+R still works.
         self._hotkeys.unregister_all()
         if self._repository is not None:
-            self._hotkeys.register(
-                HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
-                self._toggle_requested.emit,
-            )
+            self._register_toggle_hotkey()
         self._recorder_bar.set_recording(False)
 
     @Slot()

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from inscription.capture.engine import CaptureSource
 from inscription.capture.events import RawCaptureEvent
 from inscription.model import EventKind, utcnow
-from inscription.platform import create_screen_capturer
+from inscription.platform import create_screen_capturer, safe_close
 
 if TYPE_CHECKING:
     from inscription.capture.engine import CaptureEngine
@@ -82,12 +82,8 @@ class WindowFocusSource(CaptureSource):
         if self._thread is not None:
             self._thread.join(timeout=2 * self._interval + 0.5)
             self._thread = None
-        if self._screen is not None:
-            try:
-                self._screen.close()
-            except Exception as exc:
-                logger.warning("Error closing screen capturer: %s", exc)
-            self._screen = None
+        safe_close(self._screen)
+        self._screen = None
         self._engine = None
 
     def _run(self) -> None:

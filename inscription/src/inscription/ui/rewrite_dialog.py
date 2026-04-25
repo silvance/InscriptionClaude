@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -38,7 +38,7 @@ class RewriteWorker(QThread):
     #: Emitted with a human-readable message on any failure.
     failed = Signal(str)
 
-    def __init__(self, rewriter: StepRewriter, parent: QThread | None = None) -> None:
+    def __init__(self, rewriter: StepRewriter, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._rewriter = rewriter
 

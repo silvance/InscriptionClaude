@@ -7,6 +7,7 @@ and lockfile management.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import sqlite3
@@ -290,18 +291,7 @@ class SessionRepository:
             self._conn.commit()
             element_id = cursor.lastrowid
         assert element_id is not None
-        return ResolvedElement(
-            id=element_id,
-            name=element.name,
-            control_type=element.control_type,
-            automation_id=element.automation_id,
-            class_name=element.class_name,
-            role=element.role,
-            confidence=element.confidence,
-            method=element.method,
-            bounding_rect=element.bounding_rect,
-            owner_process_name=element.owner_process_name,
-        )
+        return dataclasses.replace(element, id=element_id)
 
     def append_event(
         self,
@@ -393,17 +383,7 @@ class SessionRepository:
                 )
                 step_id = cursor.lastrowid
                 assert step_id is not None
-                saved.append(
-                    DraftStep(
-                        id=step_id,
-                        sequence=i,
-                        text=step.text,
-                        source_event_ids=step.source_event_ids,
-                        screenshot_id=step.screenshot_id,
-                        suppressed=step.suppressed,
-                        manual_edit=step.manual_edit,
-                    )
-                )
+                saved.append(dataclasses.replace(step, id=step_id, sequence=i))
             self._conn.commit()
         return saved
 

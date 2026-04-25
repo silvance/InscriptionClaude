@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from inscription.capture.engine import CaptureSource
 from inscription.capture.events import RawCaptureEvent
 from inscription.model import EventKind, utcnow
-from inscription.platform import create_screen_capturer
+from inscription.platform import create_screen_capturer, safe_close
 
 try:
     from pynput import mouse as _pynput_mouse
@@ -69,12 +69,8 @@ class ClickSource(CaptureSource):
             except Exception as exc:
                 logger.warning("Error stopping mouse listener: %s", exc)
             self._listener = None
-        if self._screen is not None:
-            try:
-                self._screen.close()
-            except Exception as exc:
-                logger.warning("Error closing screen capturer: %s", exc)
-            self._screen = None
+        safe_close(self._screen)
+        self._screen = None
         self._engine = None
 
     def _on_click(self, x: int, y: int, button: Any, pressed: bool) -> None:

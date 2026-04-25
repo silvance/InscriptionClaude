@@ -182,3 +182,18 @@ def create_screen_capturer() -> ScreenCapturer:
             exc,
         )
         return _NullScreenCapturer()
+
+
+def safe_close(capturer: ScreenCapturer | None) -> None:
+    """Close ``capturer`` if non-None, swallowing any error.
+
+    Sources call this from their ``stop()`` paths — losing the capturer
+    cleanly should never propagate up and trip the engine's source-stop
+    handler.
+    """
+    if capturer is None:
+        return
+    try:
+        capturer.close()
+    except Exception as exc:
+        logger.warning("Error closing screen capturer: %s", exc)

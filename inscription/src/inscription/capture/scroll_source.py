@@ -132,6 +132,3 @@ def _describe(dx: int, dy: int) -> str:
     if dx != 0:
         parts.append(f"{'right' if dx > 0 else 'left'} {abs(dx)}")
     return ", ".join(parts) if parts else "0"
-
-
-__all__ = ["DEBOUNCE_S", "ScrollSource"]
