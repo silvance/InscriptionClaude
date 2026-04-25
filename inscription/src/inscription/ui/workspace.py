@@ -24,6 +24,7 @@ class SessionWorkspaceWidget(QWidget):
 
     step_text_edited = Signal(int, str)
     step_suppressed = Signal(int, bool)
+    step_evidentiary_toggled = Signal(int, bool)
     steps_reordered = Signal(list)
     merge_requested = Signal(int, int)
     split_requested = Signal(int)
@@ -43,6 +44,7 @@ class SessionWorkspaceWidget(QWidget):
         self._list.split_requested.connect(self.split_requested)
         self._editor.text_edited.connect(self.step_text_edited)
         self._editor.step_suppressed.connect(self.step_suppressed)
+        self._editor.evidentiary_toggled.connect(self.step_evidentiary_toggled)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self._list)

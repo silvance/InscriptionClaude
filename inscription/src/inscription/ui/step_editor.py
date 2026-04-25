@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -35,6 +36,7 @@ class StepEditorPanel(QWidget):
 
     text_edited = Signal(int, str)  # step_id, text
     step_suppressed = Signal(int, bool)  # step_id, suppressed
+    evidentiary_toggled = Signal(int, bool)  # step_id, evidentiary
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -52,12 +54,20 @@ class StepEditorPanel(QWidget):
         self._screenshot.setStyleSheet("border: 1px solid #ccc; background: #fafafa;")
         self._screenshot.setText("No screenshot")
 
+        self._evidentiary_cb = QCheckBox("Mark as evidentiary", self)
+        self._evidentiary_cb.setToolTip(
+            "Flag this step for inclusion in the downstream forensic report."
+        )
+        self._evidentiary_cb.toggled.connect(self._emit_evidentiary)
+        self._evidentiary_cb.setEnabled(False)
+
         self._suppress_btn = QPushButton("Remove step", self)
         self._suppress_btn.setToolTip("Hide this step from the export")
         self._suppress_btn.clicked.connect(self._emit_suppressed)
         self._suppress_btn.setEnabled(False)
 
         controls = QHBoxLayout()
+        controls.addWidget(self._evidentiary_cb)
         controls.addStretch(1)
         controls.addWidget(self._suppress_btn)
 
@@ -92,6 +102,13 @@ class StepEditorPanel(QWidget):
         self._text.blockSignals(blocked)
         self._suppress_btn.setEnabled(True)
         self._suppress_btn.setText("Restore step" if step.suppressed else "Remove step")
+        # Set the checkbox without firing the toggled signal — otherwise
+        # selecting a step would write its current state right back to the
+        # repository and mark every selection as a "user action".
+        cb_blocked = self._evidentiary_cb.blockSignals(True)
+        self._evidentiary_cb.setChecked(step.evidentiary)
+        self._evidentiary_cb.blockSignals(cb_blocked)
+        self._evidentiary_cb.setEnabled(True)
         self._load_screenshot(screenshot, session_root)
 
     def clear(self) -> None:
@@ -104,6 +121,10 @@ class StepEditorPanel(QWidget):
         self._screenshot.clear()
         self._screenshot.setText("No screenshot")
         self._suppress_btn.setEnabled(False)
+        cb_blocked = self._evidentiary_cb.blockSignals(True)
+        self._evidentiary_cb.setChecked(False)
+        self._evidentiary_cb.blockSignals(cb_blocked)
+        self._evidentiary_cb.setEnabled(False)
 
     def flush_pending(self) -> None:
         if self._debounce.isActive():
@@ -150,3 +171,8 @@ class StepEditorPanel(QWidget):
         suppressed = self._suppress_btn.text() == "Remove step"
         self.step_suppressed.emit(self._current_step_id, suppressed)
         self._suppress_btn.setText("Restore step" if suppressed else "Remove step")
+
+    def _emit_evidentiary(self, checked: bool) -> None:
+        if self._current_step_id is None:
+            return
+        self.evidentiary_toggled.emit(self._current_step_id, checked)

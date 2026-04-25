@@ -105,6 +105,7 @@ class SessionController(QObject):
 
         self._workspace.step_text_edited.connect(self._on_step_text_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
+        self._workspace.step_evidentiary_toggled.connect(self._on_step_evidentiary_toggled)
         self._workspace.steps_reordered.connect(self._on_steps_reordered)
         self._workspace.merge_requested.connect(self._on_merge_requested)
         self._workspace.split_requested.connect(self._on_split_requested)
@@ -483,6 +484,17 @@ class SessionController(QObject):
         except Exception:
             logger.exception("Failed to persist step suppression (step_id=%d)", step_id)
         self._workspace.reload()
+
+    @Slot(int, bool)
+    def _on_step_evidentiary_toggled(self, step_id: int, evidentiary: bool) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.set_step_evidentiary(step_id, evidentiary=evidentiary)
+        except Exception:
+            logger.exception("Failed to persist evidentiary flag (step_id=%d)", step_id)
+        # No reload — the editor's checkbox is already in the right state
+        # and reloading would re-trigger selection logic for no benefit.
 
     @Slot(list)
     def _on_steps_reordered(self, ordered_ids: list[int]) -> None:
