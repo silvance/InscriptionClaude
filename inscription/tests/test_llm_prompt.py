@@ -52,14 +52,14 @@ def test_build_user_prompt_contains_events_and_manual_edits() -> None:
         DraftStep(
             id=1,
             sequence=1,
-            text="Manually edited thing",
+            action="Manually edited thing",
             source_event_ids=(1,),
             manual_edit=True,
         ),
         DraftStep(
             id=2,
             sequence=2,
-            text="Auto thing",
+            action="Auto thing",
             source_event_ids=(2,),
             manual_edit=False,
         ),
@@ -95,30 +95,50 @@ def test_system_prompt_forbids_invented_actions() -> None:
 
 
 def test_parse_response_accepts_plain_json() -> None:
-    body = json.dumps({"steps": [{"text": "Click Save.", "source_event_ids": [1, 2]}]})
+    body = json.dumps(
+        {
+            "steps": [
+                {
+                    "action": "Click Save.",
+                    "result": "File saved.",
+                    "source_event_ids": [1, 2],
+                }
+            ]
+        }
+    )
     out = parse_response(body, valid_event_ids={1, 2})
     assert len(out) == 1
-    assert out[0].text == "Click Save."
+    assert out[0].action == "Click Save."
+    assert out[0].result == "File saved."
     assert out[0].source_event_ids == (1, 2)
 
 
 def test_parse_response_strips_markdown_fences() -> None:
-    body = '```json\n{"steps": [{"text": "x", "source_event_ids": [7]}]}\n```'
+    body = '```json\n{"steps": [{"action": "x", "result": "", "source_event_ids": [7]}]}\n```'
     out = parse_response(body, valid_event_ids={7})
-    assert out[0].text == "x"
+    assert out[0].action == "x"
+    assert out[0].result == ""
+
+
+def test_parse_response_accepts_legacy_text_field() -> None:
+    """Old JSON payloads using {"text": ...} still parse as action-only."""
+    body = json.dumps({"steps": [{"text": "Legacy step.", "source_event_ids": [1]}]})
+    out = parse_response(body, valid_event_ids={1})
+    assert out[0].action == "Legacy step."
+    assert out[0].result == ""
 
 
 def test_parse_response_drops_steps_with_no_known_ids() -> None:
     body = json.dumps(
         {
             "steps": [
-                {"text": "Keeper.", "source_event_ids": [1]},
-                {"text": "Ghost.", "source_event_ids": [999]},
+                {"action": "Keeper.", "result": "", "source_event_ids": [1]},
+                {"action": "Ghost.", "result": "", "source_event_ids": [999]},
             ]
         }
     )
     out = parse_response(body, valid_event_ids={1, 2})
-    assert [s.text for s in out] == ["Keeper."]
+    assert [s.action for s in out] == ["Keeper."]
 
 
 def test_parse_response_rejects_missing_steps_key() -> None:
@@ -133,7 +153,9 @@ def test_parse_response_rejects_non_array_steps() -> None:
 
 def test_parse_response_rejects_zero_usable_steps() -> None:
     # Every step references an unknown id → all filtered out.
-    body = json.dumps({"steps": [{"text": "x", "source_event_ids": [42]}]})
+    body = json.dumps(
+        {"steps": [{"action": "x", "result": "", "source_event_ids": [42]}]}
+    )
     with pytest.raises(LLMResponseError, match="zero usable"):
         parse_response(body, valid_event_ids={1, 2})
 

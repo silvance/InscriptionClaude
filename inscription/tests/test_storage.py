@@ -152,8 +152,14 @@ def test_merge_steps_concatenates_source_events_and_text(tmp_path) -> None:
         e1, e2, _ = _seed_three_clicks(repo)
         saved = repo.replace_steps(
             [
-                DraftStep(id=None, sequence=0, text="Click first.", source_event_ids=(e1,)),
-                DraftStep(id=None, sequence=0, text="Click second.", source_event_ids=(e2,)),
+                DraftStep(id=None, sequence=0, action="Click first.", source_event_ids=(e1,)),
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    action="Click second.",
+                    result="It worked.",
+                    source_event_ids=(e2,),
+                ),
             ]
         )
         assert saved[0].id is not None
@@ -164,9 +170,11 @@ def test_merge_steps_concatenates_source_events_and_text(tmp_path) -> None:
         assert len(remaining) == 1
         assert remaining[0].id == saved[0].id
         assert remaining[0].source_event_ids == (e1, e2)
-        assert remaining[0].text == "Click first. Click second."
+        assert remaining[0].action == "Click first. Click second."
+        assert remaining[0].result == "It worked."
         assert remaining[0].manual_edit is True
-        assert merged.text == remaining[0].text
+        assert merged.action == remaining[0].action
+        assert merged.result == remaining[0].result
     finally:
         repo.close()
 
@@ -180,7 +188,7 @@ def test_split_step_partitions_first_event_off(tmp_path) -> None:
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text="Combo step.",
+                    action="Combo step.",
                     source_event_ids=(e1, e2, e3),
                 )
             ]
@@ -206,7 +214,7 @@ def test_split_step_refuses_when_only_one_source_event(tmp_path) -> None:
     try:
         (e1,) = _seed_three_clicks(repo)[:1]
         saved = repo.replace_steps(
-            [DraftStep(id=None, sequence=0, text="Single.", source_event_ids=(e1,))]
+            [DraftStep(id=None, sequence=0, action="Single.", source_event_ids=(e1,))]
         )
         assert saved[0].id is not None
         with pytest.raises(StorageError, match="cannot split"):
@@ -221,7 +229,7 @@ def test_evidentiary_flag_round_trips(tmp_path) -> None:
         e1 = repo.append_event(kind=EventKind.CLICK, x=1, y=1, button="left")
         assert e1.id is not None
         saved = repo.replace_steps(
-            [DraftStep(id=None, sequence=0, text="Marked", source_event_ids=(e1.id,))]
+            [DraftStep(id=None, sequence=0, action="Marked", source_event_ids=(e1.id,))]
         )
         sid = saved[0].id
         assert sid is not None
@@ -244,9 +252,9 @@ def test_reorder_steps_updates_sequence(tmp_path) -> None:
         e1, e2, e3 = _seed_three_clicks(repo)
         saved = repo.replace_steps(
             [
-                DraftStep(id=None, sequence=0, text="A", source_event_ids=(e1,)),
-                DraftStep(id=None, sequence=0, text="B", source_event_ids=(e2,)),
-                DraftStep(id=None, sequence=0, text="C", source_event_ids=(e3,)),
+                DraftStep(id=None, sequence=0, action="A", source_event_ids=(e1,)),
+                DraftStep(id=None, sequence=0, action="B", source_event_ids=(e2,)),
+                DraftStep(id=None, sequence=0, action="C", source_event_ids=(e3,)),
             ]
         )
         ids = [s.id for s in saved if s.id is not None]
@@ -254,6 +262,6 @@ def test_reorder_steps_updates_sequence(tmp_path) -> None:
         repo.reorder_steps([ids[2], ids[0], ids[1]])
 
         listed = repo.list_steps()
-        assert [s.text for s in listed] == ["C", "A", "B"]
+        assert [s.action for s in listed] == ["C", "A", "B"]
     finally:
         repo.close()

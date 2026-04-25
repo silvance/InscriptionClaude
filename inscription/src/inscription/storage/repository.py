@@ -372,13 +372,14 @@ class SessionRepository:
                 cursor = self._conn.execute(
                     """
                     INSERT INTO draft_steps
-                        (sequence, text, source_event_ids, screenshot_id,
+                        (sequence, action, result, source_event_ids, screenshot_id,
                          suppressed, manual_edit, evidentiary)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         i,
-                        step.text,
+                        step.action,
+                        step.result,
                         json.dumps(list(step.source_event_ids)),
                         step.screenshot_id,
                         1 if step.suppressed else 0,
@@ -392,11 +393,33 @@ class SessionRepository:
             self._conn.commit()
         return saved
 
-    def update_step_text(self, step_id: int, text: str) -> None:
+    def update_step_fields(
+        self,
+        step_id: int,
+        *,
+        action: str | None = None,
+        result: str | None = None,
+    ) -> None:
+        """Update the action and/or result columns and mark the step manual.
+
+        Either or both fields may be supplied; ``None`` means "leave alone".
+        """
+        if action is None and result is None:
+            return
+        sets: list[str] = []
+        params: list[object] = []
+        if action is not None:
+            sets.append("action = ?")
+            params.append(action)
+        if result is not None:
+            sets.append("result = ?")
+            params.append(result)
+        sets.append("manual_edit = 1")
+        params.append(step_id)
         with self._lock:
             self._conn.execute(
-                "UPDATE draft_steps SET text = ?, manual_edit = 1 WHERE id = ?",
-                (text, step_id),
+                f"UPDATE draft_steps SET {', '.join(sets)} WHERE id = ?",
+                params,
             )
             self._conn.commit()
 
@@ -431,20 +454,14 @@ class SessionRepository:
                 )
             self._conn.commit()
 
-    def merge_steps(
-        self,
-        *,
-        primary_id: int,
-        other_id: int,
-        text: str | None = None,
-    ) -> DraftStep:
+    def merge_steps(self, *, primary_id: int, other_id: int) -> DraftStep:
         """Merge ``other_id`` into ``primary_id``; delete the other row.
 
         The merged step keeps ``primary_id`` and its screenshot. Source
-        event ids are concatenated (primary first, other appended).
-        ``text`` overrides the merged step's text when supplied; otherwise
-        the two original texts are joined with " ". Marks the result as
-        ``manual_edit`` because the user has clearly intervened.
+        event ids are concatenated (primary first, other appended). The
+        action and result strings are joined with a space; empties on
+        either side are dropped. Marks the result as ``manual_edit``
+        because the user has clearly intervened.
         """
         with self._lock:
             primary_row = self._conn.execute(
@@ -461,21 +478,23 @@ class SessionRepository:
             other = self._row_to_step(other_row)
 
             combined_ids = (*primary.source_event_ids, *other.source_event_ids)
-            merged_text = text if text is not None else f"{primary.text} {other.text}".strip()
+            merged_action = _join_text(primary.action, other.action)
+            merged_result = _join_text(primary.result, other.result)
 
             self._conn.execute(
                 """
                 UPDATE draft_steps
-                SET text = ?, source_event_ids = ?, manual_edit = 1
+                SET action = ?, result = ?, source_event_ids = ?, manual_edit = 1
                 WHERE id = ?
                 """,
-                (merged_text, json.dumps(list(combined_ids)), primary_id),
+                (merged_action, merged_result, json.dumps(list(combined_ids)), primary_id),
             )
             self._conn.execute("DELETE FROM draft_steps WHERE id = ?", (other_id,))
             self._conn.commit()
         return dataclasses.replace(
             primary,
-            text=merged_text,
+            action=merged_action,
+            result=merged_result,
             source_event_ids=combined_ids,
             manual_edit=True,
         )
@@ -517,13 +536,14 @@ class SessionRepository:
             cursor = self._conn.execute(
                 """
                 INSERT INTO draft_steps
-                    (sequence, text, source_event_ids, screenshot_id,
+                    (sequence, action, result, source_event_ids, screenshot_id,
                      suppressed, manual_edit)
-                VALUES (?, ?, ?, ?, 0, 1)
+                VALUES (?, ?, ?, ?, ?, 0, 1)
                 """,
                 (
                     step.sequence + 1,
-                    step.text,
+                    step.action,
+                    step.result,
                     json.dumps(list(tail)),
                     step.screenshot_id,
                 ),
@@ -608,7 +628,8 @@ class SessionRepository:
         return DraftStep(
             id=row["id"],
             sequence=row["sequence"],
-            text=row["text"],
+            action=row["action"],
+            result=row["result"],
             source_event_ids=tuple(json.loads(row["source_event_ids"])),
             screenshot_id=row["screenshot_id"],
             suppressed=bool(row["suppressed"]),
@@ -645,6 +666,12 @@ class SessionRepository:
 
 
 # --------------------------------------------------------------- free funcs
+
+
+def _join_text(left: str, right: str) -> str:
+    """Concatenate two step texts, dropping empties."""
+    parts = [s.strip() for s in (left, right) if s and s.strip()]
+    return " ".join(parts)
 
 
 def list_sessions(workspace_root: Path) -> list[tuple[str, SessionManifest]]:

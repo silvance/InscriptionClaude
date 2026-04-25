@@ -158,13 +158,19 @@ screenshot_artifacts
 draft_steps        (the editable guide layer)
   id                INTEGER PRIMARY KEY AUTOINCREMENT
   sequence          INTEGER NOT NULL                -- display order (gaps are OK)
-  text              TEXT NOT NULL DEFAULT ''        -- the rendered step text the examiner sees / edits
+  action            TEXT NOT NULL DEFAULT ''        -- imperative: what the examiner did
+  result            TEXT NOT NULL DEFAULT ''        -- outcome / observation; may be empty
   source_event_ids  TEXT NOT NULL DEFAULT '[]'      -- JSON list of raw_events.id this step covers
   screenshot_id     INTEGER REFERENCES screenshot_artifacts(id)
   suppressed        INTEGER NOT NULL DEFAULT 0      -- soft-delete; excluded from export
-  manual_edit       INTEGER NOT NULL DEFAULT 0      -- examiner edited the text or merged/split
+  manual_edit       INTEGER NOT NULL DEFAULT 0      -- examiner edited a field or merged/split
   evidentiary       INTEGER NOT NULL DEFAULT 0      -- ★ Tool 3's primary filter ★
 ```
+
+The `action` / `result` split mirrors the two-column layout of paper
+forensic exam notes (Time/Date · Action · Result). The `action`
+column is the imperative description; `result` is what was observed
+afterwards and is often empty for pure UI clicks.
 
 ### The two layers
 
@@ -194,7 +200,8 @@ in the order the examiner left them**.
 SELECT
   s.id,
   s.sequence,
-  s.text,
+  s.action,
+  s.result,
   s.source_event_ids,
   sh.relative_path AS screenshot_path,
   sh.sha256        AS screenshot_sha256
@@ -232,7 +239,7 @@ schema bump.
 
 Tool 3 should read the `schema_version` from `session_info` and only
 attempt to use columns it knows that version supports. The current
-schema is **v4** as of this writing. Past version surfaces:
+schema is **v5** as of this writing. Past version surfaces:
 
 | Version | Added |
 |---------|-------|
@@ -240,6 +247,7 @@ schema is **v4** as of this writing. Past version surfaces:
 | 2 | `resolved_elements.bounding_rect` (UIA element bbox in screen px). |
 | 3 | `resolved_elements.owner_process_name` (for cross-process click context). |
 | 4 | `draft_steps.evidentiary` (the integration flag for Tool 3). |
+| 5 | `draft_steps.action` + `draft_steps.result` (replaces `draft_steps.text` to match the Time/Date · Action · Result notes layout). |
 
 ---
 

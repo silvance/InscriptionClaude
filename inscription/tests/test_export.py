@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from inscription.export import export_html, export_markdown
+from inscription.export import export_forensic_notes, export_html, export_markdown
 from inscription.model import DraftStep, EventKind, ResolvedElement, utcnow
 from inscription.steps import generate_steps
 from inscription.storage import SessionRepository
@@ -171,7 +171,7 @@ def test_markdown_skips_image_when_step_has_no_screenshot(tmp_path: Path) -> Non
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text="Press Enter in Notepad.",
+                    action="Press Enter in Notepad.",
                     source_event_ids=(event.id,),
                 )
             ]
@@ -198,13 +198,13 @@ def test_markdown_omits_suppressed_steps(tmp_path: Path) -> None:
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text="Visible step.",
+                    action="Visible step.",
                     source_event_ids=(e1.id,),
                 ),
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text="Hidden step.",
+                    action="Hidden step.",
                     source_event_ids=(e2.id,),
                 ),
             ]
@@ -218,3 +218,56 @@ def test_markdown_omits_suppressed_steps(tmp_path: Path) -> None:
     text = doc.path.read_text(encoding="utf-8")
     assert "Visible step." in text
     assert "Hidden step." not in text
+
+
+# --------------------------------------------------- forensic notes
+
+
+def test_forensic_notes_writes_three_column_table(tmp_path: Path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Case 24-CF-0007")
+    try:
+        e1 = repo.append_event(kind=EventKind.MARKER, text="Loaded E01 file")
+        e2 = repo.append_event(kind=EventKind.MARKER, text="Started AXIOM")
+        assert e1.id is not None
+        assert e2.id is not None
+        repo.replace_steps(
+            [
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    action="Loaded E01 file into FTK Imager.",
+                    result="Hash verified.",
+                    source_event_ids=(e1.id,),
+                    evidentiary=True,
+                ),
+                DraftStep(
+                    id=None,
+                    sequence=0,
+                    action="Began processing in AXIOM.",
+                    source_event_ids=(e2.id,),
+                ),
+            ]
+        )
+        doc = export_forensic_notes(
+            repo,
+            examiner="A. Smith",
+            case_reference="24-CF-0007",
+        )
+    finally:
+        repo.close()
+
+    assert doc.path.exists()
+    text = doc.path.read_text(encoding="utf-8")
+    # Header carries the case metadata.
+    assert "A. Smith" in text
+    assert "24-CF-0007" in text
+    # Both steps render and the result column has the action's outcome.
+    assert "Loaded E01 file into FTK Imager." in text
+    assert "Hash verified." in text
+    assert "Began processing in AXIOM." in text
+    # Three-column table headings are present.
+    assert "Time/Date" in text
+    assert "Action" in text
+    assert "Result" in text
+    # Evidentiary row gets the row class so styling can pick it up.
+    assert 'class="evidentiary"' in text

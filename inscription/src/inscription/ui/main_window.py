@@ -132,6 +132,13 @@ class MainWindow(QMainWindow):
         export_md_action.triggered.connect(self._controller.export_markdown)
         file_menu.addAction(export_md_action)
 
+        export_notes_action = QAction("Export &Forensic notes…", self)
+        export_notes_action.setStatusTip(
+            "Export a printable Time/Date · Action · Result notes table"
+        )
+        export_notes_action.triggered.connect(self._controller.export_forensic_notes)
+        file_menu.addAction(export_notes_action)
+
         file_menu.addSeparator()
 
         exit_action = QAction("E&xit", self)

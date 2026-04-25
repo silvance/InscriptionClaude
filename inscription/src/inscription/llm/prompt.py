@@ -1,10 +1,11 @@
 """Prompt construction and response parsing for the LLM rewriter.
 
 The model is asked to produce a strict-JSON object with one key,
-``"steps"``, whose value is an array of ``{"text": ..., "source_event_ids": [...]}``
-entries. ``parse_response`` tolerates minor deviations — markdown code
-fences, a leading ``"json"`` language tag — and validates that every
-referenced event id exists before returning.
+``"steps"``, whose value is an array of
+``{"action": ..., "result": ..., "source_event_ids": [...]}`` entries.
+``parse_response`` tolerates minor deviations — markdown code fences,
+a leading ``"json"`` language tag — and validates that every referenced
+event id exists before returning.
 """
 
 from __future__ import annotations
@@ -25,16 +26,22 @@ logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """\
-You are an expert technical writer. Given a chronological timeline of
-user interactions captured from a Windows desktop workflow, produce a
-concise step-by-step procedural guide.
+You are an expert technical writer turning a Windows desktop workflow
+into a forensic-style procedural log. The output goes into a three-column
+notes table — Time/Date, Action, Result — so each step is split into
+what the examiner DID and what they OBSERVED.
 
 Rules:
-- Each step is one imperative sentence starting with an action verb
-  (Open, Click, Type, Save, Press, Choose, Select, etc.).
+- "action" is one imperative sentence starting with an action verb
+  (Open, Click, Type, Save, Press, Choose, Select, etc.) describing what
+  the examiner did.
+- "result" is what was observed or produced afterwards — a short
+  factual statement ("Hash verified", "Processing completed in 1h 23m",
+  "No evidentiary results found"). Leave "result" as an empty string
+  when nothing observable happened (most pure UI clicks).
 - Merge related consecutive events into one step when they describe a
   single user intent (e.g. clicking File then Save As then naming the
-  file → "Save the file as <name>.txt using File → Save As").
+  file → action "Save the file as <name>.txt using File → Save As").
 - Drop events that don't advance the procedure: window-focus events
   that are side effects of a click, taskbar clicks whose destination
   is visible from the next event, clicks on the recording tool itself.
@@ -45,6 +52,9 @@ Rules:
   several minutes pass between two events with no events in between,
   do not fabricate "navigated through tabs" or "scrolled around" or
   "explored the page" — just produce the step for the next event.
+- Never invent results. If the timeline does not show an outcome,
+  leave "result" empty. Do not say "verified successfully" or
+  "completed without errors" unless the input contains evidence.
 - Preserve the original event IDs — every step's "source_event_ids"
   must contain at least one id from the input timeline.
 - Never invent details (filenames, button names, URLs) not present in
@@ -54,7 +64,8 @@ Rules:
 
 Output format: a single JSON object with one key, "steps". No prose
 before or after the JSON. Each step has:
-  - "text": string. One imperative sentence.
+  - "action": string. One imperative sentence.
+  - "result": string. May be empty.
   - "source_event_ids": non-empty array of integers.
 
 Return at most as many steps as input events.
@@ -65,7 +76,8 @@ Return at most as many steps as input events.
 class RewrittenStep:
     """One step parsed out of the LLM's JSON response."""
 
-    text: str
+    action: str
+    result: str
     source_event_ids: tuple[int, ...]
 
 
@@ -80,7 +92,8 @@ def build_user_prompt(
     event_payload = [_event_to_dict(e, resolved_by_id) for e in events]
     manual = [
         {
-            "text": s.text,
+            "action": s.action,
+            "result": s.result,
             "source_event_ids": list(s.source_event_ids),
         }
         for s in existing_steps
@@ -186,11 +199,20 @@ def _coerce_step(item: object, *, index: int, valid_event_ids: set[int]) -> Rewr
     if not isinstance(item, dict):
         logger.warning("LLM step %d is not an object: %r", index, item)
         return None
-    text = item.get("text")
+    # Tolerate the legacy single-"text" shape so a stale model output
+    # still produces something usable; we treat it as an action with no
+    # observed result.
+    action = item.get("action")
+    if action is None:
+        action = item.get("text")
+    result = item.get("result", "")
     ids = item.get("source_event_ids")
-    if not isinstance(text, str) or not text.strip():
-        logger.warning("LLM step %d missing text: %r", index, item)
+    if not isinstance(action, str) or not action.strip():
+        logger.warning("LLM step %d missing action: %r", index, item)
         return None
+    if not isinstance(result, str):
+        logger.warning("LLM step %d non-string result; coercing: %r", index, result)
+        result = ""
     if not isinstance(ids, list) or not ids:
         logger.warning("LLM step %d missing source_event_ids: %r", index, item)
         return None
@@ -207,4 +229,8 @@ def _coerce_step(item: object, *, index: int, valid_event_ids: set[int]) -> Rewr
     if not coerced_ids:
         logger.warning("LLM step %d references no known event ids: %r", index, ids)
         return None
-    return RewrittenStep(text=text.strip(), source_event_ids=tuple(coerced_ids))
+    return RewrittenStep(
+        action=action.strip(),
+        result=result.strip(),
+        source_event_ids=tuple(coerced_ids),
+    )

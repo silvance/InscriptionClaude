@@ -143,7 +143,8 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
         assert reloaded.bounding_rect == (10, 20, 110, 50)
         assert reloaded.owner_process_name == "explorer.exe"
 
-        # v3 → v4 added draft_steps.evidentiary; existing/new rows respect it.
+        # v3 → v4 added draft_steps.evidentiary, v4 → v5 split text into
+        # action + result. Existing rows / new rows respect every column.
         event = repo.append_event(kind=EventKind.CLICK, x=1, y=1, button="left")
         assert event.id is not None
         saved = repo.replace_steps(
@@ -151,14 +152,50 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text="Demo",
+                    action="Loaded E01 file",
+                    result="Hash verified",
                     source_event_ids=(event.id,),
                     evidentiary=True,
                 )
             ]
         )
+        assert saved[0].action == "Loaded E01 file"
+        assert saved[0].result == "Hash verified"
         assert saved[0].evidentiary is True
         repo_steps = repo.list_steps()
+        assert repo_steps[0].action == "Loaded E01 file"
+        assert repo_steps[0].result == "Hash verified"
         assert repo_steps[0].evidentiary is True
+    finally:
+        repo.close()
+
+
+def test_v1_session_keeps_existing_step_text_as_action(tmp_path: Path) -> None:
+    """A v1 draft_steps row's ``text`` should land in ``action`` after v4→v5."""
+    _build_v1_session(tmp_path, "Legacy-WithSteps")
+
+    # Pre-seed a draft_steps row in the v1 shape.
+    db_path = tmp_path / "Legacy-WithSteps" / "session.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO raw_events (sequence, occurred_at, kind, button, x, y) "
+            "VALUES (1, '2026-04-24T00:00:00+00:00', 'click', 'left', 1, 1)"
+        )
+        event_id = conn.execute("SELECT id FROM raw_events").fetchone()[0]
+        conn.execute(
+            "INSERT INTO draft_steps (sequence, text, source_event_ids) VALUES (?, ?, ?)",
+            (1, "Original v1 text", f"[{event_id}]"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    repo = SessionRepository.open_existing(workspace_root=tmp_path, slug="Legacy-WithSteps")
+    try:
+        steps = repo.list_steps()
+        assert len(steps) == 1
+        assert steps[0].action == "Original v1 text"
+        assert steps[0].result == ""
     finally:
         repo.close()

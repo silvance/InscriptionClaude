@@ -33,7 +33,7 @@ from inscription.capture import (
     WindowFocusSource,
 )
 from inscription.config import Config
-from inscription.export import export_html, export_markdown
+from inscription.export import export_forensic_notes, export_html, export_markdown
 from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
@@ -111,7 +111,7 @@ class SessionController(QObject):
         self._event_count = 0
         self._hotkeys: HotkeyManager = create_hotkey_manager()
 
-        self._workspace.step_text_edited.connect(self._on_step_text_edited)
+        self._workspace.step_fields_edited.connect(self._on_step_fields_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
         self._workspace.step_evidentiary_toggled.connect(self._on_step_evidentiary_toggled)
         self._workspace.steps_reordered.connect(self._on_steps_reordered)
@@ -458,6 +458,15 @@ class SessionController(QObject):
             renderer=export_markdown,
         )
 
+    def export_forensic_notes(self) -> None:
+        self._export(
+            kind="Forensic notes",
+            extension="html",
+            file_filter="HTML (*.html)",
+            renderer=export_forensic_notes,
+            suggested_suffix="-notes",
+        )
+
     def _export(
         self,
         *,
@@ -465,12 +474,13 @@ class SessionController(QObject):
         extension: str,
         file_filter: str,
         renderer: Callable[..., ExportDocument],
+        suggested_suffix: str = "",
     ) -> None:
         if self._repository is None:
             return
         suggested = str(
             self._repository.session.exports_dir
-            / f"{self._repository.session.root.name}.{extension}"
+            / f"{self._repository.session.root.name}{suggested_suffix}.{extension}"
         )
         target, _ = QFileDialog.getSaveFileName(
             self._parent_widget,
@@ -508,12 +518,12 @@ class SessionController(QObject):
         self._recorder_bar.set_event_count(self._event_count)
         self.event_counted.emit(self._event_count)
 
-    @Slot(int, str)
-    def _on_step_text_edited(self, step_id: int, text: str) -> None:
+    @Slot(int, str, str)
+    def _on_step_fields_edited(self, step_id: int, action: str, result: str) -> None:
         if self._repository is None:
             return
         try:
-            self._repository.update_step_text(step_id, text)
+            self._repository.update_step_fields(step_id, action=action, result=result)
         except Exception:
             logger.exception("Failed to persist step edit (step_id=%d)", step_id)
 

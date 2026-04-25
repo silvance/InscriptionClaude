@@ -83,7 +83,13 @@ ol.steps > li::before {
   font-variant-numeric: tabular-nums;
   letter-spacing: .03em;
 }
-.step-text { margin: 0 0 .5rem 0; }
+.step-action { margin: 0 0 .35rem 0; font-weight: 500; }
+.step-result {
+  margin: 0 0 .5rem 0;
+  padding: .25rem 0 .25rem .65rem;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+}
 .step-shot img {
   max-width: 100%;
   border: 1px solid var(--rule);
@@ -219,12 +225,15 @@ def _render_step(
     assets_dir: Path,
 ) -> str:
     primary = _primary_event(step, events_by_id)
-    text = html.escape(step.text).replace("\n", "<br>")
+    action_text = html.escape(step.action).replace("\n", "<br>")
     parts = ["<li>", '<div class="step-body">']
     if primary is not None:
         ts = html.escape(primary.occurred_at.astimezone().strftime("%H:%M:%S"))
         parts.append(f'<div class="step-time">{ts}</div>')
-    parts.append(f'<p class="step-text">{text}</p>')
+    parts.append(f'<p class="step-action">{action_text}</p>')
+    if step.result.strip():
+        result_text = html.escape(step.result).replace("\n", "<br>")
+        parts.append(f'<p class="step-result">{result_text}</p>')
     shot = screenshots.get(step.screenshot_id) if step.screenshot_id else None
     if shot is not None:
         element = resolver(primary) if primary else None
@@ -236,7 +245,7 @@ def _render_step(
             session_root=session_root,
             assets_dir=assets_dir,
         )
-        alt = html.escape(step.text)[:120]
+        alt = html.escape(step.action)[:120]
         parts.append(f'<div class="step-shot"><img src="{html.escape(src)}" alt="{alt}"></div>')
     parts.append("</div>")
     parts.append("</li>")

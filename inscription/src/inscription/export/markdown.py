@@ -123,7 +123,7 @@ def _render_step(
     assets_dir: Path,
     assets_dirname: str,
 ) -> str:
-    text = step.text.strip() or "_(empty step)_"
+    action_text = step.action.strip() or "_(empty step)_"
     primary = _primary_event(step, events_by_id)
     timestamp = (
         primary.occurred_at.astimezone().strftime("%H:%M:%S") if primary is not None else None
@@ -131,7 +131,10 @@ def _render_step(
     heading = f"## Step {index}"
     if timestamp:
         heading = f"{heading} — {timestamp}"
-    body = f"{heading}\n\n{text}"
+    sections = [heading, action_text]
+    if step.result.strip():
+        sections.append(f"> **Result:** {step.result.strip()}")
+    body = "\n\n".join(sections)
     shot = screenshots.get(step.screenshot_id) if step.screenshot_id else None
     if shot is None:
         return body
@@ -146,7 +149,7 @@ def _render_step(
     )
     if asset_name is None:
         return body
-    alt = step.text.replace("\n", " ").replace("[", "(").replace("]", ")")[:120]
+    alt = step.action.replace("\n", " ").replace("[", "(").replace("]", ")")[:120]
     image_md = f"![{alt}]({assets_dirname}/{asset_name})"
     return f"{body}\n\n{image_md}"
 

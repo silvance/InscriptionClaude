@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class SessionWorkspaceWidget(QWidget):
     """Step list + step editor panel."""
 
-    step_text_edited = Signal(int, str)
+    step_fields_edited = Signal(int, str, str)  # step_id, action, result
     step_suppressed = Signal(int, bool)
     step_evidentiary_toggled = Signal(int, bool)
     steps_reordered = Signal(list)
@@ -45,7 +45,7 @@ class SessionWorkspaceWidget(QWidget):
         self._list.steps_reordered.connect(self.steps_reordered)
         self._list.merge_requested.connect(self.merge_requested)
         self._list.split_requested.connect(self.split_requested)
-        self._editor.text_edited.connect(self.step_text_edited)
+        self._editor.fields_edited.connect(self.step_fields_edited)
         self._editor.step_suppressed.connect(self.step_suppressed)
         self._editor.evidentiary_toggled.connect(self.step_evidentiary_toggled)
 

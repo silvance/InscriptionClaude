@@ -53,12 +53,23 @@ def test_rewriter_replaces_steps_from_llm_response(tmp_path) -> None:
     repo = SessionRepository.create(workspace_root=tmp_path, name="LLM")
     try:
         eid = _seed_one_click(repo)
-        content = json.dumps({"steps": [{"text": "Save the document.", "source_event_ids": [eid]}]})
+        content = json.dumps(
+            {
+                "steps": [
+                    {
+                        "action": "Save the document.",
+                        "result": "File saved.",
+                        "source_event_ids": [eid],
+                    }
+                ]
+            }
+        )
         rewriter = StepRewriter(repository=repo, client=_FakeClient(content))
         steps = rewriter.rewrite()
 
         assert len(steps) == 1
-        assert steps[0].text == "Save the document."
+        assert steps[0].action == "Save the document."
+        assert steps[0].result == "File saved."
         assert steps[0].source_event_ids == (eid,)
         assert steps[0].manual_edit is False
     finally:
@@ -74,14 +85,21 @@ def test_rewriter_preserves_manual_edits(tmp_path) -> None:
         generate_steps(repo)
         initial = repo.list_steps()[0]
         assert initial.id is not None
-        repo.update_step_text(initial.id, "Custom human text")
+        repo.update_step_fields(initial.id, action="Custom human text", result="Observed.")
 
         # LLM suggests different text; the human edit should win.
-        content = json.dumps({"steps": [{"text": "Robot text.", "source_event_ids": [eid]}]})
+        content = json.dumps(
+            {
+                "steps": [
+                    {"action": "Robot text.", "result": "robot result", "source_event_ids": [eid]}
+                ]
+            }
+        )
         steps = StepRewriter(repository=repo, client=_FakeClient(content)).rewrite()
 
         assert len(steps) == 1
-        assert steps[0].text == "Custom human text"
+        assert steps[0].action == "Custom human text"
+        assert steps[0].result == "Observed."
         assert steps[0].manual_edit is True
     finally:
         repo.close()
@@ -145,7 +163,11 @@ def test_rewriter_picks_last_screenshot_for_merged_step(tmp_path) -> None:
         content = json.dumps(
             {
                 "steps": [
-                    {"text": "Merged step.", "source_event_ids": [e1.id, e2.id]},
+                    {
+                        "action": "Merged step.",
+                        "result": "",
+                        "source_event_ids": [e1.id, e2.id],
+                    },
                 ]
             }
         )

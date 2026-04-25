@@ -14,7 +14,7 @@ after capture is safe. It does four things:
 from inscription.steps.generator import (
     StepGenerator,
     generate_steps,
-    render_step_text,
+    render_step_action,
 )
 
-__all__ = ["StepGenerator", "generate_steps", "render_step_text"]
+__all__ = ["StepGenerator", "generate_steps", "render_step_action"]

@@ -116,11 +116,18 @@ class StepRewriter:
         for item in rewritten:
             screenshot_id = _pick_screenshot_id(item.source_event_ids, events_by_id)
             preserved = manual_by_sources.get(item.source_event_ids)
+            if preserved is not None:
+                action = preserved.action
+                result = preserved.result
+            else:
+                action = item.action
+                result = item.result
             out.append(
                 DraftStep(
                     id=None,
                     sequence=0,  # assigned by replace_steps
-                    text=preserved.text if preserved is not None else item.text,
+                    action=action,
+                    result=result,
                     source_event_ids=item.source_event_ids,
                     screenshot_id=screenshot_id,
                     manual_edit=preserved is not None,

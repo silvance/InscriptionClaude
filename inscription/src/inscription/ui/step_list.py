@@ -105,9 +105,10 @@ class StepListWidget(QListWidget):
         timestamp = _step_timestamp(step, event_times)
         prefix = f"{step.sequence:02d}."
         time_part = f"  {timestamp}" if timestamp else ""
-        body = step.text or "(empty step)"
+        body = step.action or "(empty step)"
+        result_marker = "  ▸" if step.result.strip() else ""
         badge = "  ★" if step.evidentiary else ""
-        item = QListWidgetItem(f"{prefix}{time_part}  {body}{badge}")
+        item = QListWidgetItem(f"{prefix}{time_part}  {body}{result_marker}{badge}")
         item.setData(Qt.ItemDataRole.UserRole, step.id)
 
         font = QFont()

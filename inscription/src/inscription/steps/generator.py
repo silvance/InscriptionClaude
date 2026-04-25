@@ -42,7 +42,8 @@ class _Action:
     kind: EventKind
     source_event_ids: tuple[int, ...]
     screenshot_id: int | None
-    text: str
+    action: str
+    result: str = ""
 
 
 def _render_click(event: RawEvent, resolved: ResolvedElement | None) -> str:
@@ -98,11 +99,11 @@ def _render_scroll(event: RawEvent) -> str:
     return f"Scroll {descriptor}."
 
 
-def render_step_text(
+def render_step_action(
     event: RawEvent,
     resolved: ResolvedElement | None,
 ) -> str:
-    """Build a single-step text string from an event + its resolved element.
+    """Build a single-step Action string from an event + its resolved element.
 
     The wording scales with resolver confidence:
 
@@ -150,7 +151,8 @@ class StepGenerator:
                     DraftStep(
                         id=None,
                         sequence=0,  # reassigned by replace_steps
-                        text=preserved.text,
+                        action=preserved.action,
+                        result=preserved.result,
                         source_event_ids=action.source_event_ids,
                         screenshot_id=action.screenshot_id,
                         manual_edit=True,
@@ -161,7 +163,8 @@ class StepGenerator:
                 DraftStep(
                     id=None,
                     sequence=0,
-                    text=action.text,
+                    action=action.action,
+                    result=action.result,
                     source_event_ids=action.source_event_ids,
                     screenshot_id=action.screenshot_id,
                     manual_edit=False,
@@ -199,7 +202,8 @@ class StepGenerator:
                         kind=last.kind,
                         source_event_ids=(*last.source_event_ids, event.id or 0),
                         screenshot_id=last.screenshot_id or event.screenshot_id,
-                        text=last.text,
+                        action=last.action,
+                        result=last.result,
                     )
                     previous_click_ts = ts
                     continue
@@ -211,7 +215,7 @@ class StepGenerator:
                     kind=event.kind,
                     source_event_ids=(event.id or 0,),
                     screenshot_id=event.screenshot_id,
-                    text=render_step_text(event, resolved),
+                    action=render_step_action(event, resolved),
                 )
             )
         return actions

@@ -1,9 +1,13 @@
 """Step detail / editor panel.
 
-Edits to the text field are debounced — we emit a single
-``text_edited(step_id, text)`` signal per calm interval so the repository
-isn't hammered on every keystroke. ``flush_pending()`` forces an immediate
-emission (used on close and on step selection change).
+A draft step has two editable fields, mirroring the columns on a
+forensic-style notes table: **Action** (what the examiner did) and
+**Result** (what was observed). The panel exposes one debounced text
+area per field. Edits are debounced — we emit a single
+``fields_edited(step_id, action, result)`` per calm interval so the
+repository isn't hammered on every keystroke.
+``flush_pending()`` forces an immediate emission (used on close and on
+step selection change).
 """
 
 from __future__ import annotations
@@ -42,19 +46,19 @@ def _section_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
-def _description_heading(step: DraftStep, started_at: datetime | None) -> str:
-    """Build the editor's description heading, including the step time."""
+def _heading_for(step: DraftStep, started_at: datetime | None) -> str:
+    """Build the editor's main heading, including the step time."""
     base = f"Step {step.sequence:02d}"
     if started_at is None:
-        return f"{base} — description"
+        return base
     local = started_at.astimezone().strftime("%H:%M:%S")
-    return f"{base} · {local} — description"
+    return f"{base} · {local}"
 
 
 class StepEditorPanel(QWidget):
-    """Step text editor + screenshot preview."""
+    """Action + Result editor with screenshot preview."""
 
-    text_edited = Signal(int, str)  # step_id, text
+    fields_edited = Signal(int, str, str)  # step_id, action, result
     step_suppressed = Signal(int, bool)  # step_id, suppressed
     evidentiary_toggled = Signal(int, bool)  # step_id, evidentiary
 
@@ -62,49 +66,21 @@ class StepEditorPanel(QWidget):
         super().__init__(parent)
 
         self._current_step_id: int | None = None
-        self._current_text: str = ""
+        self._current_action: str = ""
+        self._current_result: str = ""
 
-        self._text = QTextEdit(self)
-        self._text.setPlaceholderText("Describe this step…")
-        self._text.textChanged.connect(self._on_text_changed)
+        self._action = self._build_text_edit("What the examiner did…")
+        self._result = self._build_text_edit("What was observed (optional)")
+        self._screenshot = self._build_screenshot_label()
+        self._evidentiary_cb = self._build_evidentiary_cb()
+        self._suppress_btn = self._build_suppress_btn()
 
-        self._screenshot = QLabel(self)
-        self._screenshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._screenshot.setMinimumHeight(240)
-        # Stylesheet selector: picks up the "card" role from the global QSS.
-        self._screenshot.setObjectName("StepScreenshot")
-        self._screenshot.setProperty("role", "card")
-        self._screenshot.setText("No screenshot")
-
-        self._evidentiary_cb = QCheckBox("Mark as evidentiary", self)
-        self._evidentiary_cb.setToolTip(
-            "Flag this step for inclusion in the downstream forensic report."
-        )
-        self._evidentiary_cb.toggled.connect(self._emit_evidentiary)
-        self._evidentiary_cb.setEnabled(False)
-
-        self._suppress_btn = QPushButton("Remove step", self)
-        self._suppress_btn.setToolTip("Hide this step from the export")
-        self._suppress_btn.clicked.connect(self._emit_suppressed)
-        self._suppress_btn.setEnabled(False)
-
-        controls = QHBoxLayout()
-        controls.addWidget(self._evidentiary_cb)
-        controls.addStretch(1)
-        controls.addWidget(self._suppress_btn)
-
-        self._description_label = _section_label("Step description", self)
+        self._heading_label = _section_label("Step", self)
+        self._action_label = _section_label("Action", self)
+        self._result_label = _section_label("Result", self)
         self._screenshot_label = _section_label("Screenshot", self)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 0, 0, 0)
-        layout.setSpacing(8)
-        layout.addWidget(self._description_label)
-        layout.addWidget(self._text, 1)
-        layout.addLayout(controls)
-        layout.addSpacing(4)
-        layout.addWidget(self._screenshot_label)
-        layout.addWidget(self._screenshot, 2)
+        self._build_layout()
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -112,6 +88,60 @@ class StepEditorPanel(QWidget):
         self._debounce.timeout.connect(self._flush)
 
         self.clear()
+
+    def _build_text_edit(self, placeholder: str) -> QTextEdit:
+        edit = QTextEdit(self)
+        edit.setPlaceholderText(placeholder)
+        edit.setAcceptRichText(False)
+        edit.textChanged.connect(self._on_text_changed)
+        return edit
+
+    def _build_screenshot_label(self) -> QLabel:
+        label = QLabel(self)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setMinimumHeight(200)
+        # Stylesheet selector: picks up the "card" role from the global QSS.
+        label.setObjectName("StepScreenshot")
+        label.setProperty("role", "card")
+        label.setText("No screenshot")
+        return label
+
+    def _build_evidentiary_cb(self) -> QCheckBox:
+        cb = QCheckBox("Mark as evidentiary", self)
+        cb.setToolTip(
+            "Flag this step for inclusion in the downstream forensic report."
+        )
+        cb.toggled.connect(self._emit_evidentiary)
+        cb.setEnabled(False)
+        return cb
+
+    def _build_suppress_btn(self) -> QPushButton:
+        btn = QPushButton("Remove step", self)
+        btn.setToolTip("Hide this step from the export")
+        btn.clicked.connect(self._emit_suppressed)
+        btn.setEnabled(False)
+        return btn
+
+    def _build_layout(self) -> None:
+        controls = QHBoxLayout()
+        controls.addWidget(self._evidentiary_cb)
+        controls.addStretch(1)
+        controls.addWidget(self._suppress_btn)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self._heading_label)
+        layout.addSpacing(2)
+        layout.addWidget(self._action_label)
+        layout.addWidget(self._action, 2)
+        layout.addSpacing(4)
+        layout.addWidget(self._result_label)
+        layout.addWidget(self._result, 1)
+        layout.addLayout(controls)
+        layout.addSpacing(4)
+        layout.addWidget(self._screenshot_label)
+        layout.addWidget(self._screenshot, 2)
 
     # ------------------------------------------------------------ API
 
@@ -125,10 +155,14 @@ class StepEditorPanel(QWidget):
     ) -> None:
         self.flush_pending()
         self._current_step_id = step.id
-        self._current_text = step.text
-        blocked = self._text.blockSignals(True)
-        self._text.setPlainText(step.text)
-        self._text.blockSignals(blocked)
+        self._current_action = step.action
+        self._current_result = step.result
+        action_blocked = self._action.blockSignals(True)
+        self._action.setPlainText(step.action)
+        self._action.blockSignals(action_blocked)
+        result_blocked = self._result.blockSignals(True)
+        self._result.setPlainText(step.result)
+        self._result.blockSignals(result_blocked)
         self._suppress_btn.setEnabled(True)
         self._suppress_btn.setText("Restore step" if step.suppressed else "Remove step")
         # Set the checkbox without firing the toggled signal — otherwise
@@ -138,16 +172,20 @@ class StepEditorPanel(QWidget):
         self._evidentiary_cb.setChecked(step.evidentiary)
         self._evidentiary_cb.blockSignals(cb_blocked)
         self._evidentiary_cb.setEnabled(True)
-        self._description_label.setText(_description_heading(step, started_at))
+        self._heading_label.setText(_heading_for(step, started_at))
         self._load_screenshot(screenshot, session_root)
 
     def clear(self) -> None:
         self.flush_pending()
         self._current_step_id = None
-        self._current_text = ""
-        blocked = self._text.blockSignals(True)
-        self._text.clear()
-        self._text.blockSignals(blocked)
+        self._current_action = ""
+        self._current_result = ""
+        action_blocked = self._action.blockSignals(True)
+        self._action.clear()
+        self._action.blockSignals(action_blocked)
+        result_blocked = self._result.blockSignals(True)
+        self._result.clear()
+        self._result.blockSignals(result_blocked)
         self._screenshot.clear()
         self._screenshot.setText("No screenshot")
         self._suppress_btn.setEnabled(False)
@@ -155,7 +193,7 @@ class StepEditorPanel(QWidget):
         self._evidentiary_cb.setChecked(False)
         self._evidentiary_cb.blockSignals(cb_blocked)
         self._evidentiary_cb.setEnabled(False)
-        self._description_label.setText("Step description")
+        self._heading_label.setText("Step")
 
     def flush_pending(self) -> None:
         if self._debounce.isActive():
@@ -190,11 +228,13 @@ class StepEditorPanel(QWidget):
     def _flush(self) -> None:
         if self._current_step_id is None:
             return
-        new_text = self._text.toPlainText()
-        if new_text == self._current_text:
+        new_action = self._action.toPlainText()
+        new_result = self._result.toPlainText()
+        if new_action == self._current_action and new_result == self._current_result:
             return
-        self._current_text = new_text
-        self.text_edited.emit(self._current_step_id, new_text)
+        self._current_action = new_action
+        self._current_result = new_result
+        self.fields_edited.emit(self._current_step_id, new_action, new_result)
 
     def _emit_suppressed(self) -> None:
         if self._current_step_id is None:

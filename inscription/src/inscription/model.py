@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class EventKind(StrEnum):
@@ -146,6 +146,12 @@ class RawEvent:
 class DraftStep:
     """A draft step produced from one or more raw events.
 
+    ``action`` is what the examiner did, in imperative voice — the same
+    column forensic exam notes use ("Loaded E01 file into FTK Imager").
+    ``result`` is the outcome or observation — the second column on those
+    notes ("Hash verified"). ``result`` is optional; many steps are pure
+    actions without a separate observation.
+
     ``source_event_ids`` records the events that contributed, so regenerating
     steps can preserve manual edits where the underlying events are unchanged.
     ``suppressed`` is a soft-delete: a suppressed step is kept for undo and
@@ -156,7 +162,8 @@ class DraftStep:
 
     id: int | None
     sequence: int
-    text: str
+    action: str
+    result: str = ""
     source_event_ids: tuple[int, ...] = ()
     screenshot_id: int | None = None
     suppressed: bool = False
