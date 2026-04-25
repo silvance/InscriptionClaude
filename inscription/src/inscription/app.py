@@ -12,7 +12,9 @@ from PySide6.QtWidgets import QApplication
 
 from inscription.logging_setup import configure_logging
 from inscription.paths import ensure_dirs
+from inscription.ui.app_icon import build_app_icon
 from inscription.ui.main_window import MainWindow
+from inscription.ui.style import apply_global_style
 from inscription.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -74,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     qt_argv = [argv[0], *remaining]
     app = QApplication(qt_argv)
     app.setStyle("Fusion")
+    palette = apply_global_style(app)
+    app.setWindowIcon(build_app_icon(palette))
 
     window = MainWindow(case_dir=args.case_dir)
     window.show()

@@ -9,10 +9,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
-    QLabel,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -23,6 +21,7 @@ from PySide6.QtWidgets import (
 from inscription.config import Config
 from inscription.ui.controller import SessionController
 from inscription.ui.recorder_bar import RecorderBar
+from inscription.ui.welcome import WelcomePage
 from inscription.ui.workspace import SessionWorkspaceWidget
 from inscription.version import __version__
 
@@ -53,6 +52,7 @@ class MainWindow(QMainWindow):
 
         self._recorder_bar = RecorderBar(self)
         self._workspace = SessionWorkspaceWidget(self)
+        self._welcome = WelcomePage(self)
         central = self._build_central()
         self.setCentralWidget(central)
 
@@ -65,14 +65,16 @@ class MainWindow(QMainWindow):
         )
         self._controller.session_opened.connect(self._on_session_opened)
         self._controller.session_closed.connect(self._on_session_closed)
+        self._welcome.open_session_requested.connect(self._controller.start)
+        self._welcome.open_existing_requested.connect(self._controller.open_session_by_slug)
 
         self._build_menus()
         self._build_statusbar()
         self._restore_geometry()
+        self._welcome.refresh(self._controller.workspace_root())
 
         if auto_start_controller:
             self.show()
-            self._controller.start()
 
     # ------------------------------------------------------------------ UI
 
@@ -84,24 +86,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._recorder_bar)
 
         self._stack = QStackedWidget(container)
-
-        placeholder = QWidget(container)
-        ph_layout = QVBoxLayout(placeholder)
-        ph_layout.setContentsMargins(48, 48, 48, 48)
-        title = QLabel("Inscription", placeholder)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = title.font()
-        font.setPointSize(24)
-        font.setBold(True)
-        title.setFont(font)
-        hint = QLabel("No session open. Use File → Open Session to begin.", placeholder)
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ph_layout.addStretch(1)
-        ph_layout.addWidget(title)
-        ph_layout.addWidget(hint)
-        ph_layout.addStretch(2)
-
-        self._stack.addWidget(placeholder)
+        self._stack.addWidget(self._welcome)
         self._stack.addWidget(self._workspace)
 
         layout.addWidget(self._stack, 1)
@@ -221,6 +206,7 @@ class MainWindow(QMainWindow):
             title = f"{title} — Case: {self._case_dir.name}"
         self.setWindowTitle(title)
         self.statusBar().showMessage("No session open")
+        self._welcome.refresh(self._controller.workspace_root())
         self._stack.setCurrentIndex(0)
 
     # -------------------------------------------------------------- Events

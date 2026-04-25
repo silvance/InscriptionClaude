@@ -51,9 +51,11 @@ class SessionWorkspaceWidget(QWidget):
         splitter.addWidget(self._editor)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
+        splitter.setHandleWidth(1)
+        splitter.setChildrenCollapsible(False)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.addWidget(splitter)
 
     # ------------------------------------------------------------ API

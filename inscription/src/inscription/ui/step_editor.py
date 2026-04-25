@@ -31,6 +31,16 @@ if TYPE_CHECKING:
 DEBOUNCE_MS = 600
 
 
+def _section_label(text: str, parent: QWidget) -> QLabel:
+    """A small bold heading used to title the editor's sections."""
+    label = QLabel(text, parent)
+    font = label.font()
+    font.setBold(True)
+    label.setFont(font)
+    label.setStyleSheet("color: #6e6e73; letter-spacing: 0.4px;")
+    return label
+
+
 class StepEditorPanel(QWidget):
     """Step text editor + screenshot preview."""
 
@@ -51,7 +61,9 @@ class StepEditorPanel(QWidget):
         self._screenshot = QLabel(self)
         self._screenshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._screenshot.setMinimumHeight(240)
-        self._screenshot.setStyleSheet("border: 1px solid #ccc; background: #fafafa;")
+        # Stylesheet selector: picks up the "card" role from the global QSS.
+        self._screenshot.setObjectName("StepScreenshot")
+        self._screenshot.setProperty("role", "card")
         self._screenshot.setText("No screenshot")
 
         self._evidentiary_cb = QCheckBox("Mark as evidentiary", self)
@@ -72,10 +84,13 @@ class StepEditorPanel(QWidget):
         controls.addWidget(self._suppress_btn)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Step description", self))
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(_section_label("Step description", self))
         layout.addWidget(self._text, 1)
         layout.addLayout(controls)
-        layout.addWidget(QLabel("Screenshot", self))
+        layout.addSpacing(4)
+        layout.addWidget(_section_label("Screenshot", self))
         layout.addWidget(self._screenshot, 2)
 
         self._debounce = QTimer(self)

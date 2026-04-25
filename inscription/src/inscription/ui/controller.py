@@ -129,6 +129,14 @@ class SessionController(QObject):
         """Show the session picker. Called from the main window on launch."""
         self._show_session_picker()
 
+    def open_session_by_slug(self, slug: str) -> None:
+        """Open the session identified by ``slug`` from the welcome page."""
+        self._open_session(slug)
+
+    def workspace_root(self) -> Path:
+        """Return the directory the welcome page should enumerate."""
+        return self._workspace_root()
+
     def shutdown(self) -> None:
         self._workspace.flush_pending()
         self._stop_recording()

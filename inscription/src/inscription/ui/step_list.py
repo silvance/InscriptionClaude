@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QWidget
 
 if TYPE_CHECKING:
@@ -99,9 +99,29 @@ class StepListWidget(QListWidget):
         screenshots: dict[int, ScreenshotArtifact],
         session_root: Path,
     ) -> QListWidgetItem:
-        label_text = f"{step.sequence:02d}. {step.text or '(empty step)'}"
-        item = QListWidgetItem(label_text)
+        prefix = f"{step.sequence:02d}."
+        body = step.text or "(empty step)"
+        badge = "  ★" if step.evidentiary else ""
+        item = QListWidgetItem(f"{prefix} {body}{badge}")
         item.setData(Qt.ItemDataRole.UserRole, step.id)
+
+        font = QFont()
+        tip_parts: list[str] = []
+        if step.evidentiary:
+            font.setBold(True)
+            # Warm gold — reads as "important" without screaming.
+            item.setForeground(QColor("#a67c00"))
+            tip_parts.append("Marked as evidentiary")
+        if step.suppressed:
+            font.setStrikeOut(True)
+            font.setItalic(True)
+            if not step.evidentiary:
+                item.setForeground(QColor("#9a9a9e"))
+            tip_parts.append("Removed from export")
+        if tip_parts:
+            item.setFont(font)
+            item.setToolTip(" · ".join(tip_parts))
+
         if step.screenshot_id and step.screenshot_id in screenshots:
             shot = screenshots[step.screenshot_id]
             icon = self._load_thumbnail(session_root / shot.relative_path)
