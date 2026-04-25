@@ -25,9 +25,12 @@ from PySide6.QtWidgets import (
 )
 
 from caseforge.model import Case, ExaminerIdentity, ExamScope
+from caseforge.ui.sessions_view import SessionsView
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from caseforge.inscription_sessions import InscriptionSession
 
 
 def _split_csv(text: str) -> list[str]:
@@ -44,6 +47,7 @@ class CaseView(QWidget):
     save_requested = Signal(object)  # Case
     launch_inscription_requested = Signal()
     close_requested = Signal()
+    refresh_sessions_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -89,7 +93,13 @@ class CaseView(QWidget):
         header.addWidget(self._launch_btn)
         header.addWidget(self._close_btn)
 
+        self._sessions_view = SessionsView(self)
+        self._sessions_view.refresh_requested.connect(self.refresh_sessions_requested)
+
         self._tabs = QTabWidget(self)
+        # Sessions first so opening a case lands on "what work has been
+        # done?" rather than the rarely-edited Case metadata tab.
+        self._tabs.addTab(self._sessions_view, "Sessions")
         self._tabs.addTab(self._build_case_tab(), "Case")
         self._tabs.addTab(self._build_examiner_tab(), "Examiner")
         self._tabs.addTab(self._build_scope_tab(), "Scope")
@@ -101,6 +111,10 @@ class CaseView(QWidget):
         layout.addWidget(self._tabs, 1)
 
     # ------------------------------------------------------------ API
+
+    def show_sessions(self, sessions: list[InscriptionSession]) -> None:
+        """Update the Sessions tab with a fresh listing."""
+        self._sessions_view.show_sessions(sessions)
 
     def show_case(self, case: Case, *, case_dir: Path) -> None:
         self._case = case

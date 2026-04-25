@@ -52,8 +52,9 @@ class MainWindow(QMainWindow):
 
         self._case_view = CaseView(self)
         self._case_view.save_requested.connect(self._controller.save)
-        self._case_view.launch_inscription_requested.connect(self._controller.launch_inscription)
+        self._case_view.launch_inscription_requested.connect(self._on_launch_inscription)
         self._case_view.close_requested.connect(self._controller.close_current)
+        self._case_view.refresh_sessions_requested.connect(self._refresh_sessions)
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self._welcome)
@@ -187,9 +188,21 @@ class MainWindow(QMainWindow):
         if case_dir is None or not isinstance(case, Case):
             return
         self._case_view.show_case(case, case_dir=case_dir)
+        self._refresh_sessions()
         self.setWindowTitle(f"CaseForge {__version__} — {case.name}")
         self.statusBar().showMessage(f"Case {case.name!r} open")
         self._stack.setCurrentIndex(1)
+
+    def _refresh_sessions(self) -> None:
+        self._case_view.show_sessions(self._controller.current_sessions())
+
+    def _on_launch_inscription(self) -> None:
+        self._controller.launch_inscription()
+        # Inscription is async — sessions will materialise once the
+        # examiner records something. Refresh the view so the empty
+        # state still reads sensibly while they work, and the user can
+        # hit Refresh on the panel after the recording wraps.
+        self._refresh_sessions()
 
     def _on_case_closed(self) -> None:
         self.setWindowTitle(f"CaseForge {__version__}")
