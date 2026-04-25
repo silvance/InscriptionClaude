@@ -7,7 +7,7 @@ import json
 import pytest
 
 from inscription.llm.client import LLMResponseError
-from inscription.llm.prompt import build_user_prompt, parse_response
+from inscription.llm.prompt import SYSTEM_PROMPT, build_user_prompt, parse_response
 from inscription.model import DraftStep, EventKind, RawEvent, ResolvedElement, utcnow
 
 
@@ -81,6 +81,17 @@ def test_build_user_prompt_contains_events_and_manual_edits() -> None:
     # Only manual-edit steps appear in the manual_edits block.
     assert "Manually edited thing" in prompt
     assert "Auto thing" not in prompt
+
+
+def test_system_prompt_forbids_invented_actions() -> None:
+    """Regression guard against the model fabricating scrolling / tab
+    navigation when the input timeline contains only clicks."""
+    text = SYSTEM_PROMPT.lower()
+    assert "never invent actions" in text or "do not fabricate" in text or "do not invent" in text
+    # Mention the specific failure modes we observed in the wild so the
+    # rule can't quietly drift away from them.
+    assert "scroll" in text
+    assert "tab" in text
 
 
 def test_parse_response_accepts_plain_json() -> None:

@@ -57,6 +57,25 @@ def test_render_step_text_prefers_uia_name() -> None:
     assert "Settings" in rendered
 
 
+def test_render_scroll_uses_descriptor_and_window_title() -> None:
+    event = type(
+        "E",
+        (),
+        {
+            "kind": EventKind.SCROLL,
+            "key": None,
+            "text": "down 8",
+            "window_title": "Google Chrome",
+            "process_name": "chrome.exe",
+            "button": None,
+        },
+    )()
+    rendered = render_step_text(event, None)  # type: ignore[arg-type]
+    assert "Scroll" in rendered
+    assert "down 8" in rendered
+    assert "Google Chrome" in rendered
+
+
 def test_render_click_drops_in_window_for_cross_process_element() -> None:
     # Taskbar / Start-menu clicks: the element lives in explorer.exe but
     # the foreground is still the user's previous app. Gluing them produces

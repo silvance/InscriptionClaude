@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Scroll capture.** New ``ScrollSource`` (``pynput.on_scroll``)
+  records mouse-wheel scrolling. Continuous scrolling is debounced —
+  a flick produces one ``EventKind.SCROLL`` event with the cumulative
+  amount encoded as ``"down 8"`` / ``"up 3, right 2"``. No screenshot
+  (scrolling is fluid; a frozen mid-scroll frame isn't useful), but
+  the engine still attaches foreground info so the rendered step
+  reads *"Scroll down 8 in Google Chrome."*. Closes the gap that was
+  causing the LLM to fabricate "navigated through tabs" when the user
+  was just scrolling.
+
+### Changed
+
+- **LLM system prompt is stricter** about not inventing actions that
+  aren't in the input timeline. Specifically forbids fabricating
+  scrolling, tab switching, or navigation when no events back them up.
+
+### Added
+
 - **Rewrite with AI.** File → Rewrite with AI… hands the session's raw
   events + UIA metadata to a local LLM (or any OpenAI-compatible server)
   and replaces the rule-based draft steps with the model's rewritten

@@ -17,6 +17,7 @@ from inscription.capture.engine import (
 )
 from inscription.capture.events import RawCaptureEvent
 from inscription.capture.keyboard_source import KeyboardMilestoneSource
+from inscription.capture.scroll_source import ScrollSource
 from inscription.capture.session_sink import SessionSink
 from inscription.capture.window_source import WindowFocusSource
 
@@ -28,6 +29,7 @@ __all__ = [
     "EnrichedEvent",
     "KeyboardMilestoneSource",
     "RawCaptureEvent",
+    "ScrollSource",
     "SessionSink",
     "WindowFocusSource",
 ]

@@ -28,6 +28,7 @@ from inscription.capture import (
     EnrichedEvent,
     KeyboardMilestoneSource,
     RawCaptureEvent,
+    ScrollSource,
     SessionSink,
     WindowFocusSource,
 )
@@ -241,6 +242,7 @@ class SessionController(QObject):
 
         engine.add_source(ClickSource())
         engine.add_source(KeyboardMilestoneSource())
+        engine.add_source(ScrollSource())
         engine.add_source(WindowFocusSource(inspector=create_foreground_inspector()))
 
         self._hotkeys.register(

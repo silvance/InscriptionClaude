@@ -38,6 +38,13 @@ Rules:
 - Drop events that don't advance the procedure: window-focus events
   that are side effects of a click, taskbar clicks whose destination
   is visible from the next event, clicks on the recording tool itself.
+- **Never invent actions that aren't in the input timeline.** Only
+  describe scrolling if a "scroll" event is present; only describe
+  switching tabs if you see distinct click events on different tabs;
+  only describe typing if a key_press or text event is present. If
+  several minutes pass between two events with no events in between,
+  do not fabricate "navigated through tabs" or "scrolled around" or
+  "explored the page" — just produce the step for the next event.
 - Preserve the original event IDs — every step's "source_event_ids"
   must contain at least one id from the input timeline.
 - Never invent details (filenames, button names, URLs) not present in

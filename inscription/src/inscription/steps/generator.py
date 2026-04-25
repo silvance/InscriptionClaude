@@ -91,6 +91,13 @@ def _render_marker(event: RawEvent) -> str:
     return event.text or "Marker placed."
 
 
+def _render_scroll(event: RawEvent) -> str:
+    descriptor = event.text or "scroll"
+    if event.window_title:
+        return f"Scroll {descriptor} in {event.window_title}."
+    return f"Scroll {descriptor}."
+
+
 def render_step_text(
     event: RawEvent,
     resolved: ResolvedElement | None,
@@ -111,6 +118,8 @@ def render_step_text(
         return _render_window_focus(event)
     if event.kind is EventKind.MARKER:
         return _render_marker(event)
+    if event.kind is EventKind.SCROLL:
+        return _render_scroll(event)
     return f"{event.kind.value}."
 
 
