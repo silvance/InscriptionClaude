@@ -18,6 +18,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from inscription.model import DraftStep, EventKind
+from inscription.steps._dedup import (
+    CLICK_DEDUP_WINDOW_S,
+    WINDOW_FOCUS_COALESCE_S,
+    ClickDedup,
+)
 
 if TYPE_CHECKING:
     from inscription.model import RawEvent, ResolvedElement
@@ -26,13 +31,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-#: Two clicks on the same resolved element within this gap collapse into one.
-CLICK_DEDUP_WINDOW_S = 0.8
-#: Window-focus events within this window of a subsequent click are assumed
-#: to be caused by that click and dropped to reduce noise.
-WINDOW_FOCUS_COALESCE_S = 0.6
 #: Resolver-confidence threshold above which we trust the UIA name + type.
 HIGH_CONFIDENCE = 0.6
+
+#: Re-exported for callers that import the dedup window through this module.
+__all__ = ["CLICK_DEDUP_WINDOW_S", "WINDOW_FOCUS_COALESCE_S", "render_step_action"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,8 +182,7 @@ class StepGenerator:
 
     def _reduce_to_actions(self, events: list[RawEvent]) -> list[_Action]:
         actions: list[_Action] = []
-        previous_click_key: tuple[int | None, str | None] | None = None
-        previous_click_ts: float | None = None
+        dedup = ClickDedup()
 
         for i, event in enumerate(events):
             if event.kind is EventKind.WINDOW_FOCUS and self._window_focus_is_noise(events, i):
@@ -188,27 +190,21 @@ class StepGenerator:
 
             resolved = self._resolve(event.resolved_element_id)
 
-            if event.kind in {EventKind.CLICK, EventKind.DOUBLE_CLICK}:
-                key = (event.resolved_element_id, event.window_title)
-                ts = event.occurred_at.timestamp()
-                if (
-                    previous_click_key == key
-                    and previous_click_ts is not None
-                    and (ts - previous_click_ts) < CLICK_DEDUP_WINDOW_S
-                ):
-                    # Merge into the previous action rather than duplicating.
-                    last = actions[-1]
-                    actions[-1] = _Action(
-                        kind=last.kind,
-                        source_event_ids=(*last.source_event_ids, event.id or 0),
-                        screenshot_id=last.screenshot_id or event.screenshot_id,
-                        action=last.action,
-                        result=last.result,
-                    )
-                    previous_click_ts = ts
-                    continue
-                previous_click_key = key
-                previous_click_ts = ts
+            should_merge = dedup.observe(
+                kind=event.kind,
+                key=(event.resolved_element_id, event.window_title),
+                ts=event.occurred_at.timestamp(),
+            )
+            if should_merge:
+                last = actions[-1]
+                actions[-1] = _Action(
+                    kind=last.kind,
+                    source_event_ids=(*last.source_event_ids, event.id or 0),
+                    screenshot_id=last.screenshot_id or event.screenshot_id,
+                    action=last.action,
+                    result=last.result,
+                )
+                continue
 
             actions.append(
                 _Action(

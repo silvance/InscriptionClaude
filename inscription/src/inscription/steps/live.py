@@ -27,8 +27,9 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from inscription.model import DraftStep, EventKind, RawEvent
-from inscription.steps.generator import CLICK_DEDUP_WINDOW_S, render_step_action
+from inscription.model import DraftStep, RawEvent
+from inscription.steps._dedup import ClickDedup
+from inscription.steps.generator import render_step_action
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -60,11 +61,10 @@ class LiveStepGenerator:
         self._repo = repository
         self._on_changed = on_changed
         self._lock = threading.Lock()
-        # Track the last appended step's id + the click-key + timestamp
-        # so we can decide whether the next click should merge into it.
+        # Track the last appended step's id so the dedup machine can
+        # extend its source events when the next click merges in.
         self._last_step_id: int | None = None
-        self._last_click_key: tuple[int | None, str | None] | None = None
-        self._last_click_ts: float | None = None
+        self._dedup = ClickDedup()
 
     # ------------------------------------------------------------ sink API
 
@@ -88,32 +88,18 @@ class LiveStepGenerator:
 
     def _handle_locked(self, *, event: EnrichedEvent, raw_id: int) -> None:
         raw = event.raw
-        is_click = raw.kind in {EventKind.CLICK, EventKind.DOUBLE_CLICK}
-        click_key: tuple[int | None, str | None] | None = None
-        ts: float | None = None
-        if is_click:
-            element_id = event.resolved.id if event.resolved is not None else None
-            click_key = (element_id, event.foreground.window_title)
-            ts = raw.occurred_at.timestamp()
-
-        # Merge into the previous step when the same element is clicked
-        # again within the dedup window — same heuristic the batch
-        # generator uses.
-        if (
-            is_click
-            and self._last_step_id is not None
-            and self._last_click_key is not None
-            and click_key == self._last_click_key
-            and self._last_click_ts is not None
-            and ts is not None
-            and (ts - self._last_click_ts) < CLICK_DEDUP_WINDOW_S
-        ):
+        element_id = event.resolved.id if event.resolved is not None else None
+        should_merge = self._dedup.observe(
+            kind=raw.kind,
+            key=(element_id, event.foreground.window_title),
+            ts=raw.occurred_at.timestamp(),
+        )
+        if should_merge and self._last_step_id is not None:
             self._repo.extend_step_sources(
                 self._last_step_id,
                 extra_event_ids=(raw_id,),
                 screenshot_id=event.persisted_screenshot_id,
             )
-            self._last_click_ts = ts
             return
 
         action_text = render_step_action(
@@ -130,8 +116,6 @@ class LiveStepGenerator:
             )
         )
         self._last_step_id = step.id
-        self._last_click_key = click_key
-        self._last_click_ts = ts
 
     @staticmethod
     def _adapt(*, raw_id: int, event: EnrichedEvent) -> RawEvent:
