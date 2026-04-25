@@ -1,0 +1,21 @@
+{
+  "id": "axiom-timeline-analysis",
+  "title": "AXIOM Timeline pass for incident reconstruction",
+  "category": "analysis",
+  "priority": "recommended",
+  "action": "Open the AXIOM Examine Timeline view across all artifact categories. Filter to the incident window. Tag key events (execution, file access, exfil staging, credential use). Cross-reference SRUM hourly data with Prefetch execution timestamps. Export the tagged subset as CSV for the report.",
+  "rationale": "AXIOM's all-artifact Timeline is the single best surface for proving a chronological narrative across logon, execution, file access, and network events. Tags carry through to the Portable Case for prosecutor review.",
+  "expected_result": "Tagged event list covering the incident window, with SRUM ↔ Prefetch corroboration on at least the key execution events.",
+  "depends_on": ["axiom-ci-processing"],
+  "tool_variants": {
+    "axiom": {
+      "action": "AXIOM Examine → Timeline view → set the date filter to the incident window. Apply tags via right-click → Add Tag (use the case's tag scheme: Execution Evidence, C2 Communications, Exfiltration). Verify Prefetch execution timestamps line up with SRUM Network Connectivity / Push Notifications hourly buckets. File → Export → CSV (tagged only).",
+      "ui_path": "AXIOM Examine > Timeline > Date filter / Tag / Export",
+      "notes": "Pin the SRUM and Prefetch columns side-by-side to spot drift between the two sources of truth."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "incident response", "exfiltration", "anti-forensics"],
+    "primary_tools": ["axiom"]
+  }
+}

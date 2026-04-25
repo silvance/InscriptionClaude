@@ -1,0 +1,25 @@
+{
+  "id": "mru-folder-access",
+  "title": "Windows MRU folder-access deep dive",
+  "category": "analysis",
+  "priority": "recommended",
+  "action": "Pull the user's MRU Folder Access entries and resolve each PIDL GUID to a path. Cross-reference with USB device-arrival timestamps to spot deliberate access to external-drive folders. Tag entries proving intentional dialog navigation; volume letters in MRU entries indicate external drive access.",
+  "rationale": "MRU Folder Access proves intentional folder navigation through the standard Windows Open/Save dialog — a strong indicator of deliberate user intent (vs system or program-driven access). Vista+ stores PIDL GUIDs that AXIOM and X-Ways both resolve.",
+  "expected_result": "Path-resolved MRU folder list with timestamps; at least one entry corroborated against a USB or network-share artefact.",
+  "tool_variants": {
+    "axiom": {
+      "action": "AXIOM Examine → Artifacts → MRU/Recent → MRU Folder Access. Sort by Date/Time. Right-click suspicious entries → Add Tag. Use the Connections view to link folder access to USB / network artefacts.",
+      "ui_path": "AXIOM Examine > Artifacts > MRU / Recent > MRU Folder Access",
+      "notes": "AXIOM presents PIDL GUIDs already resolved; cross-check the resolved path against the USB / Mount-Points artefact for external-drive correlation."
+    },
+    "xways": {
+      "action": "In X-Ways, run the MRU registry plugin under Tools → Run X-Ways Forensics Plugin (or a RegRipper-equivalent comdlg32.pl) against the user's NTUSER.DAT in the volume snapshot. Apply column filters on Path / Modified to pull the suspicious window.",
+      "ui_path": "Tools > Run X-Ways Forensics Plugin (with NTUSER.DAT focused)",
+      "notes": "X-Ways won't auto-resolve PIDL GUIDs as cleanly as AXIOM; consider running RegRipper externally and importing the output as a logical evidence object for cross-reference."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "credential", "fraud", "IP theft", "exfiltration", "anti-forensics"],
+    "device_classes": ["windows", "windows-laptop", "windows-desktop"]
+  }
+}
