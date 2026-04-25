@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-CASE_SCHEMA_VERSION = 1
+CASE_SCHEMA_VERSION = 2
 
 
 def utcnow() -> datetime:
@@ -36,6 +36,24 @@ class ExaminerIdentity:
     @property
     def is_present(self) -> bool:
         return bool(self.name.strip())
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CustodyRecord:
+    """Chain-of-custody fields captured at intake.
+
+    The block is intentionally light — full custody logs that span
+    transfers between examiners belong in a dedicated audit log
+    (Tool 3's territory). What we capture here is the minimum the
+    examiner fills in once when the evidence arrives.
+    """
+
+    received_at: datetime | None = None
+    received_from: str = ""  # who delivered the evidence
+    delivery_method: str = ""  # "in person", "carrier", "secure email", etc.
+    evidence_bag_ids: list[str] = field(default_factory=list)
+    seal_intact: bool | None = None  # tri-state: None = "not recorded"
+    notes: str = ""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -66,6 +84,7 @@ class Case:
     updated_at: datetime
     examiner: ExaminerIdentity = field(default_factory=ExaminerIdentity)
     scope: ExamScope = field(default_factory=ExamScope)
+    custody: CustodyRecord = field(default_factory=CustodyRecord)
     schema_version: int = CASE_SCHEMA_VERSION
     caseforge_version: str = ""
 

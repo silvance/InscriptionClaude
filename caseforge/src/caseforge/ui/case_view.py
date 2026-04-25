@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from caseforge.model import Case, ExaminerIdentity, ExamScope
+from caseforge.ui.custody_tab import CustodyTab
 from caseforge.ui.sessions_view import SessionsView
 
 if TYPE_CHECKING:
@@ -95,6 +96,7 @@ class CaseView(QWidget):
 
         self._sessions_view = SessionsView(self)
         self._sessions_view.refresh_requested.connect(self.refresh_sessions_requested)
+        self._custody_tab = CustodyTab(self)
 
         self._tabs = QTabWidget(self)
         # Sessions first so opening a case lands on "what work has been
@@ -103,6 +105,7 @@ class CaseView(QWidget):
         self._tabs.addTab(self._build_case_tab(), "Case")
         self._tabs.addTab(self._build_examiner_tab(), "Examiner")
         self._tabs.addTab(self._build_scope_tab(), "Scope")
+        self._tabs.addTab(self._custody_tab, "Custody")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
@@ -140,6 +143,7 @@ class CaseView(QWidget):
             edit.setText(value)
         self._summary_edit.setPlainText(case.scope.summary)
         self._notes_edit.setPlainText(case.scope.notes)
+        self._custody_tab.set_record(case.custody)
 
     # -------------------------------------------------------- builders
 
@@ -216,5 +220,6 @@ class CaseView(QWidget):
                 summary=self._summary_edit.toPlainText().strip(),
                 notes=self._notes_edit.toPlainText().strip(),
             ),
+            custody=self._custody_tab.to_record(),
         )
         self.save_requested.emit(updated)

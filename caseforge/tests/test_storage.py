@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 
-from caseforge.model import Case, ExaminerIdentity, ExamScope, utcnow
+from caseforge.model import Case, CustodyRecord, ExaminerIdentity, ExamScope, utcnow
 from caseforge.storage import (
     ARCHIVE_DIRNAME,
     CASE_FILENAME,
@@ -157,6 +159,84 @@ def test_delete_refuses_paths_that_arent_cases(tmp_path: Path) -> None:
 
 def test_delete_missing_case_is_a_noop(tmp_path: Path) -> None:
     delete_case(tmp_path / "no-such-case")  # should not raise
+
+
+def _make_case_with_custody() -> Case:
+    now = utcnow()
+    return Case(
+        name="Custody Demo",
+        case_reference="CD-1",
+        created_at=now,
+        updated_at=now,
+        examiner=ExaminerIdentity(name="Alex"),
+        scope=ExamScope(),
+        custody=CustodyRecord(
+            received_at=datetime(2026, 4, 24, 9, 30, tzinfo=UTC),
+            received_from="Det. Wilkes",
+            delivery_method="in person",
+            evidence_bag_ids=["EB-12345", "EB-12346"],
+            seal_intact=True,
+            notes="Seal photographed at intake.",
+        ),
+    )
+
+
+def test_custody_round_trips_through_case_json(tmp_path: Path) -> None:
+    case = _make_case_with_custody()
+    target = create_case(workspace_root=tmp_path, case=case)
+    loaded = read_case(target)
+    assert loaded.custody == case.custody
+
+
+def test_v1_case_json_loads_with_default_custody(tmp_path: Path) -> None:
+    """A case.json written before the v2 schema (no ``custody`` key) should
+    open cleanly with an empty CustodyRecord and be re-saved as v2."""
+    case_dir = tmp_path / "legacy"
+    case_dir.mkdir()
+    payload = {
+        "schema_version": 1,
+        "name": "Legacy",
+        "case_reference": "LG-1",
+        "created_at": "2026-04-01T00:00:00+00:00",
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "examiner": {"name": "Alex", "organisation": "", "badge_id": ""},
+        "scope": {
+            "exam_type": "",
+            "device_classes": [],
+            "evidence_items": [],
+            "agencies": [],
+            "summary": "",
+            "notes": "",
+        },
+    }
+    (case_dir / CASE_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = read_case(case_dir)
+    # Migrated to current schema with an empty custody record.
+    assert loaded.schema_version == 2
+    assert loaded.custody == CustodyRecord()
+    assert loaded.name == "Legacy"
+
+
+def test_custody_seal_tri_state_round_trips(tmp_path: Path) -> None:
+    """seal_intact tolerates None / True / False without coercing to bool."""
+    base = _make_case_with_custody()
+    for value in (None, True, False):
+        case = dataclasses_replace_custody(base, seal_intact=value)
+        target = create_case(
+            workspace_root=tmp_path / f"seal-{value}",
+            case=case,
+        )
+        loaded = read_case(target)
+        assert loaded.custody.seal_intact is value
+
+
+def dataclasses_replace_custody(case: Case, *, seal_intact: bool | None) -> Case:
+    """Helper: mutate just the seal_intact field on a frozen Case."""
+    return dataclasses.replace(
+        case,
+        custody=dataclasses.replace(case.custody, seal_intact=seal_intact),
+    )
 
 
 def test_unknown_future_schema_version_raises(tmp_path: Path) -> None:

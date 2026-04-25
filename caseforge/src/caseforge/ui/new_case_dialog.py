@@ -21,8 +21,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from caseforge.model import Case, ExaminerIdentity, ExamScope, utcnow
+from caseforge.model import Case, CustodyRecord, ExaminerIdentity, ExamScope, utcnow
 from caseforge.templates import is_no_template, list_templates
+from caseforge.ui.custody_tab import CustodyTab
 
 
 def _split_csv(text: str) -> list[str]:
@@ -52,10 +53,14 @@ class NewCaseDialog(QDialog):
         self._scope_defaults = scope_defaults
         self._draft: Case | None = None
 
+        self._custody_tab = CustodyTab(self)
+        self._custody_tab.set_record(CustodyRecord())
+
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._build_case_tab(), "Case")
         self._tabs.addTab(self._build_examiner_tab(), "Examiner")
         self._tabs.addTab(self._build_scope_tab(), "Scope")
+        self._tabs.addTab(self._custody_tab, "Custody")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel,
@@ -236,5 +241,6 @@ class NewCaseDialog(QDialog):
                 summary=self._summary_edit.toPlainText().strip(),
                 notes=self._notes_edit.toPlainText().strip(),
             ),
+            custody=self._custody_tab.to_record(),
         )
         self.accept()

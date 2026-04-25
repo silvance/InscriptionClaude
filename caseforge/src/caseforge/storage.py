@@ -24,6 +24,7 @@ from caseforge.model import (
     CASE_SCHEMA_VERSION,
     Case,
     CaseSummary,
+    CustodyRecord,
     ExaminerIdentity,
     ExamScope,
     utcnow,
@@ -226,6 +227,18 @@ def _to_json(case: Case) -> dict[str, object]:
             "summary": case.scope.summary,
             "notes": case.scope.notes,
         },
+        "custody": {
+            "received_at": (
+                case.custody.received_at.isoformat()
+                if case.custody.received_at is not None
+                else None
+            ),
+            "received_from": case.custody.received_from,
+            "delivery_method": case.custody.delivery_method,
+            "evidence_bag_ids": list(case.custody.evidence_bag_ids),
+            "seal_intact": case.custody.seal_intact,
+            "notes": case.custody.notes,
+        },
     }
 
 
@@ -234,10 +247,13 @@ def _from_json(raw: dict[str, object]) -> Case:
     raw = _migrate(raw, schema_version)
     examiner_raw = raw.get("examiner", {}) or {}
     scope_raw = raw.get("scope", {}) or {}
+    custody_raw = raw.get("custody", {}) or {}
     if not isinstance(examiner_raw, dict):
         examiner_raw = {}
     if not isinstance(scope_raw, dict):
         scope_raw = {}
+    if not isinstance(custody_raw, dict):
+        custody_raw = {}
 
     return Case(
         name=str(raw.get("name", "")),
@@ -257,13 +273,27 @@ def _from_json(raw: dict[str, object]) -> Case:
             summary=str(scope_raw.get("summary", "")),
             notes=str(scope_raw.get("notes", "")),
         ),
+        custody=CustodyRecord(
+            received_at=_parse_optional_iso(custody_raw.get("received_at")),
+            received_from=str(custody_raw.get("received_from", "")),
+            delivery_method=str(custody_raw.get("delivery_method", "")),
+            evidence_bag_ids=_string_list(custody_raw.get("evidence_bag_ids")),
+            seal_intact=_coerce_optional_bool(custody_raw.get("seal_intact")),
+            notes=str(custody_raw.get("notes", "")),
+        ),
         schema_version=CASE_SCHEMA_VERSION,
         caseforge_version=str(raw.get("caseforge_version", "")),
     )
 
 
 def _migrate(raw: dict[str, object], from_version: int) -> dict[str, object]:
-    """Forward-only schema migration. v1 is the initial shape."""
+    """Forward-only schema migration.
+
+    v1 -> v2 adds the ``custody`` block. We don't need to mutate the
+    payload — :func:`_from_json` falls back to safe defaults when the
+    block is missing — but we still surface "newer than this build"
+    explicitly so the case browser doesn't silently pretend.
+    """
     if from_version > CASE_SCHEMA_VERSION:
         msg = (
             f"case.json schema version {from_version} is newer than this "
@@ -311,6 +341,30 @@ def _parse_iso(text: str) -> datetime:
     except ValueError:
         logger.warning("Unparseable timestamp in case.json: %r", text)
         return utcnow()
+
+
+def _parse_optional_iso(value: object) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _coerce_optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if value.strip().lower() in {"true", "yes", "1"}:
+            return True
+        if value.strip().lower() in {"false", "no", "0"}:
+            return False
+    return None
 
 
 def touch_updated_at(case: Case) -> Case:
