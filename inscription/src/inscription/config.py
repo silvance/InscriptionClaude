@@ -26,6 +26,8 @@ _K_CAPTURE_AUTO_SCREENSHOT: Final = "capture/auto_screenshot"
 _K_EXAMINER_NAME: Final = "examiner/name"
 _K_EXAMINER_ORG: Final = "examiner/org"
 _K_EXAMINER_ID: Final = "examiner/id"
+_K_TRAY_CLOSE_HINT_SHOWN: Final = "tray/close_hint_shown"
+_K_MINI_DOCK_POSITION: Final = "tray/mini_dock_position"
 
 #: Default points at Ollama's OpenAI-compatible endpoint. Also works
 #: unchanged with LM Studio or ``llama.cpp --server`` when run on 11434.
@@ -194,6 +196,38 @@ class Config:
     def has_examiner_identity(self) -> bool:
         """True once the examiner has filled in at least their name."""
         return bool(self.examiner_name.strip())
+
+    # --------------------------------------------------------- tray / dock
+
+    @property
+    def tray_close_hint_shown(self) -> bool:
+        """First-close toast: shown once so the user knows the app is still
+        running after they hit X (it minimised to the tray)."""
+        return _as_bool(self._qs.value(_K_TRAY_CLOSE_HINT_SHOWN, False))
+
+    @tray_close_hint_shown.setter
+    def tray_close_hint_shown(self, value: bool) -> None:
+        self._qs.setValue(_K_TRAY_CLOSE_HINT_SHOWN, bool(value))
+
+    @property
+    def mini_dock_position(self) -> tuple[int, int] | None:
+        """Last-saved screen coordinates for the compact overlay."""
+        raw = self._qs.value(_K_MINI_DOCK_POSITION, "")
+        if not raw:
+            return None
+        text = str(raw)
+        try:
+            x_str, y_str = text.split(",", 1)
+            return int(x_str), int(y_str)
+        except ValueError:
+            return None
+
+    @mini_dock_position.setter
+    def mini_dock_position(self, value: tuple[int, int] | None) -> None:
+        if value is None:
+            self._qs.setValue(_K_MINI_DOCK_POSITION, "")
+        else:
+            self._qs.setValue(_K_MINI_DOCK_POSITION, f"{int(value[0])},{int(value[1])}")
 
     # ------------------------------------------------------- persistence
 

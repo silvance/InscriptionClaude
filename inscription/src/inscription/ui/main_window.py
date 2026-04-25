@@ -21,8 +21,11 @@ from PySide6.QtWidgets import (
 )
 
 from inscription.config import Config
+from inscription.ui.app_icon import build_app_icon
 from inscription.ui.controller import SessionController
+from inscription.ui.mini_dock import MiniDock
 from inscription.ui.recorder_bar import RecorderBar
+from inscription.ui.tray import SystemTrayController, quit_application
 from inscription.ui.welcome import WelcomePage
 from inscription.ui.workspace import SessionWorkspaceWidget
 from inscription.version import __version__
@@ -69,6 +72,29 @@ class MainWindow(QMainWindow):
         self._controller.session_closed.connect(self._on_session_closed)
         self._welcome.open_session_requested.connect(self._controller.start)
         self._welcome.open_existing_requested.connect(self._controller.open_session_by_slug)
+
+        # Compact-overlay + tray bring-up. Both stay hidden until the
+        # examiner asks for them (or the close-to-tray path triggers).
+        self._force_quit = False
+        self._mini_dock = MiniDock()
+        self._mini_dock.expand_requested.connect(self._on_dock_expand)
+        self._mini_dock.hide_requested.connect(self._mini_dock.hide)
+        self._mini_dock.moved.connect(self._on_dock_moved)
+        self._restore_dock_position()
+        self._controller.latest_step_changed.connect(self._mini_dock.show_step)
+        self._controller.recording_state_changed.connect(self._mini_dock.set_recording)
+        self._controller.session_opened.connect(self._mini_dock.set_session_name)
+        self._controller.session_closed.connect(lambda: self._mini_dock.set_session_name(None))
+
+        self._tray = SystemTrayController(icon=build_app_icon(), parent=self)
+        self._tray.show_window_requested.connect(self._on_tray_show_window)
+        self._tray.compact_mode_requested.connect(self.enter_compact_mode)
+        self._tray.toggle_recording_requested.connect(self._recorder_bar.toggle_record)
+        self._tray.quit_requested.connect(self._on_tray_quit)
+        self._controller.session_opened.connect(self._tray.set_session)
+        self._controller.session_closed.connect(lambda: self._tray.set_session(None))
+        if self._tray.is_supported():
+            self._tray.show()
 
         self._build_menus()
         self._build_statusbar()
@@ -155,6 +181,16 @@ class MainWindow(QMainWindow):
         )
         self._auto_screenshot_action.toggled.connect(self._controller.set_auto_screenshot)
         view_menu.addAction(self._auto_screenshot_action)
+        view_menu.addSeparator()
+        self._add_action(
+            view_menu, "&Compact mode", self.enter_compact_mode,
+            shortcut="Ctrl+Shift+D",
+            tip="Hide the main window and show a small always-on-top step tracker",
+        )
+        self._add_action(
+            view_menu, "Hide to system tray", self._hide_to_tray,
+            tip="Close the main window — Inscription keeps running in the tray",
+        )
 
     def _build_help_menu(self, menubar: QMenuBar) -> None:
         help_menu = menubar.addMenu("&Help")
@@ -228,9 +264,83 @@ class MainWindow(QMainWindow):
         self._welcome.refresh(self._controller.workspace_root())
         self._stack.setCurrentIndex(0)
 
+    # ----------------------------------------------------- Tray / dock
+
+    def enter_compact_mode(self) -> None:
+        """Hide the main window and float the dock; expanded by clicking it."""
+        self._mini_dock.show()
+        self._mini_dock.raise_()
+        self.hide()
+
+    def _on_dock_expand(self) -> None:
+        self._mini_dock.hide()
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _on_dock_moved(self, x: int, y: int) -> None:
+        self._config.mini_dock_position = (x, y)
+        self._config.sync()
+
+    def _restore_dock_position(self) -> None:
+        saved = self._config.mini_dock_position
+        if saved is None:
+            # First-run default: top-right of the primary screen.
+            screen = self.screen() or self._mini_dock.screen()
+            geometry = screen.availableGeometry() if screen is not None else None
+            if geometry is not None:
+                self._mini_dock.adjustSize()
+                margin = 24
+                self._mini_dock.move(
+                    geometry.right() - self._mini_dock.width() - margin,
+                    geometry.top() + margin,
+                )
+            return
+        self._mini_dock.move(saved[0], saved[1])
+
+    def _on_tray_show_window(self) -> None:
+        self._mini_dock.hide()
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _hide_to_tray(self) -> None:
+        """Same path the X button takes when the tray is available."""
+        if not self._tray.is_supported():
+            return
+        self.hide()
+        self._maybe_show_first_close_hint()
+
+    def _maybe_show_first_close_hint(self) -> None:
+        if self._config.tray_close_hint_shown:
+            return
+        self._tray.show_message(
+            "Inscription is still running",
+            "The recorder lives in the system tray. Right-click the tray "
+            "icon to bring the window back or quit.",
+        )
+        self._config.tray_close_hint_shown = True
+        self._config.sync()
+
+    def _on_tray_quit(self) -> None:
+        self._force_quit = True
+        self.close()
+        quit_application()
+
     # -------------------------------------------------------------- Events
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802  (Qt API)
+        # X-button on the title bar: hide-to-tray instead of quit, so a
+        # mid-recording examiner who reflexively closes the window
+        # doesn't lose their session. The tray menu's Quit sets
+        # ``_force_quit`` to break out of this path.
+        if not self._force_quit and self._tray.is_supported():
+            event.ignore()
+            self.hide()
+            self._maybe_show_first_close_hint()
+            return
+        self._mini_dock.hide()
+        self._tray.hide()
         self._controller.shutdown()
         self._save_geometry()
         logger.info("Main window closing")

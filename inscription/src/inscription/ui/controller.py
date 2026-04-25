@@ -79,6 +79,11 @@ class SessionController(QObject):
     session_opened = Signal(str)  # session name
     session_closed = Signal()
     event_counted = Signal(int)  # total events in current session
+    recording_state_changed = Signal(bool)  # True when recording started, False when stopped
+    #: Emitted after every live-generator update with (latest_step, started_at).
+    #: ``latest_step`` is a :class:`DraftStep` or None; ``started_at`` is its
+    #: first-source-event timestamp (or None when nothing's been captured).
+    latest_step_changed = Signal(object, object)
 
     #: Queued across threads so the pynput hotkey callback can flip state
     #: on the Qt main thread without race conditions.
@@ -312,6 +317,7 @@ class SessionController(QObject):
         self._bridge = bridge
         self._sink = sink
         self._recorder_bar.set_recording(True)
+        self.recording_state_changed.emit(True)
         logger.info("Recording started for session %r", self._repository.session.info.name)
 
     def _stop_recording(self) -> None:
@@ -329,6 +335,7 @@ class SessionController(QObject):
         if self._repository is not None:
             self._register_toggle_hotkey()
         self._recorder_bar.set_recording(False)
+        self.recording_state_changed.emit(False)
 
     @Slot()
     def _on_toggle_hotkey(self) -> None:
@@ -346,6 +353,28 @@ class SessionController(QObject):
         if self._repository is None:
             return
         self._workspace.reload()
+        self._broadcast_latest_step()
+
+    def _broadcast_latest_step(self) -> None:
+        """Notify the compact dock (and any other listener) of the newest step."""
+        if self._repository is None:
+            self.latest_step_changed.emit(None, None)
+            return
+        steps = self._repository.list_steps()
+        if not steps:
+            self.latest_step_changed.emit(None, None)
+            return
+        latest = steps[-1]
+        events_by_id = {e.id: e for e in self._repository.list_events() if e.id is not None}
+        started_at = next(
+            (
+                events_by_id[eid].occurred_at
+                for eid in latest.source_event_ids
+                if eid in events_by_id
+            ),
+            None,
+        )
+        self.latest_step_changed.emit(latest, started_at)
 
     @Slot()
     def _on_marker_hotkey(self) -> None:
