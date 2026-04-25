@@ -16,6 +16,7 @@ import dataclasses
 import json
 import logging
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from caseforge.model import (
 logger = logging.getLogger(__name__)
 
 CASE_FILENAME = "case.json"
+ARCHIVE_DIRNAME = "_archive"
 
 #: Slug character whitelist; everything else collapses to a single dash.
 _SLUG_INVALID = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -42,6 +44,14 @@ class StorageError(Exception):
 
 class CaseAlreadyExistsError(StorageError):
     """Raised when create_case is asked to land in an existing directory."""
+
+
+class ArchiveError(StorageError):
+    """Raised when archive_case can't move the directory cleanly."""
+
+
+class DeleteError(StorageError):
+    """Raised when delete_case can't recursively remove the directory."""
 
 
 def slugify(name: str) -> str:
@@ -101,16 +111,18 @@ def read_case(case_dir: Path) -> Case:
 
 
 def list_cases(workspace_root: Path) -> list[CaseSummary]:
-    """Enumerate every case directory under ``workspace_root``.
+    """Enumerate every active case directory under ``workspace_root``.
 
     Skips directories that don't contain a ``case.json`` so partially
-    initialised folders don't pollute the browser.
+    initialised folders don't pollute the browser. The reserved
+    ``_archive/`` subdirectory is hidden — archived cases live there
+    and don't surface in the welcome list.
     """
     if not workspace_root.exists():
         return []
     summaries: list[CaseSummary] = []
     for child in sorted(workspace_root.iterdir()):
-        if not child.is_dir():
+        if not child.is_dir() or child.name == ARCHIVE_DIRNAME:
             continue
         path = child / CASE_FILENAME
         if not path.exists():
@@ -122,6 +134,63 @@ def list_cases(workspace_root: Path) -> list[CaseSummary]:
             continue
         summaries.append(_summary_for(case=case, path=child))
     return summaries
+
+
+def archive_case(case_dir: Path) -> Path:
+    """Move ``case_dir`` to ``<workspace>/_archive/<slug>``.
+
+    The archive directory is created on demand. Returns the new path.
+    Existing archive entries with the same slug get a numeric suffix
+    so re-archiving doesn't clobber the previous copy — we never
+    silently drop an examiner's work.
+    """
+    if not case_dir.exists() or not case_dir.is_dir():
+        msg = f"archive_case: not a directory: {case_dir}"
+        raise ArchiveError(msg)
+    workspace_root = case_dir.parent
+    archive_root = workspace_root / ARCHIVE_DIRNAME
+    archive_root.mkdir(parents=True, exist_ok=True)
+    target = _unique_archive_target(archive_root, case_dir.name)
+    try:
+        case_dir.rename(target)
+    except OSError as exc:
+        msg = f"archive_case: could not move {case_dir} -> {target}: {exc}"
+        raise ArchiveError(msg) from exc
+    logger.info("Archived %s -> %s", case_dir, target)
+    return target
+
+
+def delete_case(case_dir: Path) -> None:
+    """Recursively remove ``case_dir``.
+
+    Defensive: refuses to delete a directory that doesn't look like a
+    case (no ``case.json``) so a path mix-up doesn't take out the
+    workspace root.
+    """
+    if not case_dir.exists():
+        return
+    if not case_dir.is_dir() or not (case_dir / CASE_FILENAME).exists():
+        msg = f"delete_case: refusing to remove non-case path {case_dir}"
+        raise DeleteError(msg)
+    try:
+        shutil.rmtree(case_dir)
+    except OSError as exc:
+        msg = f"delete_case: could not remove {case_dir}: {exc}"
+        raise DeleteError(msg) from exc
+    logger.info("Deleted %s", case_dir)
+
+
+def _unique_archive_target(archive_root: Path, slug: str) -> Path:
+    """Pick a destination that doesn't collide with prior archive entries."""
+    candidate = archive_root / slug
+    if not candidate.exists():
+        return candidate
+    counter = 2
+    while True:
+        candidate = archive_root / f"{slug}-{counter}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def case_summary_at(path: Path) -> CaseSummary:

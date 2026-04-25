@@ -49,6 +49,8 @@ class MainWindow(QMainWindow):
         self._welcome.new_case_requested.connect(self._on_new_case)
         self._welcome.open_case_requested.connect(self._on_open_recent)
         self._welcome.open_anywhere_requested.connect(self._on_open_anywhere)
+        self._welcome.archive_case_requested.connect(self._on_archive_case)
+        self._welcome.delete_case_requested.connect(self._on_delete_case)
 
         self._case_view = CaseView(self)
         self._case_view.save_requested.connect(self._controller.save)
@@ -165,6 +167,38 @@ class MainWindow(QMainWindow):
 
     def _on_open_recent(self, path: str) -> None:
         self._controller.open_existing(Path(path))
+
+    def _on_archive_case(self, path: str) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "Archive case",
+            (
+                f"Move this case into <code>_archive/</code> inside the workspace?\n\n"
+                f"Path: {path}\n\n"
+                "Archived cases stop appearing in the browser but stay on "
+                "disk so you can recover them by moving them back."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self._controller.archive(Path(path))
+
+    def _on_delete_case(self, path: str) -> None:
+        confirm = QMessageBox.warning(
+            self,
+            "Delete case permanently",
+            (
+                f"Permanently delete this case directory and everything in it?\n\n"
+                f"Path: {path}\n\n"
+                "This cannot be undone. Recordings, screenshots, and exports "
+                "in the case folder will all be removed."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self._controller.delete(Path(path))
 
     def _open_settings(self) -> None:
         SettingsDialog(self._config, parent=self).exec()

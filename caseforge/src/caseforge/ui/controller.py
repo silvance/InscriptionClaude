@@ -24,8 +24,10 @@ from caseforge.paths import WORKSPACE_DIR
 from caseforge.storage import (
     CaseAlreadyExistsError,
     StorageError,
+    archive_case,
     case_summary_at,
     create_case,
+    delete_case,
     list_cases,
     read_case,
     touch_updated_at,
@@ -139,6 +141,44 @@ class CaseController(QObject):
         self._case = None
         self._case_dir = None
         self.case_closed.emit()
+
+    # ------------------------------------------------------ archive / delete
+
+    def archive(self, case_dir: Path) -> bool:
+        """Move a case into the workspace's reserved ``_archive/`` folder."""
+        if self._case_dir == case_dir:
+            self.close_current()
+        try:
+            archive_case(case_dir)
+        except StorageError as exc:
+            logger.exception("Archive failed")
+            QMessageBox.warning(self._parent_widget, "Archive failed", str(exc))
+            return False
+        self._forget_case(case_dir)
+        self.cases_changed.emit()
+        return True
+
+    def delete(self, case_dir: Path) -> bool:
+        """Recursively remove a case directory after a UI confirmation."""
+        if self._case_dir == case_dir:
+            self.close_current()
+        try:
+            delete_case(case_dir)
+        except StorageError as exc:
+            logger.exception("Delete failed")
+            QMessageBox.warning(self._parent_widget, "Delete failed", str(exc))
+            return False
+        self._forget_case(case_dir)
+        self.cases_changed.emit()
+        return True
+
+    def _forget_case(self, case_dir: Path) -> None:
+        """Drop a path from the recents list (post archive / delete)."""
+        target = str(case_dir.resolve())
+        remaining = [p for p in self._config.recent_case_paths if p != target]
+        if remaining != self._config.recent_case_paths:
+            self._config.recent_case_paths = remaining
+            self._config.sync()
 
     # ------------------------------------------------------ updates / save
 

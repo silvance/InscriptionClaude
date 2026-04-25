@@ -9,11 +9,16 @@ import pytest
 
 from caseforge.model import Case, ExaminerIdentity, ExamScope, utcnow
 from caseforge.storage import (
+    ARCHIVE_DIRNAME,
     CASE_FILENAME,
+    ArchiveError,
     CaseAlreadyExistsError,
+    DeleteError,
     StorageError,
+    archive_case,
     case_path_for,
     create_case,
+    delete_case,
     list_cases,
     read_case,
     slugify,
@@ -103,6 +108,55 @@ def test_write_case_is_atomic_and_updates_timestamp(tmp_path: Path) -> None:
     write_case(target, bumped)
     loaded = read_case(target)
     assert loaded.updated_at >= case.updated_at
+
+
+def test_archive_case_moves_directory_into_archive(tmp_path: Path) -> None:
+    case = _make_case()
+    target = create_case(workspace_root=tmp_path, case=case)
+    moved = archive_case(target)
+    assert moved.parent.name == ARCHIVE_DIRNAME
+    assert moved.exists()
+    assert not target.exists()
+    # The browser shouldn't surface archived cases.
+    assert list_cases(tmp_path) == []
+
+
+def test_archive_case_disambiguates_collisions(tmp_path: Path) -> None:
+    case = _make_case()
+    first = create_case(workspace_root=tmp_path, case=case)
+    archive_case(first)
+    second = create_case(workspace_root=tmp_path, case=case)
+    moved = archive_case(second)
+    # The second move should land at a numbered slug to avoid clobber.
+    assert moved.name == f"{first.name}-2"
+
+
+def test_archive_refuses_non_directory(tmp_path: Path) -> None:
+    with pytest.raises(ArchiveError):
+        archive_case(tmp_path / "no-such-dir")
+
+
+def test_delete_case_removes_directory_recursively(tmp_path: Path) -> None:
+    case = _make_case()
+    target = create_case(workspace_root=tmp_path, case=case)
+    # Pretend Inscription wrote a session in there.
+    (target / "session-1").mkdir()
+    (target / "session-1" / "manifest.json").write_text("{}", encoding="utf-8")
+    delete_case(target)
+    assert not target.exists()
+
+
+def test_delete_refuses_paths_that_arent_cases(tmp_path: Path) -> None:
+    """Defensive: a path mix-up shouldn't blow away the workspace root."""
+    not_a_case = tmp_path / "bare"
+    not_a_case.mkdir()
+    with pytest.raises(DeleteError):
+        delete_case(not_a_case)
+    assert not_a_case.exists()
+
+
+def test_delete_missing_case_is_a_noop(tmp_path: Path) -> None:
+    delete_case(tmp_path / "no-such-case")  # should not raise
 
 
 def test_unknown_future_schema_version_raises(tmp_path: Path) -> None:

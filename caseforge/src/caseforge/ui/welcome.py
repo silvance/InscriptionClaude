@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -36,6 +38,8 @@ class WelcomePage(QWidget):
     new_case_requested = Signal()
     open_case_requested = Signal(str)  # case directory path
     open_anywhere_requested = Signal()
+    archive_case_requested = Signal(str)  # case directory path
+    delete_case_requested = Signal(str)  # case directory path
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -53,6 +57,8 @@ class WelcomePage(QWidget):
         self._list = QListWidget(self)
         self._list.setMinimumHeight(220)
         self._list.itemActivated.connect(self._on_activated)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
 
         self._empty_label = QLabel("No cases yet — start one with the button above.", self)
         self._empty_label.setStyleSheet("color: #6e6e73; padding: 8px;")
@@ -137,6 +143,27 @@ class WelcomePage(QWidget):
         path = item.data(Qt.ItemDataRole.UserRole)
         if isinstance(path, str):
             self.open_case_requested.emit(path)
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(path, str):
+            return
+
+        menu = QMenu(self._list)
+        open_action = QAction("Open", menu)
+        open_action.triggered.connect(lambda: self.open_case_requested.emit(path))
+        archive_action = QAction("Archive…", menu)
+        archive_action.triggered.connect(lambda: self.archive_case_requested.emit(path))
+        delete_action = QAction("Delete permanently…", menu)
+        delete_action.triggered.connect(lambda: self.delete_case_requested.emit(path))
+        menu.addAction(open_action)
+        menu.addSeparator()
+        menu.addAction(archive_action)
+        menu.addAction(delete_action)
+        menu.exec(self._list.viewport().mapToGlobal(pos))
 
     def _title(self) -> QLabel:
         title = QLabel("CaseForge", self)
