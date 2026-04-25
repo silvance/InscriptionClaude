@@ -27,8 +27,9 @@ from PySide6.QtWidgets import (
 )
 
 from caseguide.config import Config
-from caseguide.model import SuggestionsDocument, utcnow
+from caseguide.model import Suggestion, SuggestionsDocument, utcnow
 from caseguide.ui.controller import CaseGuideController
+from caseguide.ui.refine_dialog import RefineProgressDialog, RefineWorker
 from caseguide.ui.scope_panel import ScopePanel
 from caseguide.ui.suggestions_panel import SuggestionsPanel
 from caseguide.version import __version__
@@ -66,7 +67,12 @@ class MainWindow(QMainWindow):
         self._suggestions.changed.connect(self._on_suggestions_changed)
 
         self._header_label = self._build_header_label()
-        self._open_btn, self._generate_btn, self._save_btn = self._build_action_buttons()
+        (
+            self._open_btn,
+            self._generate_btn,
+            self._refine_btn,
+            self._save_btn,
+        ) = self._build_action_buttons()
 
         self.setCentralWidget(self._build_central())
         self._build_menus()
@@ -85,17 +91,28 @@ class MainWindow(QMainWindow):
         label.setFont(font)
         return label
 
-    def _build_action_buttons(self) -> tuple[QPushButton, QPushButton, QPushButton]:
+    def _build_action_buttons(
+        self,
+    ) -> tuple[QPushButton, QPushButton, QPushButton, QPushButton]:
         open_btn = QPushButton("Open case…", self)
         open_btn.clicked.connect(self._controller.open_from_picker)
-        generate_btn = QPushButton("Generate suggestions", self)
-        generate_btn.setProperty("role", "primary")
+        generate_btn = QPushButton("Generate", self)
+        generate_btn.setToolTip(
+            "Run the deterministic playbook matcher to draft suggestions."
+        )
         generate_btn.clicked.connect(self._on_generate)
         generate_btn.setEnabled(False)
+        refine_btn = QPushButton("Refine with AI", self)
+        refine_btn.setProperty("role", "primary")
+        refine_btn.setToolTip(
+            "Send the current draft to the local LLM to tailor it to this case's scope."
+        )
+        refine_btn.clicked.connect(self._on_refine)
+        refine_btn.setEnabled(False)
         save_btn = QPushButton("Save", self)
         save_btn.clicked.connect(self._on_save)
         save_btn.setEnabled(False)
-        return open_btn, generate_btn, save_btn
+        return open_btn, generate_btn, refine_btn, save_btn
 
     def _build_central(self) -> QWidget:
         header_row = QHBoxLayout()
@@ -104,6 +121,7 @@ class MainWindow(QMainWindow):
         header_row.addWidget(self._header_label, 1)
         header_row.addWidget(self._open_btn)
         header_row.addWidget(self._generate_btn)
+        header_row.addWidget(self._refine_btn)
         header_row.addWidget(self._save_btn)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -170,6 +188,7 @@ class MainWindow(QMainWindow):
         self._header_label.setText("No case open")
         self.setWindowTitle(f"CaseGuide {__version__}")
         self._generate_btn.setEnabled(False)
+        self._refine_btn.setEnabled(False)
         self._save_btn.setEnabled(False)
         self._unsaved = False
 
@@ -180,6 +199,7 @@ class MainWindow(QMainWindow):
                 "No saved suggestions — click Generate to draft a list."
             )
             self._save_btn.setEnabled(False)
+            self._refine_btn.setEnabled(False)
             self._unsaved = False
             return
         self._suggestions.set_suggestions(doc.suggestions)
@@ -190,6 +210,7 @@ class MainWindow(QMainWindow):
         # Loading from disk doesn't dirty the buffer; but enable Save so
         # the user can re-save if they want to bump the timestamp.
         self._save_btn.setEnabled(True)
+        self._refine_btn.setEnabled(bool(doc.suggestions))
         self._unsaved = False
 
     def _on_suggestions_changed(self) -> None:
@@ -207,6 +228,45 @@ class MainWindow(QMainWindow):
         )
         self._unsaved = True
         self._save_btn.setEnabled(True)
+        self._refine_btn.setEnabled(bool(doc.suggestions))
+
+    def _on_refine(self) -> None:
+        case = self._controller.current_case()
+        if case is None:
+            return
+        drafts = self._suggestions.suggestions()
+        if not drafts:
+            self.statusBar().showMessage(
+                "Run Generate first — there's nothing for the LLM to refine."
+            )
+            return
+        refiner = self._controller.build_refiner()
+        if refiner is None:
+            return
+        worker = RefineWorker(
+            refiner=refiner, scope=case.scope, drafts=drafts, parent=self
+        )
+        dialog = RefineProgressDialog(worker, parent=self)
+        dialog.succeeded.connect(self._on_refine_succeeded)
+        dialog.failed.connect(self._on_refine_failed)
+        dialog.start()
+        dialog.exec()
+
+    def _on_refine_succeeded(self, refined: list[Suggestion]) -> None:
+        self._suggestions.set_suggestions(refined)
+        self.statusBar().showMessage(
+            f"LLM produced {len(refined)} refined suggestion(s)."
+        )
+        self._unsaved = True
+        self._save_btn.setEnabled(True)
+        self._refine_btn.setEnabled(bool(refined))
+
+    def _on_refine_failed(self, message: str) -> None:
+        QMessageBox.warning(
+            self,
+            "LLM refinement failed",
+            _friendly_llm_error(message, base_url=self._config.llm_base_url),
+        )
 
     def _on_save(self) -> None:
         case_dir = self._controller.current_case_dir()
@@ -291,3 +351,37 @@ class MainWindow(QMainWindow):
                 self._on_save()
         self._save_geometry()
         super().closeEvent(event)
+
+
+def _friendly_llm_error(raw_message: str, *, base_url: str) -> str:
+    """Turn a urllib stacktrace string into something the user can act on.
+
+    Mirrors Inscription's helper of the same name — the local-LLM-not-
+    running case is the dominant failure mode in the field, so we
+    catch the connection-refused / unreachable patterns and tell the
+    user what to do instead of dumping a stacktrace.
+    """
+    lower = raw_message.lower()
+    if "connection refused" in lower or "failed to establish" in lower:
+        return (
+            f"Couldn't reach the local LLM server at {base_url}.\n\n"
+            "Start Ollama (or LM Studio / llama.cpp --server) and try "
+            "again. If it's running on a different URL or port, edit "
+            "config.ini — a Settings dialog lands in a follow-up commit.\n\n"
+            f"Original error: {raw_message}"
+        )
+    if "timed out" in lower:
+        return (
+            "The LLM took too long to respond.\n\n"
+            "Local models can be slow on the first request after start-up. "
+            "Wait and retry, or switch to a smaller model in config.ini.\n\n"
+            f"Original error: {raw_message}"
+        )
+    if "model not found" in lower or "no such model" in lower or "http 404" in lower:
+        return (
+            "The configured model isn't available on the LLM server.\n\n"
+            "Pull it (e.g. `ollama pull gemma4`) or change the model "
+            "name in config.ini.\n\n"
+            f"Original error: {raw_message}"
+        )
+    return raw_message

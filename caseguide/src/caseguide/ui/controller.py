@@ -1,13 +1,10 @@
 """Application controller for CaseGuide.
 
 Owns the open case + the playbook library; bridges the panels to the
-storage / generator modules. Panels emit Qt signals; the controller
-translates them into ``case.json`` / ``suggestions.json`` mutations.
-
-The controller is deliberately lean — there's no event loop or
-queued cross-thread work yet. The LLM augmentation pass (commit 5)
-introduces a worker thread; until then everything runs synchronously
-on the main thread.
+storage / generator / LLM modules. Panels emit Qt signals; the
+controller translates them into ``case.json`` / ``suggestions.json``
+reads and writes. The LLM refinement path runs on a worker thread
+via :class:`caseguide.ui.refine_dialog.RefineWorker`.
 """
 
 from __future__ import annotations
@@ -23,6 +20,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from caseguide.case_reader import CaseReadError, read_case
 from caseguide.config import Config
 from caseguide.generator import generate_suggestions
+from caseguide.llm import LLMClient, LLMError, SuggestionsRefiner
 from caseguide.model import SuggestionsDocument, utcnow
 from caseguide.playbooks import PlaybookMatcher, load_playbooks
 from caseguide.storage import StorageError, read_suggestions, write_suggestions
@@ -120,6 +118,27 @@ class CaseGuideController(QObject):
             )
             return None
         return generate_suggestions(scope=self._case.scope, matcher=self._matcher)
+
+    # ------------------------------------------------------- refine
+
+    def build_refiner(self) -> SuggestionsRefiner | None:
+        """Construct a refiner from the current LLM config.
+
+        Returns None and shows a friendly error dialog when the LLM
+        config is incomplete; the caller falls back to keeping the
+        deterministic suggestions in place.
+        """
+        try:
+            client = LLMClient(
+                base_url=self._config.llm_base_url,
+                model=self._config.llm_model,
+                timeout_s=self._config.llm_timeout_s,
+                api_key=self._config.llm_api_key,
+            )
+        except LLMError as exc:
+            QMessageBox.warning(self._parent_widget, "LLM not configured", str(exc))
+            return None
+        return SuggestionsRefiner(client=client)
 
     # ------------------------------------------------------- save
 
