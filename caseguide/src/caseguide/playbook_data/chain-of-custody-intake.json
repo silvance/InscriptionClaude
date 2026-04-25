@@ -1,0 +1,17 @@
+{
+  "id": "chain-of-custody-intake",
+  "title": "Chain-of-custody intake check",
+  "category": "intake",
+  "priority": "required",
+  "action": "Confirm the evidence bag IDs, seal integrity, delivery method, and source recorded on the intake form match what physically arrived. Photograph the seal before opening. File the intake form alongside the case.",
+  "rationale": "Defensible exam reports turn on a clean chain-of-custody story from the moment evidence arrives. Photographing an intact seal pre-empts later tamper claims.",
+  "expected_result": "All evidence bag IDs and seal-intact status recorded in the case match what physically arrived. Photo of the intact seal saved with the case.",
+  "references": [
+    "SWGDE Model Standard Operating Procedures for Computer Forensics"
+  ],
+  "applies_to": {
+    "exam_types": [],
+    "device_classes": [],
+    "evidence_items": []
+  }
+}

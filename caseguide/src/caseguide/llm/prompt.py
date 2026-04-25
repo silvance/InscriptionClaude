@@ -1,0 +1,211 @@
+"""System prompt + JSON parsing for the suggestions refinement pass.
+
+The model gets:
+
+- ``SYSTEM_PROMPT``: its role (refine, don't invent), the schema to
+  emit, the vocabulary to use, and explicit constraints against
+  drift.
+- A user message built by :func:`build_user_prompt` carrying the
+  case scope summary, the primary tool, and the deterministic
+  suggestions list rendered from matched playbooks.
+
+Output: a strict JSON object with a single key ``"suggestions"``
+whose value mirrors the :class:`caseguide.model.Suggestion` shape.
+The model can drop, reorder, retitle, or add suggestions, but each
+must still cite a playbook id from the input as ``source_id`` (or
+``"manual-<n>"`` for genuinely new entries) so we know what's grounded.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from caseguide.llm.client import LLMResponseError
+from caseguide.model import (
+    PRIORITY_CHOICES,
+    PRIORITY_RECOMMENDED,
+)
+
+if TYPE_CHECKING:
+    from caseguide.case_reader import CaseScope
+    from caseguide.model import Suggestion
+
+logger = logging.getLogger(__name__)
+
+
+SYSTEM_PROMPT = """\
+You are a forensic-exam coach. Your role is to *refine* a draft list
+of recommended exam actions for a specific case — not to invent steps
+from scratch.
+
+You will receive:
+
+  1. A case scope (exam type, primary forensic tool, device classes,
+     evidence items, agencies, and a free-text summary / notes).
+  2. A list of draft suggestions already produced by a deterministic
+     playbook matcher. Each draft entry carries id, action,
+     rationale, expected_result, priority, category, and references.
+
+Your job: tailor that list to the specific case. Concretely you may:
+
+- **Reword** an action so it matches the case's specific evidence
+  items, device names, or examiner vocabulary. Use plain forensic
+  language — avoid generic IT-support phrasing.
+- **Drop** a suggestion that doesn't apply to this case (note the
+  reason briefly in ``rationale`` if the omission is non-obvious).
+- **Reorder** to put dependencies before dependents.
+- **Add** a small number of scope-specific suggestions the
+  deterministic playbooks did not cover — but only when the case
+  clearly demands them. Do not invent procedural steps the model
+  has no grounding for.
+
+Hard rules:
+
+- Use the **primary tool's vocabulary** for action wording. If the
+  case's primary_tool is "axiom", action text should reference
+  AXIOM Process / AXIOM Examine button paths (e.g. "Tools →
+  Verify Evidence"). If "xways", X-Ways menu paths
+  ("Specialist → Refine Volume Snapshot"). For other / unspecified,
+  stick to tool-agnostic phrasing.
+- **Never invent specific tool features that don't exist.** If you're
+  unsure whether a button exists in AXIOM v8 or X-Ways v20, keep
+  the wording at the level of the action ("compute the SHA-256")
+  rather than guessing the menu path.
+- **Preserve the schema.** Every suggestion must have id, action,
+  priority (one of: required, recommended, optional), category,
+  expected_result, rationale, references (string list), depends_on
+  (list of suggestion ids), and source_id (the playbook id you
+  refined from, or "manual-<n>" for a new entry).
+
+Output format: a single JSON object with one key, "suggestions". No
+prose before or after. No markdown code fence is required but if
+you include one we will tolerate it.
+"""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RefinedSuggestion:
+    """One suggestion parsed out of the LLM's JSON response."""
+
+    id: str
+    action: str
+    priority: str
+    category: str
+    expected_result: str
+    rationale: str
+    references: list[str]
+    depends_on: list[str]
+    source_id: str  # playbook id this was refined from, or "manual-<n>"
+
+
+def build_user_prompt(*, scope: CaseScope, drafts: list[Suggestion]) -> str:
+    """Render the user message: scope summary + draft suggestions list."""
+    payload = {
+        "scope": {
+            "exam_type": scope.exam_type,
+            "primary_tool": scope.primary_tool,
+            "device_classes": list(scope.device_classes),
+            "evidence_items": list(scope.evidence_items),
+            "agencies": list(scope.agencies),
+            "summary": scope.summary,
+            "notes": scope.notes,
+        },
+        "draft_suggestions": [_suggestion_to_dict(s) for s in drafts],
+    }
+    return (
+        "Refine the draft suggestions for this case.\n\n"
+        f"{json.dumps(payload, indent=2, ensure_ascii=False)}\n\n"
+        "Produce the refined JSON object as specified."
+    )
+
+
+def parse_response(text: str) -> list[RefinedSuggestion]:
+    """Parse the LLM's JSON content into :class:`RefinedSuggestion` list."""
+    body = _strip_code_fences(text.strip())
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError as exc:
+        msg = f"LLM content was not valid JSON: {body[:200]!r}"
+        raise LLMResponseError(msg) from exc
+
+    if not isinstance(data, dict) or "suggestions" not in data:
+        msg = f"LLM content missing top-level 'suggestions' key: {data!r}"
+        raise LLMResponseError(msg)
+
+    raw_items = data["suggestions"]
+    if not isinstance(raw_items, list):
+        msg = f"LLM 'suggestions' must be an array, got {type(raw_items).__name__}"
+        raise LLMResponseError(msg)
+
+    out: list[RefinedSuggestion] = []
+    for index, item in enumerate(raw_items):
+        coerced = _coerce_suggestion(item, index=index)
+        if coerced is not None:
+            out.append(coerced)
+    if not out:
+        msg = "LLM returned zero usable suggestions"
+        raise LLMResponseError(msg)
+    return out
+
+
+# -------------------------------------------------------------- internals
+
+
+def _suggestion_to_dict(s: Suggestion) -> dict[str, object]:
+    return {
+        "id": s.id,
+        "action": s.action,
+        "priority": s.priority,
+        "category": s.category,
+        "expected_result": s.expected_result,
+        "rationale": s.rationale,
+        "references": list(s.references),
+        "depends_on": list(s.depends_on),
+    }
+
+
+def _strip_code_fences(text: str) -> str:
+    if not text.startswith("```"):
+        return text
+    first_nl = text.find("\n")
+    if first_nl == -1:
+        return text
+    inner = text[first_nl + 1 :]
+    if inner.endswith("```"):
+        inner = inner[:-3]
+    return inner.strip()
+
+
+def _coerce_suggestion(item: object, *, index: int) -> RefinedSuggestion | None:
+    if not isinstance(item, dict):
+        logger.warning("LLM suggestion %d is not an object: %r", index, item)
+        return None
+    action = item.get("action")
+    if not isinstance(action, str) or not action.strip():
+        logger.warning("LLM suggestion %d missing action: %r", index, item)
+        return None
+
+    priority = str(item.get("priority", PRIORITY_RECOMMENDED))
+    if priority not in PRIORITY_CHOICES:
+        priority = PRIORITY_RECOMMENDED
+
+    return RefinedSuggestion(
+        id=str(item.get("id") or f"refined-{index + 1}"),
+        action=action.strip(),
+        priority=priority,
+        category=str(item.get("category", "")),
+        expected_result=str(item.get("expected_result", "")),
+        rationale=str(item.get("rationale", "")),
+        references=_string_list(item.get("references")),
+        depends_on=_string_list(item.get("depends_on")),
+        source_id=str(item.get("source_id", "")),
+    )
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(x) for x in value if x is not None]

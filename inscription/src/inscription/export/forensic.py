@@ -17,8 +17,13 @@ import html
 import logging
 from typing import TYPE_CHECKING
 
-from inscription.export.html import _primary_event, _stage_step_asset
+from inscription.export._common import (
+    build_event_resolver,
+    select_primary_event,
+    stage_step_asset,
+)
 from inscription.model import ExportDocument, utcnow
+from inscription.util.timefmt import format_local
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -229,15 +234,7 @@ def export_forensic_notes(
     assets_dir = destination.parent / f"{destination.stem}-assets"
     assets_dir.mkdir(exist_ok=True)
 
-    element_cache: dict[int, ResolvedElement | None] = {}
-
-    def resolve(event: RawEvent) -> ResolvedElement | None:
-        eid = event.resolved_element_id
-        if eid is None:
-            return None
-        if eid not in element_cache:
-            element_cache[eid] = repository.get_resolved_element(eid)
-        return element_cache[eid]
+    resolve = build_event_resolver(repository)
 
     body_parts = [
         _TOOLBAR,
@@ -304,10 +301,8 @@ def _render_case_header(
     case_reference: str | None,
 ) -> str:
     info = session.info
-    started = info.started_at.astimezone().strftime("%d %B %Y · %H:%M")
-    ended = (
-        info.ended_at.astimezone().strftime("%d %B %Y · %H:%M") if info.ended_at else "in progress"
-    )
+    started = format_local(info.started_at, "%d %B %Y · %H:%M")
+    ended = format_local(info.ended_at, "%d %B %Y · %H:%M") if info.ended_at else "in progress"
     return (
         '<header class="case-header">\n'
         f"<h1>{html.escape(info.name)}</h1>\n"
@@ -333,10 +328,11 @@ def _render_row(
     last_date_label: str | None,
 ) -> tuple[str, str | None]:
     """Render one ``<tr>`` row plus the updated date-rollover state."""
-    primary = _primary_event(step, events_by_id)
-    when = primary.occurred_at.astimezone() if primary is not None else None
-    date_label = when.strftime("%d %b %Y") if when is not None else None
-    time_label = when.strftime("%H:%M:%S") if when is not None else "—"
+    primary = select_primary_event(step, events_by_id)
+    date_label = (
+        format_local(primary.occurred_at, "%d %b %Y") if primary is not None else None
+    )
+    time_label = format_local(primary.occurred_at, "%H:%M:%S") if primary is not None else "—"
 
     new_date: str | None = last_date_label
     if date_label and date_label != last_date_label:
@@ -382,7 +378,7 @@ def _render_action_cell(
     shot = screenshots.get(step.screenshot_id) if step.screenshot_id else None
     if shot is not None:
         element = resolver(primary_event) if primary_event else None
-        rel = _stage_step_asset(
+        asset_name = stage_step_asset(
             step=step,
             shot=shot,
             primary_event=primary_event,
@@ -390,13 +386,10 @@ def _render_action_cell(
             session_root=session_root,
             assets_dir=assets_dir,
         )
-        # _stage_step_asset returns a path relative to the destination
-        # directory ("assets/foo.png") under the regular export layout,
-        # but here our assets dir is named differently. Rewrite the
-        # leading directory if it doesn't match.
-        rel = _retarget_asset_url(rel, assets_dirname)
-        alt = html.escape(step.action)[:120]
-        parts.append(f'<img class="action-shot" src="{html.escape(rel)}" alt="{alt}">')
+        if asset_name is not None:
+            url = f"{assets_dirname}/{asset_name}"
+            alt = html.escape(step.action)[:120]
+            parts.append(f'<img class="action-shot" src="{html.escape(url)}" alt="{alt}">')
     return f"<td>{''.join(parts)}</td>"
 
 
@@ -405,14 +398,6 @@ def _render_result_cell(step: DraftStep) -> str:
         body = html.escape(step.result).replace("\n", "<br>")
         return f'<td><p class="result-text">{body}</p></td>'
     return '<td><p class="result-text result-empty">—</p></td>'
-
-
-def _retarget_asset_url(rel: str, assets_dirname: str) -> str:
-    """Swap the leading ``assets/`` segment for our differently-named dir."""
-    if "/" not in rel:
-        return rel
-    _, _, tail = rel.partition("/")
-    return f"{assets_dirname}/{tail}"
 
 
 def _render_sign_off(*, session: Session, examiner: str | None) -> str:

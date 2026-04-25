@@ -1,0 +1,22 @@
+{
+  "id": "axiom-ci-processing",
+  "title": "AXIOM CI processing pass",
+  "category": "processing",
+  "priority": "required",
+  "action": "Run AXIOM Process against the image with every artifact category enabled, DPAPI decryption armed, and the case keyword list loaded. Pay particular attention to MRU folder access, MRU opened/saved files, Recycle Bin, Shellbags, all five SRUM tables, execution evidence (Prefetch, Amcache, BAM/DAM), and anti-forensics indicators.",
+  "rationale": "CI investigations turn on proof of intentional user action. Running every category at once means the timeline pass below has the corroborating artefacts on hand without a second processing run.",
+  "expected_result": "AXIOM Examine opens with a populated Artifacts tree, an Anti-forensics category, and the keyword search hits surfaced.",
+  "depends_on": ["verify-image-hash"],
+  "tool_variants": {
+    "axiom": {
+      "action": "In AXIOM Process: Evidence Sources → add the image. Processing Details → enable every artifact category (Communication, Device Activity, Operating System, etc.). Tick DPAPI decryption and supply the user password. Import the case keyword list via Keyword Search → Import. Confirm Hash Sets includes NSRL + Project VIC if applicable. Click Analyze Evidence.",
+      "ui_path": "AXIOM Process > Evidence Sources / Processing Details / Keyword Search",
+      "notes": "DPAPI decryption needs the user password (live or recovered); without it stored credentials and Edge/Chrome saved logins won't decrypt. Magnet.AI skin-tone classification is a separate Processing Details toggle."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "credential", "fraud", "IP theft", "exfiltration", "incident response", "anti-forensics"],
+    "primary_tools": ["axiom"],
+    "evidence_items": ["E01", "DD", "image"]
+  }
+}

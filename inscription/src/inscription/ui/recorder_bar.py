@@ -106,7 +106,7 @@ class RecorderBar(QWidget):
 
         self._count_label = QLabel("0 events", self)
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._count_label.setStyleSheet("color: #6e6e73;")
+        self._count_label.setProperty("muted", True)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)

@@ -1,0 +1,34 @@
+{
+  "id": "verify-image-hash",
+  "title": "Verify image hash",
+  "category": "verification",
+  "priority": "required",
+  "action": "Compute the SHA-256 of the acquired image and compare to the value recorded at acquisition. Re-verify before any analysis touches the evidence.",
+  "rationale": "Establishes evidence integrity and seeds the chain-of-custody record. Any later tamper claim turns on this baseline matching.",
+  "expected_result": "Computed SHA-256 matches the acquisition log entry and the value on the evidence intake form.",
+  "references": [
+    "NIST SP 800-86 §5.2.2",
+    "SWGDE Best Practices for Computer Forensic Acquisitions §4.4"
+  ],
+  "tool_variants": {
+    "axiom": {
+      "action": "In AXIOM Process, Tools → Verify Evidence → select SHA-256. Record the computed hash in the case Activity Log and confirm it matches the acquisition entry. AXIOM also re-verifies on processing and surfaces mismatches in the Evidence Sources panel.",
+      "ui_path": "AXIOM Process > Tools > Verify Evidence > SHA-256",
+      "notes": "Set the hash algorithm in Project Settings if MD5 is also required."
+    },
+    "xways": {
+      "action": "In X-Ways, right-click the evidence object → Compute Hash → SHA-256. The result is logged automatically to the case Activity Log. Compare against the acquisition log entry.",
+      "ui_path": "Right-click evidence → Compute Hash → SHA-256",
+      "notes": "X-Ways stores the computed hash on the evidence object so subsequent reports show it without re-computing."
+    },
+    "ftk": {
+      "action": "In FTK Imager, File → Verify Drive/Image. Confirm the SHA-256 result matches the acquisition log.",
+      "ui_path": "FTK Imager > File > Verify Drive/Image"
+    }
+  },
+  "applies_to": {
+    "exam_types": [],
+    "device_classes": [],
+    "evidence_items": ["E01", "DD", "AD1", "image", "extraction"]
+  }
+}

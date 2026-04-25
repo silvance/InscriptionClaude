@@ -124,7 +124,7 @@ class SettingsDialog(QDialog):
             "type it on every export.",
             box,
         )
-        hint.setStyleSheet("color: #6e6e73;")
+        hint.setProperty("muted", True)
         hint.setWordWrap(True)
 
         form = QFormLayout()

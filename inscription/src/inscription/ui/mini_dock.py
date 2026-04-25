@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inscription.util.timefmt import format_clock_time
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -186,7 +188,7 @@ class MiniDock(QWidget):
         action = step.action.strip() or "(empty step)"
         self._step_label.setText(f"{step.sequence:02d}.  {action}")
         if started_at is not None:
-            self._time_label.setText(started_at.astimezone().strftime("%H:%M:%S"))
+            self._time_label.setText(format_clock_time(started_at))
         else:
             self._time_label.setText("")
 

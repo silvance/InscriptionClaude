@@ -1,0 +1,21 @@
+{
+  "id": "xways-rvs-processing",
+  "title": "X-Ways Refine Volume Snapshot pass",
+  "category": "processing",
+  "priority": "required",
+  "action": "Run X-Ways Refine Volume Snapshot with the high-value operations enabled: Volume Shadow Copy parsing, File Header Signature Search (carving), Type Verification, Internal Metadata Extraction, Hash Calculation against NSRL + case-known-bad sets, Archive Exploration, Email Extraction, Uncover Embedded Data, and Index Text. Configure each operation under its sub-dialog before launching.",
+  "rationale": "RVS is X-Ways' single processing step — running the right sub-operations now means later searches see VSS contents, carved deleted files, decompressed archive contents, and decoded internal metadata in the same volume snapshot.",
+  "expected_result": "Type Status column populated, hash matches surfaced (Category column = Notable for known-bad), VSS entries visible as 'SC #' children, archives explored recursively.",
+  "depends_on": ["verify-image-hash"],
+  "tool_variants": {
+    "xways": {
+      "action": "In X-Ways: Specialist menu → Refine Volume Snapshot. Tick: Volume Shadow Copy, File Header Signature Search, Verify File Types, Extract Internal Metadata, Compute Hash, Match Hash Set Against, Explore Archives, Extract Emails, Uncover Embedded Data, Index. Configure each sub-dialog (carve types, hash sets, supported archive extensions). Click OK to run. Watch the bottom status bar for progress; expect minutes to hours depending on image size.",
+      "ui_path": "Specialist > Refine Volume Snapshot",
+      "notes": "Save the chosen RVS configuration as a .settings file so the same processing repeats consistently across future cases. NSRL hash matching needs the .xhd database initialised first (Tools → Hash Database → Manage)."
+    }
+  },
+  "applies_to": {
+    "primary_tools": ["xways"],
+    "evidence_items": ["E01", "DD", "image"]
+  }
+}
