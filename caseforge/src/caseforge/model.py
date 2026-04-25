@@ -17,7 +17,24 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-CASE_SCHEMA_VERSION = 2
+CASE_SCHEMA_VERSION = 3
+
+#: Stable identifiers for the primary forensic tool an examiner uses on a
+#: case. Stored in ``ExamScope.primary_tool`` and consumed by CaseGuide
+#: (which renders tool-specific playbook variants) and Inscription (which
+#: feeds it to the AI-rewrite system prompt so step text comes back in
+#: the right tool's vocabulary). Free-form on the way out — the schema
+#: doesn't enforce one of these values, so adding a tool later is just a
+#: new entry in the picker.
+PRIMARY_TOOL_CHOICES: tuple[tuple[str, str], ...] = (
+    ("", "(none / unspecified)"),
+    ("axiom", "Magnet AXIOM"),
+    ("xways", "X-Ways Forensics"),
+    ("ftk", "AccessData FTK"),
+    ("autopsy", "Autopsy"),
+    ("cellebrite", "Cellebrite UFED"),
+    ("other", "Other (specify in notes)"),
+)
 
 
 def utcnow() -> datetime:
@@ -70,6 +87,7 @@ class ExamScope:
     device_classes: list[str] = field(default_factory=list)
     evidence_items: list[str] = field(default_factory=list)
     agencies: list[str] = field(default_factory=list)
+    primary_tool: str = ""  # one of PRIMARY_TOOL_CHOICES ids; "" = unspecified
     summary: str = ""
     notes: str = ""
 

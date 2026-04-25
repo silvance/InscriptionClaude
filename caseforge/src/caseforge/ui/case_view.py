@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from caseforge.model import Case, ExaminerIdentity, ExamScope
 from caseforge.ui.custody_tab import CustodyTab
 from caseforge.ui.sessions_view import SessionsView
+from caseforge.ui.widgets import build_primary_tool_combo, primary_tool_value, select_primary_tool
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -141,6 +142,7 @@ class CaseView(QWidget):
             (self._agencies_edit, _join_csv(case.scope.agencies)),
         ):
             edit.setText(value)
+        select_primary_tool(self._primary_tool_combo, case.scope.primary_tool)
         self._summary_edit.setPlainText(case.scope.summary)
         self._notes_edit.setPlainText(case.scope.notes)
         self._custody_tab.set_record(case.custody)
@@ -179,6 +181,7 @@ class CaseView(QWidget):
     def _build_scope_tab(self) -> QWidget:
         page = QWidget(self)
         self._exam_type_edit = QLineEdit(page)
+        self._primary_tool_combo = build_primary_tool_combo(page)
         self._device_classes_edit = QLineEdit(page)
         self._evidence_items_edit = QLineEdit(page)
         self._agencies_edit = QLineEdit(page)
@@ -188,6 +191,7 @@ class CaseView(QWidget):
         self._notes_edit.setMaximumHeight(140)
         form = QFormLayout()
         form.addRow("Exam type", self._exam_type_edit)
+        form.addRow("Primary tool", self._primary_tool_combo)
         form.addRow("Device classes", self._device_classes_edit)
         form.addRow("Evidence items", self._evidence_items_edit)
         form.addRow("Agencies", self._agencies_edit)
@@ -214,6 +218,7 @@ class CaseView(QWidget):
             ),
             scope=ExamScope(
                 exam_type=self._exam_type_edit.text().strip(),
+                primary_tool=primary_tool_value(self._primary_tool_combo),
                 device_classes=_split_csv(self._device_classes_edit.text()),
                 evidence_items=_split_csv(self._evidence_items_edit.text()),
                 agencies=_split_csv(self._agencies_edit.text()),

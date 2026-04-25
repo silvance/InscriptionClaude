@@ -224,6 +224,7 @@ def _to_json(case: Case) -> dict[str, object]:
             "device_classes": list(case.scope.device_classes),
             "evidence_items": list(case.scope.evidence_items),
             "agencies": list(case.scope.agencies),
+            "primary_tool": case.scope.primary_tool,
             "summary": case.scope.summary,
             "notes": case.scope.notes,
         },
@@ -270,6 +271,7 @@ def _from_json(raw: dict[str, object]) -> Case:
             device_classes=_string_list(scope_raw.get("device_classes")),
             evidence_items=_string_list(scope_raw.get("evidence_items")),
             agencies=_string_list(scope_raw.get("agencies")),
+            primary_tool=str(scope_raw.get("primary_tool", "")),
             summary=str(scope_raw.get("summary", "")),
             notes=str(scope_raw.get("notes", "")),
         ),
@@ -289,10 +291,11 @@ def _from_json(raw: dict[str, object]) -> Case:
 def _migrate(raw: dict[str, object], from_version: int) -> dict[str, object]:
     """Forward-only schema migration.
 
-    v1 -> v2 adds the ``custody`` block. We don't need to mutate the
-    payload — :func:`_from_json` falls back to safe defaults when the
-    block is missing — but we still surface "newer than this build"
-    explicitly so the case browser doesn't silently pretend.
+    Both jumps so far (v1 -> v2 added ``custody``, v2 -> v3 added
+    ``scope.primary_tool``) are additive — :func:`_from_json` falls back
+    to safe defaults when the new fields are missing — but we still
+    surface "newer than this build" explicitly so the case browser
+    doesn't silently pretend a future schema is fine.
     """
     if from_version > CASE_SCHEMA_VERSION:
         msg = (

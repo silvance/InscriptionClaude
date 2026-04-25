@@ -42,6 +42,7 @@ def _make_case(name: str = "Operation Stardust") -> Case:
         examiner=ExaminerIdentity(name="Alex Smith", organisation="CCU", badge_id="CCU-0421"),
         scope=ExamScope(
             exam_type="CSAM possession",
+            primary_tool="axiom",
             device_classes=["windows-laptop"],
             evidence_items=["E01 image"],
             agencies=["FBI"],
@@ -86,6 +87,47 @@ def test_round_trip_preserves_every_field(tmp_path: Path) -> None:
     assert loaded.case_reference == case.case_reference
     assert loaded.examiner == case.examiner
     assert loaded.scope == case.scope
+    # Specifically: the v3 primary_tool field round-trips.
+    assert loaded.scope.primary_tool == "axiom"
+
+
+def test_v2_case_json_loads_with_default_primary_tool(tmp_path: Path) -> None:
+    """A v2 case.json (no scope.primary_tool) opens with primary_tool='' and
+    upgrades to v3 on next save."""
+    case_dir = tmp_path / "v2-legacy"
+    case_dir.mkdir()
+    payload = {
+        "schema_version": 2,
+        "name": "Legacy v2",
+        "case_reference": "LV2-1",
+        "created_at": "2026-04-01T00:00:00+00:00",
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "examiner": {"name": "Alex", "organisation": "", "badge_id": ""},
+        "scope": {
+            "exam_type": "fraud",
+            "device_classes": ["windows-desktop"],
+            "evidence_items": ["E01 image"],
+            "agencies": [],
+            "summary": "",
+            "notes": "",
+        },
+        "custody": {
+            "received_at": None,
+            "received_from": "",
+            "delivery_method": "",
+            "evidence_bag_ids": [],
+            "seal_intact": None,
+            "notes": "",
+        },
+    }
+    (case_dir / CASE_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = read_case(case_dir)
+    assert loaded.schema_version == 3
+    assert loaded.scope.primary_tool == ""
+    # Other fields untouched.
+    assert loaded.scope.exam_type == "fraud"
+    assert loaded.scope.device_classes == ["windows-desktop"]
 
 
 def test_read_case_raises_when_missing(tmp_path: Path) -> None:
@@ -212,9 +254,13 @@ def test_v1_case_json_loads_with_default_custody(tmp_path: Path) -> None:
     (case_dir / CASE_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
 
     loaded = read_case(case_dir)
-    # Migrated to current schema with an empty custody record.
-    assert loaded.schema_version == 2
+    # Migrated to current schema with an empty custody record. As the
+    # schema version moves forward, this test follows: the point is
+    # that older case.json files keep loading and pick up safe defaults
+    # for every field added since.
+    assert loaded.schema_version == 3
     assert loaded.custody == CustodyRecord()
+    assert loaded.scope.primary_tool == ""
     assert loaded.name == "Legacy"
 
 

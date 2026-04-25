@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from caseforge.model import Case, CustodyRecord, ExaminerIdentity, ExamScope, utcnow
 from caseforge.templates import is_no_template, list_templates
 from caseforge.ui.custody_tab import CustodyTab
+from caseforge.ui.widgets import build_primary_tool_combo, primary_tool_value, select_primary_tool
 
 
 def _split_csv(text: str) -> list[str]:
@@ -158,6 +159,9 @@ class NewCaseDialog(QDialog):
         self._agencies_edit = QLineEdit(_join_csv(self._scope_defaults.agencies), page)
         self._agencies_edit.setPlaceholderText("comma-separated, e.g. FBI, ICAC")
 
+        self._primary_tool_combo = build_primary_tool_combo(page)
+        select_primary_tool(self._primary_tool_combo, self._scope_defaults.primary_tool)
+
         self._summary_edit = QPlainTextEdit(self._scope_defaults.summary, page)
         self._summary_edit.setPlaceholderText(
             "Short paragraph the report builder pulls into the executive summary."
@@ -187,6 +191,7 @@ class NewCaseDialog(QDialog):
         form.addRow("Apply template", self._template_combo)
         form.addRow("", template_hint)
         form.addRow("Exam type", self._exam_type_edit)
+        form.addRow("Primary tool", self._primary_tool_combo)
         form.addRow("Device classes", self._device_classes_edit)
         form.addRow("Evidence items", self._evidence_items_edit)
         form.addRow("Agencies", self._agencies_edit)
@@ -208,6 +213,7 @@ class NewCaseDialog(QDialog):
 
     def _apply_scope(self, scope: ExamScope) -> None:
         self._exam_type_edit.setText(scope.exam_type)
+        select_primary_tool(self._primary_tool_combo, scope.primary_tool)
         self._device_classes_edit.setText(_join_csv(scope.device_classes))
         self._evidence_items_edit.setText(_join_csv(scope.evidence_items))
         self._agencies_edit.setText(_join_csv(scope.agencies))
@@ -235,6 +241,7 @@ class NewCaseDialog(QDialog):
             ),
             scope=ExamScope(
                 exam_type=self._exam_type_edit.text().strip(),
+                primary_tool=primary_tool_value(self._primary_tool_combo),
                 device_classes=_split_csv(self._device_classes_edit.text()),
                 evidence_items=_split_csv(self._evidence_items_edit.text()),
                 agencies=_split_csv(self._agencies_edit.text()),
