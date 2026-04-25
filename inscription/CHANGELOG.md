@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Editor upgrades.** Three new affordances on the step list:
+  - **Drag-to-reorder.** Move steps with the mouse; sequence numbers
+    persist via ``SessionRepository.reorder_steps``.
+  - **Merge with next step.** Right-click a step → "Merge with next
+    step" combines its ``source_event_ids`` with the following step,
+    deletes the second row, marks the result ``manual_edit``.
+  - **Split off first event.** Right-click a step that covers more
+    than one source event → "Split off first event" peels the first
+    event into its own step and keeps the rest in a sibling row
+    inserted directly after.
+- ``SessionRepository.merge_steps`` and ``split_step`` back the new
+  context-menu actions; both mark touched rows as ``manual_edit`` so
+  later AI/regenerate passes preserve them verbatim.
+
+### Added
+
 - **Scroll capture.** New ``ScrollSource`` (``pynput.on_scroll``)
   records mouse-wheel scrolling. Continuous scrolling is debounced —
   a flick produces one ``EventKind.SCROLL`` event with the cumulative

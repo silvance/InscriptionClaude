@@ -101,6 +101,9 @@ class SessionController(QObject):
 
         self._workspace.step_text_edited.connect(self._on_step_text_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
+        self._workspace.steps_reordered.connect(self._on_steps_reordered)
+        self._workspace.merge_requested.connect(self._on_merge_requested)
+        self._workspace.split_requested.connect(self._on_split_requested)
         self._recorder_bar.record_toggled.connect(self._on_record_toggled)
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
         self._toggle_requested.connect(self._on_toggle_hotkey)
@@ -418,4 +421,52 @@ class SessionController(QObject):
             self._repository.set_step_suppressed(step_id, suppressed=suppressed)
         except Exception:
             logger.exception("Failed to persist step suppression (step_id=%d)", step_id)
+        self._workspace.reload()
+
+    @Slot(list)
+    def _on_steps_reordered(self, ordered_ids: list[int]) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.reorder_steps(ordered_ids)
+        except Exception:
+            logger.exception("Failed to persist reorder")
+            self._workspace.reload()  # snap UI back to truth on failure
+            return
+        # Re-derive the manifest so the session picker reflects the new
+        # ordering on next launch.
+        self._repository.flush_manifest()
+
+    @Slot(int, int)
+    def _on_merge_requested(self, primary_id: int, other_id: int) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.merge_steps(primary_id=primary_id, other_id=other_id)
+        except Exception:
+            logger.exception("Failed to merge steps %d and %d", primary_id, other_id)
+            QMessageBox.warning(
+                self._parent_widget,
+                "Merge failed",
+                "Could not merge those two steps. See logs for details.",
+            )
+            return
+        self._repository.flush_manifest()
+        self._workspace.reload()
+
+    @Slot(int)
+    def _on_split_requested(self, step_id: int) -> None:
+        if self._repository is None:
+            return
+        try:
+            self._repository.split_step(step_id)
+        except Exception:
+            logger.exception("Failed to split step %d", step_id)
+            QMessageBox.warning(
+                self._parent_widget,
+                "Split failed",
+                "Could not split that step. See logs for details.",
+            )
+            return
+        self._repository.flush_manifest()
         self._workspace.reload()

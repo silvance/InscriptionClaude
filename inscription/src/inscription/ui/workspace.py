@@ -24,6 +24,9 @@ class SessionWorkspaceWidget(QWidget):
 
     step_text_edited = Signal(int, str)
     step_suppressed = Signal(int, bool)
+    steps_reordered = Signal(list)
+    merge_requested = Signal(int, int)
+    split_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -35,6 +38,9 @@ class SessionWorkspaceWidget(QWidget):
 
         self._list.step_selected.connect(self._on_step_selected)
         self._list.step_deselected.connect(self._editor.clear)
+        self._list.steps_reordered.connect(self.steps_reordered)
+        self._list.merge_requested.connect(self.merge_requested)
+        self._list.split_requested.connect(self.split_requested)
         self._editor.text_edited.connect(self.step_text_edited)
         self._editor.step_suppressed.connect(self.step_suppressed)
 

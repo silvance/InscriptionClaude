@@ -64,6 +64,10 @@ def _loads_rect(raw: str | None) -> tuple[int, int, int, int] | None:
     return (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
 
 
+#: A step needs at least this many source events to be splittable in two.
+_MIN_SOURCE_IDS_TO_SPLIT = 2
+
+
 class SessionRepository:
     """Persistence API for a single open session."""
 
@@ -412,6 +416,128 @@ class SessionRepository:
                     (i, step_id),
                 )
             self._conn.commit()
+
+    def merge_steps(
+        self,
+        *,
+        primary_id: int,
+        other_id: int,
+        text: str | None = None,
+    ) -> DraftStep:
+        """Merge ``other_id`` into ``primary_id``; delete the other row.
+
+        The merged step keeps ``primary_id`` and its screenshot. Source
+        event ids are concatenated (primary first, other appended).
+        ``text`` overrides the merged step's text when supplied; otherwise
+        the two original texts are joined with " ". Marks the result as
+        ``manual_edit`` because the user has clearly intervened.
+        """
+        with self._lock:
+            primary_row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (primary_id,)
+            ).fetchone()
+            other_row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (other_id,)
+            ).fetchone()
+            if primary_row is None or other_row is None:
+                msg = f"merge_steps: missing step ({primary_id=}, {other_id=})"
+                raise StorageError(msg)
+
+            primary = self._row_to_step(primary_row)
+            other = self._row_to_step(other_row)
+
+            combined_ids = (*primary.source_event_ids, *other.source_event_ids)
+            merged_text = text if text is not None else f"{primary.text} {other.text}".strip()
+
+            self._conn.execute(
+                """
+                UPDATE draft_steps
+                SET text = ?, source_event_ids = ?, manual_edit = 1
+                WHERE id = ?
+                """,
+                (merged_text, json.dumps(list(combined_ids)), primary_id),
+            )
+            self._conn.execute("DELETE FROM draft_steps WHERE id = ?", (other_id,))
+            self._conn.commit()
+        return dataclasses.replace(
+            primary,
+            text=merged_text,
+            source_event_ids=combined_ids,
+            manual_edit=True,
+        )
+
+    def split_step(self, step_id: int) -> tuple[DraftStep, DraftStep]:
+        """Split ``step_id`` into two: first source event vs the rest.
+
+        The original step keeps its ``id`` and screenshot but loses every
+        source event after the first. A new row is inserted directly after
+        with the remaining source events. Both halves are marked
+        ``manual_edit``.
+
+        Raises :class:`StorageError` if the step has fewer than two
+        source events (nothing to split).
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (step_id,)
+            ).fetchone()
+            if row is None:
+                msg = f"split_step: no step with id {step_id}"
+                raise StorageError(msg)
+            step = self._row_to_step(row)
+            if len(step.source_event_ids) < _MIN_SOURCE_IDS_TO_SPLIT:
+                count = len(step.source_event_ids)
+                msg = f"split_step: step {step_id} has only {count} source event(s); cannot split"
+                raise StorageError(msg)
+
+            head = (step.source_event_ids[0],)
+            tail = step.source_event_ids[1:]
+
+            # Bump every later step's sequence by 1 so we can insert the
+            # tail half directly after this one without sequence collisions.
+            self._conn.execute(
+                "UPDATE draft_steps SET sequence = sequence + 1 WHERE sequence > ?",
+                (step.sequence,),
+            )
+
+            cursor = self._conn.execute(
+                """
+                INSERT INTO draft_steps
+                    (sequence, text, source_event_ids, screenshot_id,
+                     suppressed, manual_edit)
+                VALUES (?, ?, ?, ?, 0, 1)
+                """,
+                (
+                    step.sequence + 1,
+                    step.text,
+                    json.dumps(list(tail)),
+                    step.screenshot_id,
+                ),
+            )
+            new_id = cursor.lastrowid
+            assert new_id is not None
+
+            # Trim the original to just the first event; keep its text so
+            # the user can edit each half independently.
+            self._conn.execute(
+                """
+                UPDATE draft_steps
+                SET source_event_ids = ?, manual_edit = 1
+                WHERE id = ?
+                """,
+                (json.dumps(list(head)), step_id),
+            )
+            self._conn.commit()
+
+        first = dataclasses.replace(step, source_event_ids=head, manual_edit=True)
+        second = dataclasses.replace(
+            step,
+            id=new_id,
+            sequence=step.sequence + 1,
+            source_event_ids=tail,
+            manual_edit=True,
+        )
+        return first, second
 
     def set_step_screenshot(self, step_id: int, screenshot_id: int | None) -> None:
         with self._lock:
