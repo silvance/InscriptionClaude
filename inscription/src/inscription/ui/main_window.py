@@ -134,7 +134,18 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         menubar.addMenu("&Edit")
-        menubar.addMenu("&View")
+
+        view_menu = menubar.addMenu("&View")
+
+        self._auto_screenshot_action = QAction("Auto-screenshot every action", self)
+        self._auto_screenshot_action.setCheckable(True)
+        self._auto_screenshot_action.setChecked(self._controller.auto_screenshot_enabled())
+        self._auto_screenshot_action.setStatusTip(
+            "When off, only the Ctrl+Shift+P snapshot hotkey produces images. "
+            "Takes effect on the next recording."
+        )
+        self._auto_screenshot_action.toggled.connect(self._controller.set_auto_screenshot)
+        view_menu.addAction(self._auto_screenshot_action)
 
         help_menu = menubar.addMenu("&Help")
         about_action = QAction("&About Inscription", self)

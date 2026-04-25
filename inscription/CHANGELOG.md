@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Auto-screenshot toggle + manual snapshot hotkey.** New View menu
+  item *Auto-screenshot every action* (default on, persists in
+  ``config.ini`` under ``capture/auto_screenshot``). When unchecked,
+  ``ClickSource`` and ``WindowFocusSource`` skip their screenshot
+  grab — only the new **Ctrl+Shift+P** snapshot hotkey produces
+  images. Useful for forensic workflows where the examiner wants
+  screenshots only at deliberate moments (hash verifications, registry
+  entries, etc.) and for keeping session sizes lean. The LLM rewrite
+  is unaffected either way — it never consumed screenshots in the
+  first place.
+- ``EventKind.MARKER`` events from the snapshot hotkey carry the
+  captured PNG, so the manual snapshot lands as a normal step in the
+  draft list with a screenshot attached.
+- **Evidentiary flag on draft steps** (storage layer). New
+  ``DraftStep.evidentiary`` / ``SessionRepository.set_step_evidentiary``;
+  schema bumped 3 → 4 with an ALTER TABLE. Designed for the upcoming
+  three-tool suite — the report builder will query this flag to pull
+  the examiner-curated subset of steps into the final forensic report.
+  The UI toggle for this lands in a follow-up.
+
+### Added
+
 - **Editor upgrades.** Three new affordances on the step list:
   - **Drag-to-reorder.** Move steps with the mouse; sequence numbers
     persist via ``SessionRepository.reorder_steps``.

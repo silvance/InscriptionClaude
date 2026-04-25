@@ -50,3 +50,16 @@ def test_llm_timeout_coerces_bad_value(tmp_path) -> None:
     ini.write_text("[llm]\ntimeout_s=not-a-number\n", encoding="utf-8")
     cfg = Config(path=ini)
     assert cfg.llm_timeout_s == DEFAULT_LLM_TIMEOUT_S
+
+
+def test_auto_screenshot_default_is_true(tmp_path) -> None:
+    cfg = Config(path=tmp_path / "c.ini")
+    assert cfg.auto_screenshot is True
+
+
+def test_auto_screenshot_round_trips_false(tmp_path) -> None:
+    ini = tmp_path / "c.ini"
+    cfg = Config(path=ini)
+    cfg.auto_screenshot = False
+    cfg.sync()
+    assert Config(path=ini).auto_screenshot is False

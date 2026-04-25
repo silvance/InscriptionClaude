@@ -22,6 +22,7 @@ _K_LLM_BASE_URL: Final = "llm/base_url"
 _K_LLM_MODEL: Final = "llm/model"
 _K_LLM_TIMEOUT_S: Final = "llm/timeout_s"
 _K_LLM_API_KEY: Final = "llm/api_key"
+_K_CAPTURE_AUTO_SCREENSHOT: Final = "capture/auto_screenshot"
 
 #: Default points at Ollama's OpenAI-compatible endpoint. Also works
 #: unchanged with LM Studio or ``llama.cpp --server`` when run on 11434.
@@ -74,6 +75,25 @@ class Config:
     @workspace_root.setter
     def workspace_root(self, value: Path) -> None:
         self._qs.setValue(_K_WORKSPACE_ROOT, str(value))
+
+    # ----------------------------------------------------------- capture
+
+    @property
+    def auto_screenshot(self) -> bool:
+        """Whether ClickSource and WindowFocusSource grab a screenshot
+        on every event.
+
+        Default is True (the original behaviour). When False, only the
+        manual snapshot hotkey produces images — useful for forensic
+        workflows where the examiner wants screenshots only at moments
+        they've already decided are evidentiary, and for keeping session
+        sizes lean.
+        """
+        return _as_bool(self._qs.value(_K_CAPTURE_AUTO_SCREENSHOT, True))
+
+    @auto_screenshot.setter
+    def auto_screenshot(self, value: bool) -> None:
+        self._qs.setValue(_K_CAPTURE_AUTO_SCREENSHOT, bool(value))
 
     # ---------------------------------------------------------------- ui
 

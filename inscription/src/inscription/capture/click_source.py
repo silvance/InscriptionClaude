@@ -43,7 +43,8 @@ DOUBLE_CLICK_RADIUS_PX = 4
 class ClickSource(CaptureSource):
     """Convert pynput mouse press events into :class:`RawCaptureEvent`."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, auto_screenshot: bool = True) -> None:
+        self._auto_screenshot = auto_screenshot
         self._engine: CaptureEngine | None = None
         self._listener: Any = None
         self._lock = threading.Lock()
@@ -81,7 +82,10 @@ class ClickSource(CaptureSource):
             return
         button_name = getattr(button, "name", str(button))
         kind = self._classify(x, y, button_name)
-        png, w, h = self._capture(int(x), int(y))
+        if self._auto_screenshot:
+            png, w, h = self._capture(int(x), int(y))
+        else:
+            png, w, h = None, 0, 0
         engine.submit(
             RawCaptureEvent(
                 kind=kind,

@@ -42,6 +42,8 @@ from inscription.platform import (
     HotkeyManager,
     create_foreground_inspector,
     create_hotkey_manager,
+    create_screen_capturer,
+    safe_close,
 )
 from inscription.resolve import create_element_resolver
 from inscription.steps import generate_steps
@@ -64,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 TOGGLE_RECORD_HOTKEY = "<ctrl>+<shift>+r"
 MARKER_HOTKEY = "<ctrl>+<shift>+m"
+SNAPSHOT_HOTKEY = "<ctrl>+<shift>+p"
 
 
 class SessionController(QObject):
@@ -77,6 +80,7 @@ class SessionController(QObject):
     #: on the Qt main thread without race conditions.
     _toggle_requested = Signal()
     _marker_requested = Signal()
+    _snapshot_requested = Signal()
 
     def __init__(
         self,
@@ -108,6 +112,7 @@ class SessionController(QObject):
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
         self._toggle_requested.connect(self._on_toggle_hotkey)
         self._marker_requested.connect(self._on_marker_hotkey)
+        self._snapshot_requested.connect(self._on_snapshot_hotkey)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -246,14 +251,24 @@ class SessionController(QObject):
 
         engine.start()
 
-        engine.add_source(ClickSource())
+        auto = self._config.auto_screenshot
+        engine.add_source(ClickSource(auto_screenshot=auto))
         engine.add_source(KeyboardMilestoneSource())
         engine.add_source(ScrollSource())
-        engine.add_source(WindowFocusSource(inspector=create_foreground_inspector()))
+        engine.add_source(
+            WindowFocusSource(
+                inspector=create_foreground_inspector(),
+                auto_screenshot=auto,
+            )
+        )
 
         self._hotkeys.register(
             HotkeyBinding(sequence=MARKER_HOTKEY, name="marker"),
             self._marker_requested.emit,
+        )
+        self._hotkeys.register(
+            HotkeyBinding(sequence=SNAPSHOT_HOTKEY, name="snapshot"),
+            self._snapshot_requested.emit,
         )
 
         self._engine = engine
@@ -308,6 +323,39 @@ class SessionController(QObject):
             )
         )
 
+    @Slot()
+    def _on_snapshot_hotkey(self) -> None:
+        """Capture the current screen and submit it as a marker event.
+
+        Works in either auto- or manual-screenshot mode — handy when the
+        examiner wants to mark *this* exact moment with a frozen frame
+        even if the surrounding events would normally produce screenshots
+        anyway.
+        """
+        engine = self._engine
+        if engine is None:
+            return
+        # mss must be owned by the calling thread; the queued signal puts
+        # this on the Qt main thread, where a fresh capturer is fine.
+        capturer = create_screen_capturer()
+        try:
+            image = capturer.capture()
+        except Exception:
+            logger.exception("Snapshot hotkey failed to capture screen")
+            return
+        finally:
+            safe_close(capturer)
+        engine.submit(
+            RawCaptureEvent(
+                kind=EventKind.MARKER,
+                occurred_at=utcnow(),
+                text="Manual snapshot.",
+                png_bytes=image.png_bytes,
+                png_width=image.width,
+                png_height=image.height,
+            )
+        )
+
     # ---------------------------------------------------------- step actions
 
     def _regenerate_steps(self) -> None:
@@ -328,6 +376,19 @@ class SessionController(QObject):
     def regenerate_steps(self) -> None:
         """Public entry point for the File > Regenerate menu item."""
         self._regenerate_steps()
+
+    def auto_screenshot_enabled(self) -> bool:
+        return self._config.auto_screenshot
+
+    def set_auto_screenshot(self, enabled: bool) -> None:
+        """Persist the auto-screenshot preference.
+
+        Takes effect the next time recording starts; an in-flight session
+        keeps whatever mode it was started under so the source threads
+        stay consistent.
+        """
+        self._config.auto_screenshot = enabled
+        self._config.sync()
 
     def rewrite_with_llm(self) -> None:
         """Send the session to the configured LLM and replace draft_steps

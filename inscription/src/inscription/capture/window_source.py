@@ -61,9 +61,11 @@ class WindowFocusSource(CaptureSource):
         *,
         inspector: ForegroundInspector,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
+        auto_screenshot: bool = True,
     ) -> None:
         self._inspector = inspector
         self._interval = interval_s
+        self._auto_screenshot = auto_screenshot
         self._engine: CaptureEngine | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -109,7 +111,7 @@ class WindowFocusSource(CaptureSource):
         # already active when recording started, not a transition.
         if previous is None:
             return
-        png, w, h = self._capture(info)
+        png, w, h = self._capture(info) if self._auto_screenshot else (None, 0, 0)
         engine.submit(
             RawCaptureEvent(
                 kind=EventKind.WINDOW_FOCUS,
