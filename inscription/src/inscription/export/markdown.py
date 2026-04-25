@@ -19,11 +19,14 @@ that's the report builder's job; this exporter shows the full draft.
 from __future__ import annotations
 
 import logging
-import shutil
 from typing import TYPE_CHECKING
 
+from inscription.export._common import (
+    build_event_resolver,
+    select_primary_event,
+    stage_step_asset,
+)
 from inscription.model import ExportDocument, utcnow
-from inscription.render import crop_highlight
 from inscription.util.timefmt import format_clock_time
 
 if TYPE_CHECKING:
@@ -61,15 +64,7 @@ def export_markdown(
     assets_dir = destination.parent / f"{destination.stem}-assets"
     assets_dir.mkdir(exist_ok=True)
 
-    element_cache: dict[int, ResolvedElement | None] = {}
-
-    def resolve(event: RawEvent) -> ResolvedElement | None:
-        eid = event.resolved_element_id
-        if eid is None:
-            return None
-        if eid not in element_cache:
-            element_cache[eid] = repository.get_resolved_element(eid)
-        return element_cache[eid]
+    resolve = build_event_resolver(repository)
 
     parts = [_render_header(session)]
     for i, step in enumerate(steps, start=1):
@@ -125,7 +120,7 @@ def _render_step(
     assets_dirname: str,
 ) -> str:
     action_text = step.action.strip() or "_(empty step)_"
-    primary = _primary_event(step, events_by_id)
+    primary = select_primary_event(step, events_by_id)
     timestamp = format_clock_time(primary.occurred_at) if primary is not None else None
     heading = f"## Step {index}"
     if timestamp:
@@ -138,7 +133,7 @@ def _render_step(
     if shot is None:
         return body
     element = resolver(primary) if primary else None
-    asset_name = _stage_step_asset(
+    asset_name = stage_step_asset(
         step=step,
         shot=shot,
         primary_event=primary,
@@ -153,55 +148,3 @@ def _render_step(
     return f"{body}\n\n{image_md}"
 
 
-def _primary_event(step: DraftStep, events_by_id: dict[int, RawEvent]) -> RawEvent | None:
-    """Mirror the HTML exporter's primary-event selection."""
-    for eid in step.source_event_ids:
-        event = events_by_id.get(eid)
-        if event is None:
-            continue
-        if step.screenshot_id is not None and event.screenshot_id == step.screenshot_id:
-            return event
-    for eid in step.source_event_ids:
-        event = events_by_id.get(eid)
-        if event is not None:
-            return event
-    return None
-
-
-def _stage_step_asset(
-    *,
-    step: DraftStep,
-    shot: ScreenshotArtifact,
-    primary_event: RawEvent | None,
-    element: ResolvedElement | None,
-    session_root: Path,
-    assets_dir: Path,
-) -> str | None:
-    src_path = session_root / shot.relative_path
-    step_id = step.id if step.id is not None else step.sequence
-    target = assets_dir / f"step-{step_id:05d}.png"
-
-    try:
-        raw_bytes = src_path.read_bytes()
-    except OSError as exc:
-        logger.warning("Could not read source screenshot %s: %s", src_path, exc)
-        return None
-
-    rect = element.bounding_rect if element is not None else None
-    click = (
-        (primary_event.x, primary_event.y)
-        if primary_event is not None and primary_event.x is not None and primary_event.y is not None
-        else None
-    )
-
-    if rect is None:
-        try:
-            shutil.copyfile(src_path, target)
-        except OSError as exc:
-            logger.warning("Could not stage asset %s: %s", src_path, exc)
-            return None
-        return target.name
-
-    rendered = crop_highlight(raw_bytes, bounding_rect=rect, click_point=click)
-    target.write_bytes(rendered)
-    return target.name
