@@ -1,0 +1,52 @@
+{
+    "folders": [
+        {
+            "name": "Inscription (capture + notes)",
+            "path": "inscription"
+        },
+        {
+            "name": "CaseForge (case intake + reports)",
+            "path": "caseforge"
+        },
+        {
+            "name": "CaseGuide (LLM-assisted exam coach)",
+            "path": "caseguide"
+        },
+        {
+            "name": "Suite root",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.analysis.typeCheckingMode": "basic",
+        "python.terminal.activateEnvironment": true,
+        "[python]": {
+            "editor.defaultFormatter": "charliermarsh.ruff",
+            "editor.codeActionsOnSave": {
+                "source.organizeImports": "explicit"
+            }
+        },
+        "ruff.organizeImports": true,
+        "files.exclude": {
+            "**/__pycache__": true,
+            "**/.pytest_cache": true,
+            "**/.mypy_cache": true,
+            "**/.ruff_cache": true,
+            "**/*.egg-info": true
+        },
+        "search.exclude": {
+            "**/.venv": true,
+            "**/dist": true,
+            "**/build": true
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.vscode-pylance",
+            "charliermarsh.ruff"
+        ]
+    }
+}
