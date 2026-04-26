@@ -128,6 +128,8 @@ class SessionController(QObject):
         self._engine: CaptureEngine | None = None
         self._bridge: QtCaptureBridge | None = None
         self._sink: SessionSink | None = None
+        self._click_source: ClickSource | None = None
+        self._window_source: WindowFocusSource | None = None
         self._event_count = 0
         self._hotkeys: HotkeyManager = create_hotkey_manager()
 
@@ -334,15 +336,15 @@ class SessionController(QObject):
         engine.start()
 
         auto = self._config.auto_screenshot
-        engine.add_source(ClickSource(auto_screenshot=auto))
+        self._click_source = ClickSource(auto_screenshot=auto)
+        engine.add_source(self._click_source)
         engine.add_source(KeyboardMilestoneSource())
         engine.add_source(ScrollSource())
-        engine.add_source(
-            WindowFocusSource(
-                inspector=create_foreground_inspector(),
-                auto_screenshot=auto,
-            )
+        self._window_source = WindowFocusSource(
+            inspector=create_foreground_inspector(),
+            auto_screenshot=auto,
         )
+        engine.add_source(self._window_source)
 
         self._hotkeys.register(
             HotkeyBinding(sequence=MARKER_HOTKEY, name="marker"),
@@ -370,6 +372,8 @@ class SessionController(QObject):
         self._engine = None
         self._bridge = None
         self._sink = None
+        self._click_source = None
+        self._window_source = None
         # Re-register just the toggle binding so Ctrl+Shift+R still works.
         self._hotkeys.unregister_all()
         if self._repository is not None:
@@ -506,14 +510,17 @@ class SessionController(QObject):
         return self._config.auto_screenshot
 
     def set_auto_screenshot(self, enabled: bool) -> None:
-        """Persist the auto-screenshot preference.
+        """Persist the auto-screenshot preference and apply it immediately.
 
-        Takes effect the next time recording starts; an in-flight session
-        keeps whatever mode it was started under so the source threads
-        stay consistent.
+        Updates any running capture sources so toggling during a recording
+        takes effect on the very next event, not just at the next recording.
         """
         self._config.auto_screenshot = enabled
         self._config.sync()
+        if self._click_source is not None:
+            self._click_source.set_auto_screenshot(enabled)
+        if self._window_source is not None:
+            self._window_source.set_auto_screenshot(enabled)
 
     def rewrite_with_llm(self) -> None:
         """Send the session to the configured LLM and replace draft_steps

@@ -63,6 +63,15 @@ class ClickSource(CaptureSource):
         listener.start()
         self._listener = listener
 
+    def set_auto_screenshot(self, enabled: bool) -> None:
+        """Toggle screenshot capture while recording is in progress.
+
+        Called from the GUI thread; the pynput listener thread reads
+        ``_auto_screenshot`` on the next click. CPython bool assignment is
+        atomic, so no lock is needed.
+        """
+        self._auto_screenshot = enabled
+
     def stop(self) -> None:
         if self._listener is not None:
             try:

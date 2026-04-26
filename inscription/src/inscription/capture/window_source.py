@@ -79,6 +79,14 @@ class WindowFocusSource(CaptureSource):
         thread.start()
         self._thread = thread
 
+    def set_auto_screenshot(self, enabled: bool) -> None:
+        """Toggle screenshot capture while recording is in progress.
+
+        Called from the GUI thread; the poll thread reads ``_auto_screenshot``
+        on the next window-focus event. CPython bool assignment is atomic.
+        """
+        self._auto_screenshot = enabled
+
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
