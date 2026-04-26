@@ -1,24 +1,34 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for CaseForge.
 
-Invoke from the caseforge/ directory:
+Invoke from the caseforge/ directory, or use the repo-root build.ps1:
 
-    pyinstaller packaging/caseforge.spec --noconfirm
+    cd caseforge
+    pyinstaller packaging\\caseforge.spec --noconfirm
 
-Output is written to ``dist/CaseForge/``. Copy that folder to the
-target workstation and run ``CaseForge.exe`` directly.
+Output lands in dist\\CaseForge\\. Copy that folder to the target
+workstation and run CaseForge.exe.
 """
 
 from pathlib import Path
 
-ROOT = Path.cwd()
-SRC = ROOT / "src"
-ENTRY = SRC / "caseforge" / "__main__.py"
+SPEC_DIR = Path(__file__).resolve().parent
+ROOT     = SPEC_DIR.parent
+SRC      = ROOT / "src"
+ENTRY    = SRC / "caseforge" / "__main__.py"
 
 HIDDEN_IMPORTS = [
     "PySide6.QtCore",
     "PySide6.QtGui",
     "PySide6.QtWidgets",
+    # Optional report dependencies — bundled so the report export
+    # menu works without a separate pip install.
+    "docxtpl",
+    "docx",
+    "jinja2",
+    "jinja2.ext",
+    "lxml",
+    "lxml.etree",
 ]
 
 a = Analysis(

@@ -1,38 +1,52 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for Inscription.
 
-Invoke from the repository root:
+Invoke from the inscription/ directory, or use the repo-root build.ps1:
 
-    pyinstaller packaging/inscription.spec --noconfirm
+    cd inscription
+    pyinstaller packaging\\inscription.spec --noconfirm
 
-Output is written to ``dist/Inscription/``. Copy that folder to the target
-workstation and run ``Inscription.exe`` directly. One-folder mode is used in
-Phase 0 because it starts faster and is easier to diagnose than one-file; a
-proper installer wrapper comes in Phase 5.
+Output lands in dist\\Inscription\\. Copy that folder to the target
+workstation and run Inscription.exe. One-folder mode is used because
+it starts faster and is easier to diagnose than one-file.
 """
 
 from pathlib import Path
 
-ROOT = Path.cwd()
-SRC = ROOT / "src"
-ENTRY = SRC / "inscription" / "__main__.py"
+from PyInstaller.utils.hooks import collect_submodules
 
-# Hidden imports — modules that PyInstaller's static analysis can miss
-# because they're loaded indirectly. Listing them defensively keeps the
-# build robust across PyInstaller versions.
+SPEC_DIR = Path(__file__).resolve().parent   # inscription/packaging/
+ROOT     = SPEC_DIR.parent                    # inscription/
+SRC      = ROOT / "src"
+ENTRY    = SRC / "inscription" / "__main__.py"
+
 HIDDEN_IMPORTS = [
-    # PySide6 sub-modules used directly. The PySide6 hook usually picks
-    # them up but listing keeps us safe across PyInstaller upgrades.
+    # PySide6 — the hook usually picks these up, but listing them
+    # keeps the build stable across PyInstaller versions.
     "PySide6.QtCore",
     "PySide6.QtGui",
     "PySide6.QtWidgets",
-    # Capture stack — pynput dispatches per-OS backends at import time;
-    # comtypes underpins pywinauto's UIA bridge on Windows.
+    # Screenshot capture (Windows backend loaded at runtime).
+    "mss",
+    "mss.win32",
+    # pynput dispatches per-OS backends at import time.
     "pynput.mouse",
     "pynput.keyboard",
+    "pynput.mouse._win32",
+    "pynput.keyboard._win32",
+    # pywinauto UIA bridge.
+    "pywinauto",
+    "pywinauto.application",
+    "pywinauto.backends",
+    "pywinauto.backends.uia",
+    # comtypes underpins pywinauto on Windows; collect_submodules
+    # pulls in the generated COM stubs that static analysis misses.
     "comtypes",
     "comtypes.client",
+    *collect_submodules("comtypes"),
+    # System info.
     "psutil",
+    "psutil._pswindows",
 ]
 
 a = Analysis(
@@ -45,7 +59,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Trim obviously unused stdlib modules from the bundle.
         "tkinter",
         "unittest",
         "test",

@@ -1,19 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for CaseGuide.
 
-Invoke from the caseguide/ directory:
+Invoke from the caseguide/ directory, or use the repo-root build.ps1:
 
-    pyinstaller packaging/caseguide.spec --noconfirm
+    cd caseguide
+    pyinstaller packaging\\caseguide.spec --noconfirm
 
-Output is written to ``dist/CaseGuide/``. Copy that folder to the
-target workstation and run ``CaseGuide.exe`` directly.
+Output lands in dist\\CaseGuide\\. Copy that folder to the target
+workstation and run CaseGuide.exe.
 """
 
 from pathlib import Path
 
-ROOT = Path.cwd()
-SRC = ROOT / "src"
-ENTRY = SRC / "caseguide" / "__main__.py"
+SPEC_DIR     = Path(__file__).resolve().parent
+ROOT         = SPEC_DIR.parent
+SRC          = ROOT / "src"
+ENTRY        = SRC / "caseguide" / "__main__.py"
+PLAYBOOK_DIR = SRC / "caseguide" / "playbook_data"
 
 HIDDEN_IMPORTS = [
     "PySide6.QtCore",
@@ -25,7 +28,12 @@ a = Analysis(
     [str(ENTRY)],
     pathex=[str(SRC)],
     binaries=[],
-    datas=[],
+    datas=[
+        # Built-in forensic playbooks. paths.py resolves them via
+        # Path(__file__).parent / "playbook_data", which lands in
+        # the caseguide/ sub-directory inside the bundle's _internal/.
+        (str(PLAYBOOK_DIR), "caseguide/playbook_data"),
+    ],
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],
     hooksconfig={},
