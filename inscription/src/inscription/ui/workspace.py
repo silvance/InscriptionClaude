@@ -1,8 +1,13 @@
 """The central widget shown while a session is open.
 
-Splits horizontally: step list on the left, step editor on the right.
-Exposes signals the controller listens on and does not hold repository
-state itself.
+Splits horizontally: step list on the left, step editor in the
+middle, optional CaseGuide suggestions panel on the right. The
+suggestions panel is hidden whenever the case directory has no
+``.caseguide/suggestions.json`` so a session running without the
+sibling tool just looks like the original two-pane layout.
+
+Exposes signals the controller listens on and does not hold
+repository state itself.
 """
 
 from __future__ import annotations
@@ -14,15 +19,17 @@ from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 from inscription.ui.step_editor import StepEditorPanel
 from inscription.ui.step_list import StepListWidget
+from inscription.ui.suggestions_panel import SuggestionsPanel
 
 if TYPE_CHECKING:
     from datetime import datetime
+    from pathlib import Path
 
     from inscription.storage import SessionRepository
 
 
 class SessionWorkspaceWidget(QWidget):
-    """Step list + step editor panel."""
+    """Step list + step editor + optional CaseGuide suggestions panel."""
 
     step_fields_edited = Signal(int, str, str)  # step_id, action, result
     step_suppressed = Signal(int, bool)
@@ -30,6 +37,9 @@ class SessionWorkspaceWidget(QWidget):
     steps_reordered = Signal(list)
     merge_requested = Signal(int, int)
     split_requested = Signal(int)
+    #: Forwarded from the suggestions panel; controller catches it
+    #: and inserts a new draft step from the chosen suggestion.
+    draft_step_requested = Signal(object)  # CaseguideSuggestion
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -39,6 +49,7 @@ class SessionWorkspaceWidget(QWidget):
 
         self._list = StepListWidget(self)
         self._editor = StepEditorPanel(self)
+        self._suggestions = SuggestionsPanel(self)
 
         self._list.step_selected.connect(self._on_step_selected)
         self._list.step_deselected.connect(self._editor.clear)
@@ -48,12 +59,15 @@ class SessionWorkspaceWidget(QWidget):
         self._editor.fields_edited.connect(self.step_fields_edited)
         self._editor.step_suppressed.connect(self.step_suppressed)
         self._editor.evidentiary_toggled.connect(self.step_evidentiary_toggled)
+        self._suggestions.draft_step_requested.connect(self.draft_step_requested)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self._list)
         splitter.addWidget(self._editor)
+        splitter.addWidget(self._suggestions)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(2, 2)
         splitter.setHandleWidth(1)
         splitter.setChildrenCollapsible(False)
 
@@ -65,12 +79,22 @@ class SessionWorkspaceWidget(QWidget):
 
     def set_repository(self, repository: SessionRepository) -> None:
         self._repository = repository
+        self._suggestions.set_session_open(open_=True)
         self.reload()
 
     def clear_repository(self) -> None:
         self._repository = None
+        self._suggestions.set_session_open(open_=False)
         self._list.clear_steps()
         self._editor.clear()
+
+    def set_case_dir(self, case_dir: Path | None) -> None:
+        """Tell the suggestions panel which case directory to watch."""
+        self._suggestions.set_case_dir(case_dir)
+
+    def reload_suggestions(self) -> None:
+        """Refresh the suggestions panel from disk."""
+        self._suggestions.reload()
 
     def reload(self) -> None:
         if self._repository is None:

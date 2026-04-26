@@ -149,8 +149,26 @@ fields on each suggestion. The examiner ticks "Mark complete" in the
 suggestions panel; the row dims and strikes through, and CaseGuide's
 LLM Refine pass leaves completed entries untouched (so re-running
 Refine doesn't undo verified work). Inscription, as a read-only
-consumer, can use the same fields to grey-out completed suggestions
-when it surfaces the panel.
+consumer, mirrors the same visual treatment — completed rows render
+with strikeout text and a muted foreground colour.
+
+#### Inscription's consumer
+
+Inscription's panel lives in `inscription.ui.suggestions_panel` and
+reads suggestions.json via `inscription.caseguide_link.read_suggestions`.
+The reader is deliberately tolerant: missing file → `None` (panel
+hides), unparseable file → logged + `None` (panel hides), unknown
+fields → ignored (forward-compat with v3+).
+
+A `QFileSystemWatcher` on `<case-root>/.caseguide/suggestions.json`
+plus its parent directory means a refresh after CaseGuide's atomic
+write (.tmp + rename) lands in Inscription within a Qt event-loop
+tick — no polling.
+
+Each row has a "Draft as step" button: clicking it appends a new
+`DraftStep` to the open session (`action` ← suggestion.action,
+`result` ← suggestion.expected_result, `manual_edit=True` so the
+next Regenerate-Steps pass leaves it alone).
 
 ---
 

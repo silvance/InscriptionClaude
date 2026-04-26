@@ -42,7 +42,7 @@ from inscription.capture import (
 from inscription.config import Config
 from inscription.export import export_forensic_notes, export_html, export_markdown
 from inscription.llm import LLMClient, LLMError, StepRewriter
-from inscription.model import EventKind, utcnow
+from inscription.model import DraftStep, EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
 from inscription.platform import (
     HotkeyBinding,
@@ -71,6 +71,7 @@ from inscription.version import __version__
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from inscription.caseguide_link import CaseguideSuggestion
     from inscription.model import ExportDocument
     from inscription.ui.recorder_bar import RecorderBar
     from inscription.ui.workspace import SessionWorkspaceWidget
@@ -136,6 +137,7 @@ class SessionController(QObject):
         self._workspace.steps_reordered.connect(self._on_steps_reordered)
         self._workspace.merge_requested.connect(self._on_merge_requested)
         self._workspace.split_requested.connect(self._on_split_requested)
+        self._workspace.draft_step_requested.connect(self._on_draft_step_requested)
         self._recorder_bar.record_toggled.connect(self._on_record_toggled)
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
         self._toggle_requested.connect(self._on_toggle_hotkey)
@@ -711,6 +713,42 @@ class SessionController(QObject):
                 self._parent_widget,
                 "Split failed",
                 "Could not split that step. See logs for details.",
+            )
+            return
+        self._repository.flush_manifest()
+        self._workspace.reload()
+
+    @Slot(object)
+    def _on_draft_step_requested(self, suggestion: CaseguideSuggestion) -> None:
+        """Append a draft step seeded from a CaseGuide suggestion.
+
+        ``manual_edit=True`` so the next Regenerate-Steps pass leaves
+        the row untouched — the examiner deliberately chose this
+        suggestion, it shouldn't be clobbered by event-driven
+        regeneration.
+        """
+        if self._repository is None:
+            return
+        action = suggestion.action.strip()
+        if not action:
+            logger.info("Draft-as-step ignored: suggestion %s has no action", suggestion.id)
+            return
+        try:
+            self._repository.append_step(
+                DraftStep(
+                    id=None,
+                    sequence=0,  # repository auto-assigns from MAX(sequence) + 1
+                    action=action,
+                    result=suggestion.expected_result,
+                    manual_edit=True,
+                )
+            )
+        except Exception:
+            logger.exception("Failed to draft suggestion %s as a step", suggestion.id)
+            QMessageBox.warning(
+                self._parent_widget,
+                "Draft failed",
+                "Could not add that suggestion as a step. See logs for details.",
             )
             return
         self._repository.flush_manifest()
