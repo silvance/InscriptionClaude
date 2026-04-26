@@ -168,3 +168,90 @@ def test_starter_playbook_axiom_ci_matches_axiom_ci_case() -> None:
     assert "chain-of-custody-intake" in matched_ids
     # The X-Ways playbook must not fire for an AXIOM case.
     assert "xways-rvs-processing" not in matched_ids
+
+
+def test_soft_field_passes_when_scope_is_blank() -> None:
+    """A descriptive rule should not punish under-specified scopes."""
+    pb = Playbook(
+        id="image",
+        title="Image",
+        action="Verify hash.",
+        applies_to=AppliesTo(evidence_items=["E01", "image"]),
+    )
+    matcher = PlaybookMatcher([pb])
+    # Empty scope.evidence_items used to fail — now it's inconclusive,
+    # so the playbook still fires. The examiner can complete or remove
+    # if it doesn't apply.
+    assert matcher.match(CaseScope(exam_type="anything")) == [pb]
+
+
+def test_strict_primary_tool_rule_still_requires_explicit_match() -> None:
+    """primary_tools stays strict so AXIOM steps don't leak."""
+    pb = Playbook(
+        id="axiom",
+        title="AXIOM",
+        action="Process.",
+        applies_to=AppliesTo(primary_tools=["axiom"]),
+    )
+    matcher = PlaybookMatcher([pb])
+    # Scope without a primary_tool must NOT trigger an AXIOM-only step.
+    assert matcher.match(CaseScope(exam_type="CI")) == []
+    assert matcher.match(CaseScope(primary_tool="axiom")) == [pb]
+    assert matcher.match(CaseScope(primary_tool="xways")) == []
+
+
+def test_keyword_present_in_scope_text_short_circuits_match() -> None:
+    """Any keyword in the joined scope text fires the playbook."""
+    pb = Playbook(
+        id="hash",
+        title="Hash",
+        action="Verify.",
+        # Other rules are restrictive; keywords are the escape hatch.
+        applies_to=AppliesTo(
+            evidence_items=["E01"],
+            keywords=["acquisition", "image"],
+        ),
+    )
+    matcher = PlaybookMatcher([pb])
+    # Even with no evidence_items, the exam_type string contains
+    # "image" so the keyword hit fires the playbook.
+    assert matcher.match(CaseScope(exam_type="Forensic image acquisition")) == [pb]
+
+
+def test_keyword_does_not_override_strict_tool_when_no_match() -> None:
+    """Keywords short-circuit, but only matter to the playbook itself."""
+    pb = Playbook(
+        id="axiom-keyword",
+        title="AXIOM",
+        action="Process.",
+        applies_to=AppliesTo(
+            primary_tools=["axiom"],
+            keywords=["timeline"],
+        ),
+    )
+    matcher = PlaybookMatcher([pb])
+    # Keyword present in scope text → playbook fires regardless of
+    # primary_tools, because keywords are an OR short-circuit.
+    assert matcher.match(CaseScope(exam_type="timeline analysis")) == [pb]
+
+
+def test_under_specified_image_acquisition_case_now_fires_image_hash() -> None:
+    """Regression for the user's reported scenario.
+
+    A case with only ``exam_type='Forensic image acquisition'`` and
+    everything else empty used to match only ``chain-of-custody-intake``.
+    With the matcher rework, ``verify-image-hash`` fires too — via the
+    keyword path — since hashing is a required step for any acquired
+    image regardless of other scope details.
+    """
+    matcher = PlaybookMatcher(
+        load_playbooks(user_dir=__import__("pathlib").Path("/nonexistent"))
+    )
+    scope = CaseScope(exam_type="Forensic image acquisition")
+    matched_ids = {p.id for p in matcher.match(scope)}
+    assert "chain-of-custody-intake" in matched_ids
+    assert "verify-image-hash" in matched_ids
+    # AXIOM / X-Ways tool-specific steps must not leak into a case
+    # that hasn't picked a tool.
+    assert "axiom-ci-processing" not in matched_ids
+    assert "xways-rvs-processing" not in matched_ids

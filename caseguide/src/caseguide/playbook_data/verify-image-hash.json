@@ -29,6 +29,7 @@
   "applies_to": {
     "exam_types": [],
     "device_classes": [],
-    "evidence_items": ["E01", "DD", "AD1", "image", "extraction"]
+    "evidence_items": ["E01", "DD", "AD1", "image", "extraction"],
+    "keywords": ["image", "acquisition", "hash", "extraction", "forensic"]
   }
 }

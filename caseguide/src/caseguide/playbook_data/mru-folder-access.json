@@ -20,6 +20,7 @@
   },
   "applies_to": {
     "exam_types": ["CI", "credential", "fraud", "IP theft", "exfiltration", "anti-forensics"],
-    "device_classes": ["windows", "windows-laptop", "windows-desktop"]
+    "device_classes": ["windows", "windows-laptop", "windows-desktop"],
+    "keywords": ["windows", "mru", "user activity", "folder access", "ntuser"]
   }
 }
