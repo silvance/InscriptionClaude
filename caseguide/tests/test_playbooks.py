@@ -41,6 +41,8 @@ def test_builtin_playbooks_load_and_parse() -> None:
         "xways-rvs-processing",
         # Autopsy track.
         "autopsy-ci-processing",
+        "autopsy-timeline-analysis",
+        "autopsy-keyword-tagging",
         # Cellebrite (mobile) track.
         "cellebrite-mobile-extraction",
         "cellebrite-mobile-analysis",

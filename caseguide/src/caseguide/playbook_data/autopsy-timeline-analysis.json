@@ -1,0 +1,21 @@
+{
+  "id": "autopsy-timeline-analysis",
+  "title": "Autopsy Timeline pass for incident reconstruction",
+  "category": "analysis",
+  "priority": "recommended",
+  "action": "Open Autopsy's Timeline (Tools → Timeline) and walk the incident window across all event types — File System, Web History, Recent Activity, USB Device Events. Tag entries that prove execution, exfiltration, or credential use. Export the tagged subset for the report bundle. Pair Prefetch execution events with file-access events on the same minute when reconstructing user-driven activity.",
+  "rationale": "Autopsy's Timeline view stitches per-source events into one chronology — the same narrative surface AXIOM's Timeline gives you, just from the open-source ingest pipeline. Tagging in Timeline carries through to the case's Tagged Files / Tagged Items nodes, which Generate Report (HTML) emits as a structured section.",
+  "expected_result": "Tagged event list covering the incident window in the Timeline view; Tagged Files node populated; Generate Report HTML output includes the tagged subset.",
+  "depends_on": ["autopsy-ci-processing"],
+  "tool_variants": {
+    "autopsy": {
+      "action": "Tools → Timeline. Switch to Detail view (the histogram won't show per-event entries). Filters → Date/Time → set the incident window. Right-click events → Tag → choose the case tag scheme (Execution Evidence, Exfiltration, Credential Use). Tools → Generate Report → select the relevant tagged categories under Tagged Files.",
+      "ui_path": "Tools > Timeline > Detail view; Tools > Generate Report",
+      "notes": "Timeline ingest is incremental — if you add a data source mid-case, re-open Timeline to pick up new events. The Counts view is faster for spotting bursts of activity; switch to List for per-event tagging."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "incident response", "exfiltration", "anti-forensics", "fraud"],
+    "primary_tools": ["autopsy"]
+  }
+}

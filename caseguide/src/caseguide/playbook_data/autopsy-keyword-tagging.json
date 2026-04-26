@@ -1,0 +1,21 @@
+{
+  "id": "autopsy-keyword-tagging",
+  "title": "Autopsy keyword search + tagging review pass",
+  "category": "analysis",
+  "priority": "recommended",
+  "action": "Run the case keyword list against every ingested data source. Walk the Keyword Hits node grouping by keyword; tag genuine hits and suppress noise (NSRL-known files, app-installer strings). Use the Tags panel to drive the review-and-export loop — every tag becomes a section in the generated HTML report.",
+  "rationale": "Autopsy's Keyword Search runs concurrently with hashing during ingest, so by the time review starts the hits are already grouped per keyword. The Tags workflow is what carries findings into the prosecutor-facing report; without disciplined tagging the report has no tagged-items section to draw from.",
+  "expected_result": "Every keyword in the case list has either tagged hits or a documented zero-result. Keyword Hits node populated; Tags panel reflects the review decisions; HTML report includes a Tagged Items section.",
+  "depends_on": ["autopsy-ci-processing"],
+  "tool_variants": {
+    "autopsy": {
+      "action": "Tree → Keyword Hits — expand each keyword. For each hit: right-click → File Metadata to confirm the artefact, then right-click → Add File Tag (or Add Result Tag for blob-extracted hits) using the case tag scheme. Use Tools → Run Ingest Modules on the data source if you need to re-run Keyword Search after adding a list. Tools → Generate Report → HTML → tick Tagged Files / Tagged Results for the tagged-items section.",
+      "ui_path": "Tree > Keyword Hits; Tools > Generate Report > HTML",
+      "notes": "Keyword lists live in Tools → Options → Keyword Lists; import the case-specific list there before ingest so it runs concurrently with hashing. Adding a list post-ingest is supported via Run Ingest Modules but costs a re-run."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "credential", "fraud", "IP theft", "exfiltration", "CSAM"],
+    "primary_tools": ["autopsy"]
+  }
+}
