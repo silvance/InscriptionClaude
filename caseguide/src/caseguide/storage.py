@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 CASEGUIDE_DIRNAME = ".caseguide"
 SUGGESTIONS_FILENAME = "suggestions.json"
 
+# Hard cap on the size of suggestions.json. Even a maximalist case with
+# hundreds of suggestions and long rationales fits comfortably in a few
+# hundred KB — anything larger is corrupt or hostile, and the load path
+# refuses to read it into memory rather than risk a slow parse / OOM.
+_MAX_SUGGESTIONS_BYTES = 10 * 1024 * 1024
+
 
 class StorageError(Exception):
     """Wrapper around any suggestions.json read/write failure."""
@@ -50,6 +56,17 @@ def read_suggestions(case_dir: Path) -> SuggestionsDocument | None:
     if not target.exists():
         return None
     try:
+        size = target.stat().st_size
+    except OSError as exc:
+        msg = f"Could not stat {target}: {exc}"
+        raise StorageError(msg) from exc
+    if size > _MAX_SUGGESTIONS_BYTES:
+        msg = (
+            f"{target} is {size} bytes; refusing to load files larger than "
+            f"{_MAX_SUGGESTIONS_BYTES} bytes."
+        )
+        raise StorageError(msg)
+    try:
         raw = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         msg = f"Could not parse {target}: {exc}"
@@ -66,8 +83,20 @@ def write_suggestions(case_dir: Path, doc: SuggestionsDocument) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = _to_json(doc)
     tmp = target.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    # Drop any leftover .tmp from a prior crash before we write our own;
+    # otherwise repeated crashes accumulate junk and Path.write_text's
+    # default would happily overwrite without complaint anyway.
+    tmp.unlink(missing_ok=True)
+    try:
+        tmp.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        tmp.replace(target)
+    except OSError:
+        # Clean up the half-written .tmp on failure so the next attempt
+        # starts from a clean slate.
+        tmp.unlink(missing_ok=True)
+        raise
     return target
 
 

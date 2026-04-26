@@ -149,7 +149,26 @@ def _load_user_templates(directory: Path) -> list[ScopeTemplate]:
     return out
 
 
+#: Hard cap on user-overlay template size. The shipped templates are
+#: under 1 KB; an order of magnitude headroom is plenty for examiners
+#: who pad their templates with notes.
+_MAX_TEMPLATE_BYTES = 1 * 1024 * 1024
+
+
 def _parse_template(path: Path) -> ScopeTemplate | None:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        logger.warning("Skipping unreadable template %s: %s", path, exc)
+        return None
+    if size > _MAX_TEMPLATE_BYTES:
+        logger.warning(
+            "Skipping oversize template %s (%d bytes; cap is %d)",
+            path,
+            size,
+            _MAX_TEMPLATE_BYTES,
+        )
+        return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

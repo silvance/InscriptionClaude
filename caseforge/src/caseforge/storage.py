@@ -38,6 +38,11 @@ ARCHIVE_DIRNAME = "_archive"
 #: Slug character whitelist; everything else collapses to a single dash.
 _SLUG_INVALID = re.compile(r"[^a-zA-Z0-9._-]+")
 
+#: Hard cap on the case.json size we'll load. Files in the wild sit in
+#: the low-tens-of-KB range; refuse anything larger to bound the memory
+#: + parse-time exposure for corrupt or hostile files.
+_MAX_CASE_BYTES = 5 * 1024 * 1024
+
 
 class StorageError(Exception):
     """Wrapper around any case.json read/write failure."""
@@ -93,8 +98,16 @@ def write_case(case_dir: Path, case: Case) -> None:
     payload = _to_json(case)
     target = case_dir / CASE_FILENAME
     tmp = target.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    # Drop any leftover .tmp from a prior crash before we write our own.
+    tmp.unlink(missing_ok=True)
+    try:
+        tmp.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        tmp.replace(target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def read_case(case_dir: Path) -> Case:
@@ -102,6 +115,14 @@ def read_case(case_dir: Path) -> Case:
     target = case_dir / CASE_FILENAME
     if not target.exists():
         msg = f"No case.json at {target}"
+        raise StorageError(msg)
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        msg = f"Could not stat {target}: {exc}"
+        raise StorageError(msg) from exc
+    if size > _MAX_CASE_BYTES:
+        msg = f"{target} is {size} bytes; refusing to load (cap is {_MAX_CASE_BYTES})."
         raise StorageError(msg)
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
