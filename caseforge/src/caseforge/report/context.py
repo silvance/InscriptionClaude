@@ -19,8 +19,13 @@ Case (from ``case.json``):
 
 - ``{{ case.name }}``                   The case name CaseForge wrote.
 - ``{{ case.reference }}``              External case reference.
-- ``{{ case.created_at }}``             Case-creation timestamp.
-- ``{{ case.updated_at }}``             Last edit timestamp.
+- ``{{ case.created_at }}``             Case-creation timestamp (raw
+                                        datetime — call ``.strftime``
+                                        for custom formats).
+- ``{{ case.created_at_str }}``         Pre-formatted creation
+                                        timestamp ("YYYY-MM-DD HH:MM UTC").
+- ``{{ case.updated_at }}``             Last-edit timestamp (raw).
+- ``{{ case.updated_at_str }}``         Pre-formatted last-edit ts.
 - ``{{ case.path }}``                   Absolute path to the case dir.
 
 Examiner identity (from ``case.json``):
@@ -45,7 +50,13 @@ Exam scope (from ``case.json``):
 
 Custody (from ``case.json``):
 
-- ``{{ custody.received_at }}``
+- ``{{ custody.received_at }}``         Raw datetime, or None — guard
+                                        with ``{% if custody.received_at %}``
+                                        before calling ``.strftime``.
+- ``{{ custody.received_at_str }}``     Pre-formatted, or empty string
+                                        when no received_at is set
+                                        (avoids "None" appearing in
+                                        the rendered report).
 - ``{{ custody.received_from }}``
 - ``{{ custody.delivery_method }}``
 - ``{{ custody.evidence_bag_ids_csv }}``
@@ -140,6 +151,7 @@ class _ScopeView:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class _CustodyView:
     received_at: datetime | None
+    received_at_str: str  # "" when received_at is None — avoids "None" in reports
     received_from: str
     delivery_method: str
     evidence_bag_ids: list[str]
@@ -151,7 +163,9 @@ class _CaseView:
     name: str
     reference: str
     created_at: datetime
+    created_at_str: str
     updated_at: datetime
+    updated_at_str: str
     path: str
 
 
@@ -279,7 +293,9 @@ def _case_view(case: Case, case_dir: Path) -> _CaseView:
         name=case.name,
         reference=case.case_reference,
         created_at=case.created_at,
+        created_at_str=case.created_at.strftime(_DEFAULT_TS_FORMAT),
         updated_at=case.updated_at,
+        updated_at_str=case.updated_at.strftime(_DEFAULT_TS_FORMAT),
         path=str(case_dir.resolve()),
     )
 
@@ -312,8 +328,12 @@ def _scope_view(case: Case) -> _ScopeView:
 
 def _custody_view(case: Case) -> _CustodyView:
     c = case.custody
+    received_at_str = (
+        c.received_at.strftime(_DEFAULT_TS_FORMAT) if c.received_at is not None else ""
+    )
     return _CustodyView(
         received_at=c.received_at,
+        received_at_str=received_at_str,
         received_from=c.received_from,
         delivery_method=c.delivery_method,
         evidence_bag_ids=list(c.evidence_bag_ids),

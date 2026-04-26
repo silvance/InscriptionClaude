@@ -80,7 +80,7 @@ no_implicit_optional = true
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["PySide6.*", "pytestqt.*", "pyinstaller.*", "docxtpl.*", "docx.*"]
+module = ["PySide6.*", "pytestqt.*", "pyinstaller.*", "docxtpl.*", "docx.*", "jinja2.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -47,6 +47,7 @@ def render_report(
 
     try:
         from docxtpl import DocxTemplate  # noqa: PLC0415 - optional extra
+        from jinja2 import Environment, StrictUndefined  # noqa: PLC0415 - optional extra
     except ImportError as exc:
         msg = (
             "Report rendering requires the optional 'docxtpl' dependency. "
@@ -63,8 +64,15 @@ def render_report(
         msg = f"Could not open template {template_path}: {exc}"
         raise RenderError(msg) from exc
 
+    # StrictUndefined turns ``{{ case.bogus }}`` into a hard
+    # UndefinedError instead of silently rendering an empty string.
+    # That's the right tradeoff for forensic templates: a typo in a
+    # token name should surface as a render failure, not as a blank
+    # spot in the finished report that the operator might miss.
+    jinja_env = Environment(undefined=StrictUndefined, autoescape=True)
+
     try:
-        template.render(context.as_template_dict())
+        template.render(context.as_template_dict(), jinja_env=jinja_env)
     except Exception as exc:
         # Most commonly: Jinja2 TemplateSyntaxError (unbalanced
         # ``{% %}`` tags, unknown filter, etc.) or UndefinedError if
