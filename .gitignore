@@ -17,3 +17,26 @@ caseguide/.ruff_cache/
 caseguide/**/__pycache__/
 caseguide/*.egg-info/
 caseguide/src/*.egg-info/
+
+inscription/.venv/
+inscription/dist/
+inscription/build/
+inscription/.pytest_cache/
+inscription/.mypy_cache/
+inscription/.ruff_cache/
+inscription/**/__pycache__/
+inscription/*.egg-info/
+inscription/src/*.egg-info/
+
+# Suite-root virtualenv used by the recommended setup recipe (one
+# venv that holds all three apps installed editable).
+.venv/
+
+# Per-user VS Code state (debug history, last-used launch configs,
+# etc.) shouldn't travel with the repo, but the workspace file and
+# the shared settings.json / extensions.json should — explicitly
+# unignore them so a fresh clone picks them up.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+

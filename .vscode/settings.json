@@ -1,0 +1,29 @@
+// Folder-mode settings — used when opening this directory directly.
+// The InscriptionClaude.code-workspace file in this directory is the
+// recommended way to open the suite (one root per app); these settings
+// exist so opening the folder still gives a usable Python + ruff setup.
+{
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.analysis.typeCheckingMode": "basic",
+    "python.terminal.activateEnvironment": true,
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+    "ruff.organizeImports": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/.mypy_cache": true,
+        "**/.ruff_cache": true,
+        "**/*.egg-info": true
+    },
+    "search.exclude": {
+        "**/.venv": true,
+        "**/dist": true,
+        "**/build": true
+    }
+}
