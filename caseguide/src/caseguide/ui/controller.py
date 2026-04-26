@@ -15,12 +15,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from caseguide.case_reader import CaseReadError, read_case
 from caseguide.config import Config
 from caseguide.generator import generate_suggestions
 from caseguide.llm import LLMClient, LLMError, SuggestionsRefiner
+from caseguide.markdown_export import render_markdown
 from caseguide.model import SuggestionsDocument, utcnow
 from caseguide.playbooks import PlaybookMatcher, load_playbooks
 from caseguide.storage import StorageError, read_suggestions, write_suggestions
@@ -160,3 +161,77 @@ class CaseGuideController(QObject):
             QMessageBox.critical(self._parent_widget, "Save failed", str(exc))
             return False
         return True
+
+    # ------------------------------------------------------- export
+
+    def copy_markdown_to_clipboard(self, doc: SuggestionsDocument) -> bool:
+        """Render the suggestions as markdown and stash on the clipboard.
+
+        Returns False (and shows nothing) when there's no clipboard
+        available, which only happens in headless test environments;
+        callers can ignore the return value in normal flow.
+        """
+        text = render_markdown(doc, case=self._case)
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return False
+        clipboard.setText(text)
+        return True
+
+    def export_markdown(self, doc: SuggestionsDocument) -> Path | None:
+        """Show a save-file dialog and write the markdown checklist.
+
+        Default filename derives from the case slug + ``-suggestions.md``
+        so the saved file lines up with the case folder it came from.
+        """
+        suggested_dir = (
+            str(self._case_dir.resolve()) if self._case_dir is not None else ""
+        )
+        case_name = (
+            self._case.name
+            if self._case is not None and self._case.name
+            else "suggestions"
+        )
+        suggested_name = (
+            f"{_filename_safe(case_name)}-suggestions.md" if case_name else "suggestions.md"
+        )
+        suggested_path = (
+            f"{suggested_dir}/{suggested_name}" if suggested_dir else suggested_name
+        )
+        target, _ = QFileDialog.getSaveFileName(
+            self._parent_widget,
+            "Export checklist as Markdown",
+            suggested_path,
+            "Markdown (*.md);;All files (*)",
+        )
+        if not target:
+            return None
+        path = Path(target)
+        text = render_markdown(doc, case=self._case)
+        try:
+            path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            logger.exception("Markdown export failed")
+            QMessageBox.critical(
+                self._parent_widget,
+                "Export failed",
+                f"Could not write {path}: {exc}",
+            )
+            return None
+        return path
+
+
+def _filename_safe(name: str) -> str:
+    """Strip / replace characters most filesystems object to.
+
+    Same vocabulary as CaseForge's slugify, lifted inline rather than
+    imported so CaseGuide stays decoupled from the sibling package.
+    """
+    out = []
+    for ch in name:
+        if ch.isalnum() or ch in "._-":
+            out.append(ch)
+        elif ch == " ":
+            out.append("-")
+    cleaned = "".join(out).strip("-._")
+    return cleaned or "suggestions"

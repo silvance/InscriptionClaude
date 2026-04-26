@@ -223,8 +223,13 @@ class SuggestionsPanel(QWidget):
             self._scope.setVisible(False)
 
         self._list.clear()
+        # Pre-compute the completed-id set so each row can be marked as
+        # blocked when its prerequisites haven't been met yet — keeps
+        # the visual treatment in sync with what CaseGuide shows on its
+        # side of the case directory.
+        completed_ids = {s.id for s in document.suggestions if s.completed}
         for suggestion in document.suggestions:
-            item = _build_item(suggestion)
+            item = _build_item(suggestion, completed_ids=completed_ids)
             self._list.addItem(item)
 
         self._show_detail(None)
@@ -280,30 +285,47 @@ class SuggestionsPanel(QWidget):
 
 
 _COMPLETED_TEXT_COLOR = QColor(140, 140, 140)
+_BLOCKED_TEXT_COLOR = QColor(120, 120, 130)
 
 
-def _build_item(suggestion: CaseguideSuggestion) -> QListWidgetItem:
-    """Build a list item that visually communicates priority + completion.
+def _build_item(
+    suggestion: CaseguideSuggestion, *, completed_ids: set[str]
+) -> QListWidgetItem:
+    """Build a list item that visually communicates priority, completion,
+    and dependency-blocked state.
 
     Lightweight on purpose: the priority sits in a leading bracket
-    label and completed rows get a strikeout font + muted foreground.
-    A custom delegate would be richer but Inscription is a consumer
-    here — CaseGuide owns the designed view of this list.
+    label, completed rows strike through, blocked rows italicise so
+    the eye still reads them but without the action signal of an
+    actionable row. A custom delegate would be richer but Inscription
+    is a consumer here — CaseGuide owns the designed view of this list.
     """
-    item = QListWidgetItem(_row_label(suggestion))
+    missing = tuple(d for d in suggestion.depends_on if d not in completed_ids)
+    is_blocked = bool(missing) and not suggestion.completed
+    item = QListWidgetItem(_row_label(suggestion, blocked_count=len(missing)))
     item.setData(_SUGGESTION_ROLE, suggestion)
     if suggestion.completed:
         font = item.font()
         font.setStrikeOut(True)
         item.setFont(font)
         item.setForeground(QBrush(_COMPLETED_TEXT_COLOR))
+    elif is_blocked:
+        font = item.font()
+        font.setItalic(True)
+        item.setFont(font)
+        item.setForeground(QBrush(_BLOCKED_TEXT_COLOR))
     return item
 
 
-def _row_label(suggestion: CaseguideSuggestion) -> str:
+def _row_label(suggestion: CaseguideSuggestion, *, blocked_count: int) -> str:
     badge = (suggestion.priority or "").upper() or "RECOMMENDED"
     body = suggestion.action.strip().splitlines()[0] if suggestion.action else "(empty)"
-    prefix = "✓ " if suggestion.completed else ""
+    if suggestion.completed:
+        prefix = "✓ "
+    elif blocked_count:
+        prefix = "🔒 "
+    else:
+        prefix = ""
     return f"{prefix}[{badge}] {body}"
 
 

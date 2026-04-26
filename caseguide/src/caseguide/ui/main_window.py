@@ -33,6 +33,7 @@ from caseguide.model import Suggestion, SuggestionsDocument, utcnow
 from caseguide.ui.controller import CaseGuideController
 from caseguide.ui.refine_dialog import RefineProgressDialog, RefineWorker
 from caseguide.ui.scope_panel import ScopePanel
+from caseguide.ui.settings_dialog import SettingsDialog
 from caseguide.ui.suggestions_panel import SuggestionsPanel
 from caseguide.ui.widgets import empty_state
 from caseguide.version import __version__
@@ -193,10 +194,36 @@ class MainWindow(QMainWindow):
         file_menu.addAction(regenerate_action)
 
         file_menu.addSeparator()
+        self._copy_md_action = QAction("&Copy checklist to clipboard", self)
+        self._copy_md_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        self._copy_md_action.setStatusTip(
+            "Copy the suggestions list as a markdown checklist (paste into "
+            "the case file, a ticket, or the forensic notes)."
+        )
+        self._copy_md_action.triggered.connect(self._on_copy_markdown)
+        self._copy_md_action.setEnabled(False)
+        file_menu.addAction(self._copy_md_action)
+
+        self._export_md_action = QAction("Export checklist as &Markdown…", self)
+        self._export_md_action.setStatusTip(
+            "Save the suggestions list as a markdown file alongside the case."
+        )
+        self._export_md_action.triggered.connect(self._on_export_markdown)
+        self._export_md_action.setEnabled(False)
+        file_menu.addAction(self._export_md_action)
+
+        file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        edit_menu = menubar.addMenu("&Edit")
+        settings_action = QAction("&Settings…", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.setStatusTip("Configure the local LLM endpoint used by Refine.")
+        settings_action.triggered.connect(self._open_settings)
+        edit_menu.addAction(settings_action)
 
         help_menu = menubar.addMenu("&Help")
         about_action = QAction("&About CaseGuide", self)
@@ -221,6 +248,7 @@ class MainWindow(QMainWindow):
         self._generate_btn.setEnabled(False)
         self._refine_btn.setEnabled(False)
         self._save_btn.setEnabled(False)
+        self._set_export_actions_enabled(have_suggestions=False)
         self._unsaved = False
         self._stack.setCurrentIndex(0)
 
@@ -232,6 +260,7 @@ class MainWindow(QMainWindow):
             )
             self._save_btn.setEnabled(False)
             self._refine_btn.setEnabled(False)
+            self._set_export_actions_enabled(have_suggestions=False)
             self._unsaved = False
             return
         self._suggestions.set_suggestions(doc.suggestions)
@@ -243,11 +272,15 @@ class MainWindow(QMainWindow):
         # the user can re-save if they want to bump the timestamp.
         self._save_btn.setEnabled(True)
         self._refine_btn.setEnabled(bool(doc.suggestions))
+        self._set_export_actions_enabled(have_suggestions=bool(doc.suggestions))
         self._unsaved = False
 
     def _on_suggestions_changed(self) -> None:
         self._unsaved = True
         self._save_btn.setEnabled(self._controller.current_case_dir() is not None)
+        self._set_export_actions_enabled(
+            have_suggestions=bool(self._suggestions.suggestions())
+        )
 
     def _on_generate(self) -> None:
         doc = self._controller.generate()
@@ -261,6 +294,44 @@ class MainWindow(QMainWindow):
         self._unsaved = True
         self._save_btn.setEnabled(True)
         self._refine_btn.setEnabled(bool(doc.suggestions))
+        self._set_export_actions_enabled(have_suggestions=bool(doc.suggestions))
+
+    def _set_export_actions_enabled(self, *, have_suggestions: bool) -> None:
+        self._copy_md_action.setEnabled(have_suggestions)
+        self._export_md_action.setEnabled(have_suggestions)
+
+    def _current_document(self) -> SuggestionsDocument:
+        """Bundle the panel's current state into a SuggestionsDocument.
+
+        Used by the export paths so they see exactly what's on screen,
+        including unsaved edits and completion-state toggles.
+        """
+        case = self._controller.current_case()
+        scope_summary = self._header_for(case) if case is not None else ""
+        return SuggestionsDocument(
+            generated_at=utcnow(),
+            scope_summary=scope_summary,
+            playbooks=[],
+            suggestions=self._suggestions.suggestions(),
+            caseguide_version=__version__,
+        )
+
+    def _on_copy_markdown(self) -> None:
+        doc = self._current_document()
+        if not doc.suggestions:
+            return
+        if self._controller.copy_markdown_to_clipboard(doc):
+            self.statusBar().showMessage(
+                f"Copied {len(doc.suggestions)} suggestion(s) to the clipboard as markdown."
+            )
+
+    def _on_export_markdown(self) -> None:
+        doc = self._current_document()
+        if not doc.suggestions:
+            return
+        target = self._controller.export_markdown(doc)
+        if target is not None:
+            self.statusBar().showMessage(f"Exported markdown checklist to {target}.")
 
     def _on_refine(self) -> None:
         case = self._controller.current_case()
@@ -338,6 +409,9 @@ class MainWindow(QMainWindow):
             ),
         )
 
+    def _open_settings(self) -> None:
+        SettingsDialog(self._config, parent=self).exec()
+
     @staticmethod
     def _header_for(handle: CaseHandle) -> str:
         ref = f" · {handle.case_reference}" if handle.case_reference else ""
@@ -398,22 +472,24 @@ def _friendly_llm_error(raw_message: str, *, base_url: str) -> str:
         return (
             f"Couldn't reach the local LLM server at {base_url}.\n\n"
             "Start Ollama (or LM Studio / llama.cpp --server) and try "
-            "again. If it's running on a different URL or port, edit "
-            "config.ini — a Settings dialog lands in a follow-up commit.\n\n"
+            "again. If it's running on a different URL or port, open "
+            "Edit → Settings to point CaseGuide at it (the Test "
+            "connection button verifies before you save).\n\n"
             f"Original error: {raw_message}"
         )
     if "timed out" in lower:
         return (
             "The LLM took too long to respond.\n\n"
             "Local models can be slow on the first request after start-up. "
-            "Wait and retry, or switch to a smaller model in config.ini.\n\n"
+            "Wait and retry, or raise the timeout / switch to a smaller "
+            "model in Edit → Settings.\n\n"
             f"Original error: {raw_message}"
         )
     if "model not found" in lower or "no such model" in lower or "http 404" in lower:
         return (
             "The configured model isn't available on the LLM server.\n\n"
             "Pull it (e.g. `ollama pull gemma4`) or change the model "
-            "name in config.ini.\n\n"
+            "name in Edit → Settings.\n\n"
             f"Original error: {raw_message}"
         )
     return raw_message

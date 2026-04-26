@@ -55,6 +55,13 @@ if TYPE_CHECKING:
 # the panel when it stores the dataclass for the delegate to read.
 SUGGESTION_ROLE = Qt.ItemDataRole.UserRole + 1
 
+# Per-row "blocked by an incomplete prerequisite" flag, computed by the
+# panel (which sees the whole list) and read by the delegate (which
+# only sees one item at a time). The names of the missing
+# prerequisites travel as a tuple of strings so the metadata row can
+# show ``blocked by 2 (incomplete)`` without re-walking the model.
+BLOCKED_ROLE = Qt.ItemDataRole.UserRole + 2
+
 
 @dataclass(frozen=True, slots=True)
 class _ChipPalette:
@@ -76,6 +83,12 @@ _PRIORITY_CHIPS: dict[str, _ChipPalette] = {
 _DONE_CHIP = _ChipPalette(bg="#34c759", fg="#ffffff")
 _DONE_LABEL = "✓ DONE"
 _COMPLETED_OPACITY = 0.55
+
+# Blocked rows fade further than the chrome but stay legible — the
+# examiner needs to read what's coming up, just shouldn't be tempted
+# to start it. A leading lock glyph in the metadata row reinforces
+# the "wait" semantics.
+_BLOCKED_OPACITY = 0.45
 
 _PADDING_H = 12
 _PADDING_V = 10
@@ -119,8 +132,20 @@ class SuggestionDelegate(QStyledItemDelegate):
 
         is_selected = bool(opt.state & QStyle.StateFlag.State_Selected)
         is_completed = suggestion.completed
+        # Blocked = at least one prerequisite isn't yet completed. The
+        # panel computes the missing list once per render and stamps
+        # it on the item; we just read it back. Completed wins over
+        # blocked when both are set.
+        blocked_missing_raw = index.data(BLOCKED_ROLE)
+        blocked_missing: tuple[str, ...] = (
+            tuple(blocked_missing_raw)
+            if isinstance(blocked_missing_raw, (list, tuple)) and not is_completed
+            else ()
+        )
         if is_completed:
             painter.setOpacity(_COMPLETED_OPACITY)
+        elif blocked_missing:
+            painter.setOpacity(_BLOCKED_OPACITY)
         text_pen = self._text_pen(opt, selected=is_selected)
         muted_pen = self._muted_pen(opt, selected=is_selected)
 
@@ -155,7 +180,13 @@ class SuggestionDelegate(QStyledItemDelegate):
 
         meta_top = body_rect.top() + len(wrapped) * line_height + _META_GAP
         self._draw_metadata_row(
-            painter, suggestion, body_rect, meta_top, opt, muted_pen
+            painter,
+            suggestion,
+            body_rect,
+            meta_top,
+            opt,
+            muted_pen,
+            blocked_missing=blocked_missing,
         )
 
         painter.restore()
@@ -168,6 +199,8 @@ class SuggestionDelegate(QStyledItemDelegate):
         meta_top: int,
         opt: QStyleOptionViewItem,
         muted_pen: QPen,
+        *,
+        blocked_missing: tuple[str, ...] = (),
     ) -> None:
         meta_font = QFont(opt.font)
         meta_font.setPointSize(max(8, opt.font.pointSize() - 1))
@@ -188,7 +221,18 @@ class SuggestionDelegate(QStyledItemDelegate):
             meta_x += badge_w + _BADGE_GAP
 
         baseline_y = meta_top + meta_metrics.ascent() + _CHIP_PADDING_V
-        if suggestion.depends_on:
+        if blocked_missing:
+            # Blocked rows shadow the depends_on hint with the actual
+            # incomplete count so the examiner sees how close the row
+            # is to becoming actionable.
+            count = len(blocked_missing)
+            painter.setPen(muted_pen)
+            painter.drawText(
+                meta_x,
+                baseline_y,
+                f"🔒 blocked by {count} incomplete step{'s' if count != 1 else ''}",
+            )
+        elif suggestion.depends_on:
             count = len(suggestion.depends_on)
             text = f"↳ depends on {count} step{'s' if count != 1 else ''}"
             painter.setPen(muted_pen)

@@ -36,7 +36,11 @@ from caseguide.model import (
     Suggestion,
     utcnow,
 )
-from caseguide.ui.suggestion_delegate import SUGGESTION_ROLE, SuggestionDelegate
+from caseguide.ui.suggestion_delegate import (
+    BLOCKED_ROLE,
+    SUGGESTION_ROLE,
+    SuggestionDelegate,
+)
 from caseguide.ui.widgets import horizontal_separator
 
 logger = logging.getLogger(__name__)
@@ -186,10 +190,11 @@ class SuggestionsPanel(QWidget):
     def _render(self, *, select_index: int | None = None) -> None:
         # Block list signals while we rebuild so itemSelectionChanged
         # doesn't fire mid-clear for the row that's about to disappear.
+        completed_ids = {s.id for s in self._suggestions if s.completed}
         with QSignalBlocker(self._list):
             self._list.clear()
             for suggestion in self._suggestions:
-                self._list.addItem(_make_item(suggestion))
+                self._list.addItem(_make_item(suggestion, completed_ids=completed_ids))
         self._update_summary()
         if select_index is not None and 0 <= select_index < self._list.count():
             self._list.setCurrentRow(select_index)
@@ -282,7 +287,11 @@ class SuggestionsPanel(QWidget):
         self._suggestions[idx] = updated
         item = self._list.item(idx)
         if item is not None:
-            _refresh_item(item, updated)
+            # Field edits don't change completion state, so the
+            # blocked-set hasn't shifted — pass the current completed
+            # set unchanged.
+            completed_ids = {s.id for s in self._suggestions if s.completed}
+            _refresh_item(item, updated, completed_ids=completed_ids)
         self._update_summary()
         self.changed.emit()
 
@@ -296,12 +305,20 @@ class SuggestionsPanel(QWidget):
         else:
             updated = dataclasses.replace(current, completed=True, completed_at=utcnow())
         self._suggestions[idx] = updated
-        item = self._list.item(idx)
-        if item is not None:
-            _refresh_item(item, updated)
+        # Toggling completion can unblock or re-block other rows whose
+        # depends_on points at this suggestion, so refresh every row's
+        # BLOCKED_ROLE — not just the one we toggled.
+        self._refresh_all_blocked_state()
         self._refresh_completion_widgets(updated)
         self._update_summary()
         self.changed.emit()
+
+    def _refresh_all_blocked_state(self) -> None:
+        completed_ids = {s.id for s in self._suggestions if s.completed}
+        for row, suggestion in enumerate(self._suggestions):
+            item = self._list.item(row)
+            if item is not None:
+                _refresh_item(item, suggestion, completed_ids=completed_ids)
 
     def _commit_pending_edits(self) -> None:
         # Force any in-flight QLineEdit signal to fire so the current
@@ -344,24 +361,39 @@ class SuggestionsPanel(QWidget):
         self.changed.emit()
 
 
-def _make_item(suggestion: Suggestion) -> QListWidgetItem:
+def _make_item(
+    suggestion: Suggestion, *, completed_ids: set[str]
+) -> QListWidgetItem:
     """Build a list item that the SuggestionDelegate paints.
 
     The delegate reads the dataclass off ``SUGGESTION_ROLE``; we still
     set the user-role id and an accessible-name fallback so screen
     readers and Qt's default layout logic have something to fall back
-    to if the delegate isn't installed.
+    to if the delegate isn't installed. ``BLOCKED_ROLE`` carries the
+    list of unmet prerequisites so the delegate can dim and label
+    the row without re-walking the model.
     """
     item = QListWidgetItem(_accessible_label(suggestion))
     item.setData(Qt.ItemDataRole.UserRole, suggestion.id)
     item.setData(SUGGESTION_ROLE, suggestion)
+    item.setData(BLOCKED_ROLE, _missing_prereqs(suggestion, completed_ids))
     return item
 
 
-def _refresh_item(item: QListWidgetItem, suggestion: Suggestion) -> None:
+def _refresh_item(
+    item: QListWidgetItem, suggestion: Suggestion, *, completed_ids: set[str]
+) -> None:
     item.setText(_accessible_label(suggestion))
     item.setData(Qt.ItemDataRole.UserRole, suggestion.id)
     item.setData(SUGGESTION_ROLE, suggestion)
+    item.setData(BLOCKED_ROLE, _missing_prereqs(suggestion, completed_ids))
+
+
+def _missing_prereqs(
+    suggestion: Suggestion, completed_ids: set[str]
+) -> tuple[str, ...]:
+    """Subset of ``depends_on`` whose ids haven't been completed yet."""
+    return tuple(dep for dep in suggestion.depends_on if dep not in completed_ids)
 
 
 def _accessible_label(suggestion: Suggestion) -> str:
