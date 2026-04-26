@@ -15,6 +15,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Report rendering pulls in docxtpl (which itself depends on
+# python-docx + jinja2). It's optional so a CaseForge install that
+# only does case intake doesn't drag in unused deps; the renderer
+# raises a friendly RenderError pointing at this extra when
+# docxtpl is missing.
+report = [
+    "docxtpl>=0.16",
+]
 dev = [
     "pytest>=8.2",
     "pytest-qt>=4.4",
@@ -22,10 +30,12 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "pyinstaller>=6.10",
+    "docxtpl>=0.16",
 ]
 
 [project.scripts]
 caseforge = "caseforge.app:main"
+caseforge-report = "caseforge.report.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/caseforge"]
@@ -70,7 +80,7 @@ no_implicit_optional = true
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["PySide6.*", "pytestqt.*", "pyinstaller.*"]
+module = ["PySide6.*", "pytestqt.*", "pyinstaller.*", "docxtpl.*", "docx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
