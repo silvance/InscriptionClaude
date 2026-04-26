@@ -13,12 +13,13 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
-    QFrame,
     QLabel,
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from caseguide.ui.widgets import horizontal_separator
 
 if TYPE_CHECKING:
     from caseguide.case_reader import CaseHandle
@@ -72,9 +73,7 @@ class ScopePanel(QWidget):
         self._notes_box.setReadOnly(True)
         self._notes_box.setMaximumHeight(160)
 
-        rule = QFrame(self)
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setProperty("muted", "true")
+        rule = horizontal_separator(self)
 
         form = QFormLayout()
         form.addRow("Exam type", self._exam_type_value)

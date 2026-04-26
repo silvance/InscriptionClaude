@@ -92,7 +92,7 @@ class CustodyTab(QWidget):
             "chain-of-custody section.",
             self,
         )
-        hint.setStyleSheet("color: #6e6e73;")
+        hint.setProperty("muted", "true")
         hint.setWordWrap(True)
 
         form = QFormLayout()

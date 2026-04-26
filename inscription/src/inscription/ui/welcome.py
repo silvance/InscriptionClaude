@@ -76,7 +76,6 @@ def _quickstart_label(card: QWidget) -> QLabel:
     )
     label.setTextFormat(Qt.TextFormat.RichText)
     label.setWordWrap(True)
-    label.setStyleSheet("color: #1d1d1f;")
     return label
 
 

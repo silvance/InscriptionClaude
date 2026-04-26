@@ -98,7 +98,7 @@ class NewCaseDialog(QDialog):
             "Case reference is the external case number you'll search by later.",
             page,
         )
-        hint.setStyleSheet("color: #6e6e73;")
+        hint.setProperty("muted", "true")
         hint.setWordWrap(True)
 
         form = QFormLayout()
@@ -126,7 +126,7 @@ class NewCaseDialog(QDialog):
             "Inscription's forensic-notes header reads from these fields.",
             page,
         )
-        hint.setStyleSheet("color: #6e6e73;")
+        hint.setProperty("muted", "true")
         hint.setWordWrap(True)
 
         form = QFormLayout()
@@ -184,7 +184,7 @@ class NewCaseDialog(QDialog):
             "Picking a template fills the fields below — edit freely after.",
             page,
         )
-        template_hint.setStyleSheet("color: #6e6e73;")
+        template_hint.setProperty("muted", "true")
         template_hint.setWordWrap(True)
 
         form = QFormLayout()

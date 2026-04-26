@@ -12,9 +12,10 @@ or ``failed``.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -71,7 +72,7 @@ class RefineProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Refining with LLM")
         self.setModal(True)
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(460)
         # The X button would just hide the dialog while the worker
         # keeps running; force the user through Cancel so the path
         # is explicit.
@@ -86,34 +87,63 @@ class RefineProgressDialog(QDialog):
 
         progress = QProgressBar(self)
         progress.setRange(0, 0)  # indeterminate
+        progress.setTextVisible(False)
+        progress.setMinimumHeight(8)
+
+        # Elapsed-time readout — confirms the dialog is alive while
+        # the model thinks. Tabular numerals so the seconds digit
+        # doesn't reflow the layout every tick.
+        self._elapsed_label = QLabel("Elapsed: 0:00", self)
+        self._elapsed_label.setProperty("muted", "true")
+        self._elapsed_label.setStyleSheet("font-variant-numeric: tabular-nums;")
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel, parent=self)
         buttons.rejected.connect(self._on_cancel)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
         layout.addWidget(label)
         layout.addWidget(progress)
+        layout.addWidget(self._elapsed_label)
         layout.addWidget(buttons)
 
         self._worker = worker
         self._worker.finished_ok.connect(self._on_success)
         self._worker.failed.connect(self._on_failure)
 
+        self._tick_timer = QTimer(self)
+        self._tick_timer.setInterval(500)  # 2 Hz; cheap and responsive
+        self._tick_timer.timeout.connect(self._update_elapsed)
+        self._started_at = 0.0
+
     def start(self) -> None:
+        self._started_at = time.monotonic()
+        self._tick_timer.start()
         self._worker.start()
+
+    def _update_elapsed(self) -> None:
+        if self._started_at == 0.0:
+            return
+        elapsed = int(time.monotonic() - self._started_at)
+        minutes, seconds = divmod(elapsed, 60)
+        self._elapsed_label.setText(f"Elapsed: {minutes}:{seconds:02d}")
 
     # ------------------------------------------------------------ slots
 
     def _on_success(self, refined: list[Suggestion]) -> None:
+        self._tick_timer.stop()
         self.succeeded.emit(refined)
         self.accept()
 
     def _on_failure(self, message: str) -> None:
+        self._tick_timer.stop()
         self.failed.emit(message)
         self.reject()
 
     def _on_cancel(self) -> None:
         # QThread can't be killed mid-HTTP, but the request will finish
         # on its own and the connected slots will no-op after reject().
+        self._tick_timer.stop()
         logger.info("User cancelled LLM refinement (request may still complete in background)")
         self.reject()

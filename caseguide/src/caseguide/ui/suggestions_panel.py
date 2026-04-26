@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,6 +37,7 @@ from caseguide.model import (
     utcnow,
 )
 from caseguide.ui.suggestion_delegate import SUGGESTION_ROLE, SuggestionDelegate
+from caseguide.ui.widgets import horizontal_separator
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +99,7 @@ class SuggestionsPanel(QWidget):
         self._editor_stack.addWidget(self._editor)
         self._editor_stack.setCurrentIndex(0)
 
-        rule = QFrame(self)
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setProperty("muted", "true")
+        rule = horizontal_separator(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)

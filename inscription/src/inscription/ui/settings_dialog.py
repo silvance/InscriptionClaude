@@ -159,7 +159,7 @@ class SettingsDialog(QDialog):
         self._test_btn.clicked.connect(self._on_test_connection)
         self._test_status = QLabel("", box)
         self._test_status.setWordWrap(True)
-        self._test_status.setStyleSheet("color: #6e6e73;")
+        self._test_status.setProperty("muted", "true")
 
         form = QFormLayout()
         form.addRow("Base URL", self._base_url_edit)
@@ -199,7 +199,12 @@ class SettingsDialog(QDialog):
 
         self._test_btn.setEnabled(False)
         self._test_status.setText("Testing…")
-        self._test_status.setStyleSheet("color: #6e6e73;")
+        # Reset to muted while the test runs; success/failure paths
+        # set a status colour explicitly via setStyleSheet later.
+        self._test_status.setStyleSheet("")
+        self._test_status.setProperty("muted", "true")
+        self._test_status.style().unpolish(self._test_status)
+        self._test_status.style().polish(self._test_status)
 
         worker = _ConnectionTest(
             base_url=base_url, model=model, timeout_s=timeout, api_key=api_key
