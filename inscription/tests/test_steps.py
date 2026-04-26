@@ -149,6 +149,37 @@ def test_generator_suppresses_window_focus_before_click(tmp_path) -> None:
         repo.close()
 
 
+def test_render_click_downgrades_text_control_to_window_title() -> None:
+    # UIA "Text" controls are static labels; clicks on them are positional
+    # accidents (e.g. clicking near a label or on the recorder's own UI).
+    # The renderer must fall back to the window-title path and not produce
+    # garbage like "Click the 'No screenshot' Text in Inscription."
+    event = type(
+        "E",
+        (),
+        {
+            "kind": EventKind.CLICK,
+            "key": None,
+            "text": None,
+            "window_title": "Inscription",
+            "process_name": "python.exe",
+            "button": "left",
+        },
+    )()
+    resolved = ResolvedElement(
+        id=1,
+        name="No screenshot",
+        control_type="Text",
+        confidence=0.95,
+        method="uia",
+        owner_process_name="python.exe",
+    )
+    rendered = render_step_action(event, resolved)  # type: ignore[arg-type]
+    assert "No screenshot" not in rendered
+    assert "Text" not in rendered
+    assert "Inscription" in rendered  # window-title fallback
+
+
 def test_generator_preserves_manual_edits(tmp_path) -> None:
     repo = SessionRepository.create(workspace_root=tmp_path, name="Edits")
     try:
