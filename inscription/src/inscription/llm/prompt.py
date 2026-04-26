@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Cap on the body excerpt we surface to the user when JSON parsing
+#: fails. Long enough to identify the kind of failure (markdown
+#: preamble vs. pure prose vs. truncated reply), short enough to fit
+#: in a Qt message box without scrolling.
+_ERROR_SNIPPET_LIMIT = 200
+
 
 SYSTEM_PROMPT = """\
 You are an expert technical writer turning a Windows desktop workflow
@@ -62,13 +68,18 @@ Rules:
 - Keep any steps marked "manual_edit" in the existing draft verbatim;
   their text is already approved by the user.
 
-Output format: a single JSON object with one key, "steps". No prose
-before or after the JSON. Each step has:
+Output format: a single JSON object with one key, "steps". Your reply
+MUST start with the character ``{`` and end with the character ``}`` —
+no Markdown, no preamble, no "Here's the JSON:", no trailing summary.
+Each step has:
   - "action": string. One imperative sentence.
   - "result": string. May be empty.
   - "source_event_ids": non-empty array of integers.
 
 Return at most as many steps as input events.
+
+Example of a correctly-formatted reply:
+{"steps":[{"action":"Open the case folder.","result":"","source_event_ids":[1]}]}
 """
 
 
@@ -114,17 +125,26 @@ def build_user_prompt(
 def parse_response(text: str, *, valid_event_ids: set[int]) -> list[RewrittenStep]:
     """Parse the assistant's JSON content into :class:`RewrittenStep` list.
 
-    Tolerates markdown code fences around the JSON. Drops any step whose
-    ``source_event_ids`` references no real event — the alternative is
-    silently inventing links back into the raw layer, which would break
-    the guide's provenance.
+    Tolerates markdown code fences around the JSON, and tolerates
+    smaller models that prepend a sentence of commentary before the
+    JSON object — extracts the first balanced ``{...}`` block as a
+    fallback. Drops any step whose ``source_event_ids`` references no
+    real event — the alternative is silently inventing links back
+    into the raw layer, which would break the guide's provenance.
     """
     body = _strip_code_fences(text.strip())
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError as exc:
-        msg = f"LLM content was not valid JSON: {body[:200]!r}"
-        raise LLMResponseError(msg) from exc
+    data = _parse_json_lenient(body)
+    if data is None:
+        snippet = body[:_ERROR_SNIPPET_LIMIT] + (
+            "…" if len(body) > _ERROR_SNIPPET_LIMIT else ""
+        )
+        msg = (
+            "LLM did not return JSON. The configured model may be "
+            "ignoring the json_object response_format directive — try "
+            "a stronger / instruction-tuned model in Edit → Settings → LLM. "
+            f"First chars of reply: {snippet!r}"
+        )
+        raise LLMResponseError(msg)
 
     if not isinstance(data, dict) or "steps" not in data:
         msg = f"LLM content missing top-level 'steps' key: {data!r}"
@@ -180,6 +200,68 @@ def _event_to_dict(
         if r:
             payload["element"] = r
     return payload
+
+
+def _parse_json_lenient(body: str) -> object | None:
+    """Try strict JSON first; fall back to extracting the first ``{...}``.
+
+    Smaller / weakly instruction-tuned models routinely prepend a
+    sentence of commentary before the JSON object even when asked
+    not to ("Sure! Here's the JSON: { ... }"). Extracting the first
+    balanced brace block recovers those cases without inventing
+    structure that wasn't present. Returns ``None`` when neither
+    strategy yields valid JSON.
+    """
+    try:
+        parsed: object = json.loads(body)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return parsed
+    candidate = _extract_first_json_object(body)
+    if candidate is None:
+        return None
+    try:
+        recovered: object = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return recovered
+
+
+def _extract_first_json_object(body: str) -> str | None:
+    """Return the first balanced ``{...}`` substring in ``body``, or None.
+
+    Walks the string tracking brace depth, ignoring braces inside
+    string literals (with escape-aware handling). Stops at the first
+    well-formed object and returns its source text.
+    """
+    depth = 0
+    start = -1
+    in_string = False
+    escape = False
+    for i, ch in enumerate(body):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth == 0:
+                continue
+            depth -= 1
+            if depth == 0 and start >= 0:
+                return body[start : i + 1]
+    return None
 
 
 def _strip_code_fences(text: str) -> str:

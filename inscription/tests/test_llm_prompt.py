@@ -161,5 +161,47 @@ def test_parse_response_rejects_zero_usable_steps() -> None:
 
 
 def test_parse_response_rejects_invalid_json() -> None:
-    with pytest.raises(LLMResponseError, match="not valid JSON"):
-        parse_response("this is not json", valid_event_ids={1})
+    with pytest.raises(LLMResponseError, match="did not return JSON"):
+        parse_response("this is not json at all", valid_event_ids={1})
+
+
+def test_parse_response_recovers_json_from_prose_preamble() -> None:
+    """Smaller models routinely prepend a sentence of commentary even
+    when the prompt forbids it. The parser must extract the JSON
+    object that follows so the rewrite still lands."""
+    body = (
+        "Sure! Here is the JSON object you asked for:\n\n"
+        '{"steps": [{"action": "Open the case folder.", '
+        '"result": "", "source_event_ids": [1]}]}\n\n'
+        "Let me know if you'd like me to adjust anything."
+    )
+    out = parse_response(body, valid_event_ids={1})
+    assert len(out) == 1
+    assert out[0].action == "Open the case folder."
+
+
+def test_parse_response_recovers_json_with_braces_in_strings() -> None:
+    """The brace-balance walker must ignore braces inside string
+    literals so a JSON object whose action text contains a literal
+    ``{`` doesn't confuse the extractor."""
+    body = (
+        'Here is the result: {"steps": [{"action": '
+        '"Type \\"{ \\\\\\"k\\\\\\": 1 }\\" into the field.", '
+        '"result": "", "source_event_ids": [1]}]} done.'
+    )
+    out = parse_response(body, valid_event_ids={1})
+    assert len(out) == 1
+    assert "{" in out[0].action
+
+
+def test_parse_response_error_message_points_at_settings_for_pure_prose() -> None:
+    """When the model returns purely prose with no JSON, the error
+    message should hint at Settings → LLM (the user can swap the
+    model from there) rather than a bare "invalid JSON" line."""
+    body = (
+        "The user is interacting with a sequence of applications and "
+        "processes, which suggests a workflow involving research, "
+        "software installation/setup, and potentially data analysis."
+    )
+    with pytest.raises(LLMResponseError, match="Settings"):
+        parse_response(body, valid_event_ids={1})

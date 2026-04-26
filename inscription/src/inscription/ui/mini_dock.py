@@ -179,8 +179,14 @@ class MiniDock(QWidget):
     def set_recording(self, recording: bool) -> None:
         self._dot.set_recording(recording)
 
-    def show_step(self, step: DraftStep | None, *, started_at: datetime | None) -> None:
-        """Update the body to reflect the latest captured step."""
+    def show_step(self, step: DraftStep | None, started_at: datetime | None) -> None:
+        """Update the body to reflect the latest captured step.
+
+        ``started_at`` is positional (not keyword-only) because Qt
+        invokes connected slots with positional arguments — declaring
+        it kw-only made every emission silently raise ``TypeError`` and
+        leave the dock stuck on "Awaiting first step…".
+        """
         if step is None:
             self._step_label.setText("Awaiting first step…")
             self._time_label.setText("")
