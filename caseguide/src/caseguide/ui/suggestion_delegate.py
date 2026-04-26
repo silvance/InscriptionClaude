@@ -70,6 +70,13 @@ _PRIORITY_CHIPS: dict[str, _ChipPalette] = {
     PRIORITY_OPTIONAL: _ChipPalette(bg="#e5e5e7", fg="#3a3a3c"),
 }
 
+# Completed rows swap the priority chip for a calm green "DONE" tag so
+# the eye can scan the list and spot finished work at a glance without
+# losing the row entirely.
+_DONE_CHIP = _ChipPalette(bg="#34c759", fg="#ffffff")
+_DONE_LABEL = "✓ DONE"
+_COMPLETED_OPACITY = 0.55
+
 _PADDING_H = 12
 _PADDING_V = 10
 _CHIP_PADDING_H = 8
@@ -111,11 +118,18 @@ class SuggestionDelegate(QStyledItemDelegate):
         rect = opt.rect.adjusted(_PADDING_H, _PADDING_V, -_PADDING_H, -_PADDING_V)
 
         is_selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        is_completed = suggestion.completed
+        if is_completed:
+            painter.setOpacity(_COMPLETED_OPACITY)
         text_pen = self._text_pen(opt, selected=is_selected)
         muted_pen = self._muted_pen(opt, selected=is_selected)
 
         chip_rect = self._draw_priority_chip(
-            painter, rect, suggestion.priority, selected=is_selected
+            painter,
+            rect,
+            suggestion.priority,
+            selected=is_selected,
+            completed=is_completed,
         )
 
         body_left = chip_rect.right() + _CHIP_GAP
@@ -124,6 +138,8 @@ class SuggestionDelegate(QStyledItemDelegate):
         action_font = QFont(opt.font)
         action_font.setPointSize(opt.font.pointSize())
         action_font.setWeight(QFont.Weight.Medium)
+        if is_completed:
+            action_font.setStrikeOut(True)
         action_metrics = QFontMetrics(action_font)
         wrapped = self._elide_to_two_lines(action_metrics, suggestion.action, body_rect.width())
         line_height = action_metrics.lineSpacing()
@@ -137,15 +153,28 @@ class SuggestionDelegate(QStyledItemDelegate):
                 line,
             )
 
-        # Metadata row below the action text.
         meta_top = body_rect.top() + len(wrapped) * line_height + _META_GAP
+        self._draw_metadata_row(
+            painter, suggestion, body_rect, meta_top, opt, muted_pen
+        )
+
+        painter.restore()
+
+    def _draw_metadata_row(
+        self,
+        painter: QPainter,
+        suggestion: Suggestion,
+        body_rect: QRect,
+        meta_top: int,
+        opt: QStyleOptionViewItem,
+        muted_pen: QPen,
+    ) -> None:
         meta_font = QFont(opt.font)
         meta_font.setPointSize(max(8, opt.font.pointSize() - 1))
         painter.setFont(meta_font)
         painter.setPen(muted_pen)
-
-        meta_x = body_rect.left()
         meta_metrics = QFontMetrics(meta_font)
+        meta_x = body_rect.left()
         if suggestion.category:
             badge_w = self._draw_chip(
                 painter,
@@ -158,30 +187,19 @@ class SuggestionDelegate(QStyledItemDelegate):
             )
             meta_x += badge_w + _BADGE_GAP
 
+        baseline_y = meta_top + meta_metrics.ascent() + _CHIP_PADDING_V
         if suggestion.depends_on:
             count = len(suggestion.depends_on)
             text = f"↳ depends on {count} step{'s' if count != 1 else ''}"
             painter.setPen(muted_pen)
-            painter.drawText(
-                meta_x,
-                meta_top + meta_metrics.ascent() + _CHIP_PADDING_V,
-                text,
-            )
+            painter.drawText(meta_x, baseline_y, text)
         elif not suggestion.category and suggestion.expected_result:
-            # Show expected_result preview when neither category nor
-            # depends_on filled the row.
             preview = suggestion.expected_result.strip().splitlines()[0]
             preview = meta_metrics.elidedText(
                 preview, Qt.TextElideMode.ElideRight, body_rect.width()
             )
             painter.setPen(muted_pen)
-            painter.drawText(
-                meta_x,
-                meta_top + meta_metrics.ascent() + _CHIP_PADDING_V,
-                f"Expect: {preview}",
-            )
-
-        painter.restore()
+            painter.drawText(meta_x, baseline_y, f"Expect: {preview}")
 
     def sizeHint(  # noqa: N802 - Qt API
         self,
@@ -196,7 +214,8 @@ class SuggestionDelegate(QStyledItemDelegate):
         # Best-effort width: the view passes its own width through
         # option.rect, but on first paint it can be 0.
         width = max(opt.rect.width(), 320)
-        chip_width = self._chip_width(opt, _priority_text(suggestion.priority))
+        chip_label = _DONE_LABEL if suggestion.completed else _priority_text(suggestion.priority)
+        chip_width = self._chip_width(opt, chip_label)
         body_width = width - 2 * _PADDING_H - chip_width - _CHIP_GAP
 
         action_font = QFont(opt.font)
@@ -222,9 +241,14 @@ class SuggestionDelegate(QStyledItemDelegate):
         priority: str,
         *,
         selected: bool,
+        completed: bool = False,
     ) -> QRect:
-        chip = _PRIORITY_CHIPS.get(priority, _PRIORITY_CHIPS[PRIORITY_RECOMMENDED])
-        text = _priority_text(priority)
+        if completed:
+            chip = _DONE_CHIP
+            text = _DONE_LABEL
+        else:
+            chip = _PRIORITY_CHIPS.get(priority, _PRIORITY_CHIPS[PRIORITY_RECOMMENDED])
+            text = _priority_text(priority)
         font = QFont(painter.font())
         font.setPointSize(max(8, font.pointSize() - 1))
         font.setWeight(QFont.Weight.DemiBold)

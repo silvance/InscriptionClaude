@@ -34,6 +34,7 @@ from caseguide.model import (
     PRIORITY_CHOICES,
     PRIORITY_RECOMMENDED,
     Suggestion,
+    utcnow,
 )
 from caseguide.ui.suggestion_delegate import SUGGESTION_ROLE, SuggestionDelegate
 
@@ -163,9 +164,23 @@ class SuggestionsPanel(QWidget):
         form.addRow("Expected result", self._expected_edit)
         form.addRow("Rationale", self._rationale_edit)
 
+        # Completion tracker — examiner toggles after they've actually
+        # done the step. The LLM Refine pass leaves completed entries
+        # alone so the verified work doesn't bounce back to "to do".
+        self._complete_btn = QPushButton("Mark complete", page)
+        self._complete_btn.setProperty("role", "primary")
+        self._complete_btn.clicked.connect(self._on_toggle_completed)
+        self._completed_label = QLabel("", page)
+        self._completed_label.setProperty("muted", "true")
+
+        complete_row = QHBoxLayout()
+        complete_row.addWidget(self._complete_btn)
+        complete_row.addWidget(self._completed_label, 1)
+
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(form)
+        layout.addLayout(complete_row)
         return page
 
     # -------------------------------------------------------- internals
@@ -189,8 +204,10 @@ class SuggestionsPanel(QWidget):
             return
         plural = "s" if len(self._suggestions) != 1 else ""
         required = sum(1 for s in self._suggestions if s.priority == "required")
+        completed = sum(1 for s in self._suggestions if s.completed)
         self._summary_label.setText(
-            f"{len(self._suggestions)} suggestion{plural} · {required} required"
+            f"{len(self._suggestions)} suggestion{plural} · "
+            f"{required} required · {completed} completed"
         )
 
     def _update_button_state(self) -> None:
@@ -226,7 +243,22 @@ class SuggestionsPanel(QWidget):
         self._action_edit.setPlainText(suggestion.action)
         self._expected_edit.setPlainText(suggestion.expected_result)
         self._rationale_edit.setPlainText(suggestion.rationale)
+        self._refresh_completion_widgets(suggestion)
         self._suppress_signals = False
+
+    def _refresh_completion_widgets(self, suggestion: Suggestion) -> None:
+        if suggestion.completed:
+            self._complete_btn.setText("Mark incomplete")
+            stamp = suggestion.completed_at
+            if stamp is not None:
+                self._completed_label.setText(
+                    f"Completed {stamp.strftime('%Y-%m-%d %H:%M')}"
+                )
+            else:
+                self._completed_label.setText("Completed")
+        else:
+            self._complete_btn.setText("Mark complete")
+            self._completed_label.setText("")
 
     def _on_field_changed(self) -> None:
         if self._suppress_signals:
@@ -247,6 +279,23 @@ class SuggestionsPanel(QWidget):
         item = self._list.item(idx)
         if item is not None:
             _refresh_item(item, updated)
+        self._update_summary()
+        self.changed.emit()
+
+    def _on_toggle_completed(self) -> None:
+        idx = self._list.currentRow()
+        if not (0 <= idx < len(self._suggestions)):
+            return
+        current = self._suggestions[idx]
+        if current.completed:
+            updated = dataclasses.replace(current, completed=False, completed_at=None)
+        else:
+            updated = dataclasses.replace(current, completed=True, completed_at=utcnow())
+        self._suggestions[idx] = updated
+        item = self._list.item(idx)
+        if item is not None:
+            _refresh_item(item, updated)
+        self._refresh_completion_widgets(updated)
         self._update_summary()
         self.changed.emit()
 

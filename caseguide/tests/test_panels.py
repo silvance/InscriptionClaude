@@ -77,3 +77,20 @@ def test_suggestions_panel_move_swaps_neighbours(qtbot) -> None:  # type: ignore
     panel._list.setCurrentRow(2)
     panel._on_move(-1)
     assert [s.id for s in panel.suggestions()] == ["a", "c", "b"]
+
+
+def test_suggestions_panel_mark_complete_toggles_state(qtbot) -> None:  # type: ignore[no-untyped-def]
+    panel = SuggestionsPanel()
+    qtbot.addWidget(panel)
+    panel.set_suggestions([Suggestion(id="a", action="Verify hash.")])
+    panel._list.setCurrentRow(0)
+
+    panel._on_toggle_completed()
+    out = panel.suggestions()
+    assert out[0].completed is True
+    assert out[0].completed_at is not None
+
+    panel._on_toggle_completed()
+    out = panel.suggestions()
+    assert out[0].completed is False
+    assert out[0].completed_at is None

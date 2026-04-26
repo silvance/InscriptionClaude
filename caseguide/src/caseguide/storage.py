@@ -94,6 +94,8 @@ def _suggestion_to_json(s: Suggestion) -> dict[str, object]:
         "rationale": s.rationale,
         "references": list(s.references),
         "depends_on": list(s.depends_on),
+        "completed": s.completed,
+        "completed_at": s.completed_at.isoformat() if s.completed_at is not None else None,
     }
 
 
@@ -127,6 +129,8 @@ def _suggestion_from_json(raw: dict[str, object]) -> Suggestion:
         rationale=str(raw.get("rationale", "")),
         references=_string_list(raw.get("references")),
         depends_on=_string_list(raw.get("depends_on")),
+        completed=_coerce_bool(raw.get("completed"), default=False),
+        completed_at=_parse_optional_iso(raw.get("completed_at")),
     )
 
 
@@ -156,3 +160,26 @@ def _parse_iso(value: object) -> datetime:
         return datetime.fromisoformat(value)
     except ValueError:
         return utcnow()
+
+
+def _parse_optional_iso(value: object) -> datetime | None:
+    """Like ``_parse_iso`` but returns None for missing / unparseable input.
+
+    Used for ``completed_at`` — a missing timestamp legitimately means
+    "never completed", so we must not invent ``utcnow()`` as a fallback
+    the way ``generated_at`` does.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _coerce_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default

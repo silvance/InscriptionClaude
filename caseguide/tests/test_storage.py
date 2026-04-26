@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -88,3 +90,60 @@ def test_atomic_write_does_not_leave_tmp_behind(tmp_path: Path) -> None:
     leftover = list(case_dir.glob("**/*.tmp"))
     assert leftover == []
     assert (case_dir / ".caseguide" / SUGGESTIONS_FILENAME).exists()
+
+
+def test_round_trip_preserves_completion_state(tmp_path: Path) -> None:
+    case_dir = tmp_path / "completed"
+    case_dir.mkdir()
+    completed_at = datetime(2026, 4, 25, 14, 30, tzinfo=UTC)
+    doc = SuggestionsDocument(
+        generated_at=utcnow(),
+        suggestions=[
+            Suggestion(
+                id="verify-image-hash",
+                action="Verify SHA-256 of acquired image.",
+                priority=PRIORITY_REQUIRED,
+                completed=True,
+                completed_at=completed_at,
+            ),
+            Suggestion(id="open", action="Pending step.", priority=PRIORITY_REQUIRED),
+        ],
+    )
+    write_suggestions(case_dir, doc)
+    loaded = read_suggestions(case_dir)
+    assert loaded is not None
+    done, pending = loaded.suggestions
+    assert done.completed is True
+    assert done.completed_at == completed_at
+    assert pending.completed is False
+    assert pending.completed_at is None
+
+
+def test_v1_file_loads_with_default_completion(tmp_path: Path) -> None:
+    """A v1 suggestions.json (no completion fields) should still load."""
+    case_dir = tmp_path / "legacy"
+    target = suggestions_path(case_dir)
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generated_at": "2026-04-01T12:00:00+00:00",
+                "scope_summary": "Old case",
+                "playbooks": [],
+                "suggestions": [
+                    {
+                        "id": "verify-image-hash",
+                        "action": "Verify SHA-256.",
+                        "priority": "required",
+                    },
+                ],
+                "caseguide_version": "0.1.0a0",
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = read_suggestions(case_dir)
+    assert loaded is not None
+    assert loaded.suggestions[0].completed is False
+    assert loaded.suggestions[0].completed_at is None

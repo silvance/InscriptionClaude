@@ -90,7 +90,7 @@ The contract:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": "2026-04-25T14:30:00+00:00",
   "scope_summary": "CSAM possession; Windows 11 laptop; full-disk image acquired.",
   "playbooks": ["NIST SP 800-86", "Internal SOP DF-CSAM-2024"],
@@ -103,7 +103,9 @@ The contract:
       "expected_result": "Hash matches the value recorded at acquisition time.",
       "rationale": "Establishes evidence integrity before any analysis touches the image.",
       "references": ["NIST SP 800-86 §5.2.2"],
-      "depends_on": []
+      "depends_on": [],
+      "completed": true,
+      "completed_at": "2026-04-25T15:02:11+00:00"
     },
     {
       "id": "export-registry-hives",
@@ -113,7 +115,9 @@ The contract:
       "expected_result": "Hives written to <case-root>/derived/registry/ with SHA-256 logged.",
       "rationale": "Registry artefacts feed timeline reconstruction and user-activity analysis.",
       "references": ["SWGDE Best Practices for Computer Forensic Acquisitions §4.7"],
-      "depends_on": ["verify-image-hash"]
+      "depends_on": ["verify-image-hash"],
+      "completed": false,
+      "completed_at": null
     }
   ]
 }
@@ -123,7 +127,7 @@ Field-by-field:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `schema_version` | int | Bumps when this contract changes. v1 today. |
+| `schema_version` | int | Bumps when this contract changes. v2 today (added per-suggestion `completed` / `completed_at`). |
 | `generated_at` | ISO 8601 string | When CaseGuide produced this file. |
 | `scope_summary` | string | Short, human-readable; shown as the panel header. |
 | `playbooks` | string[] | Display-only; identifies which standards / SOPs the suggestions came from. |
@@ -135,26 +139,18 @@ Field-by-field:
 | `suggestions[].rationale` | string | Optional one-liner the panel can show as a tooltip / expandable. |
 | `suggestions[].references` | string[] | Optional citations to the standard / SOP / vendor doc. |
 | `suggestions[].depends_on` | string[] | Optional list of other `id`s. Inscription may grey out a suggestion until its dependencies are completed. |
+| `suggestions[].completed` | bool | True after the examiner marks the step done in CaseGuide; defaults to `false`. Both fields default to `false`/`null` on legacy v1 files. |
+| `suggestions[].completed_at` | ISO 8601 string \| null | When the examiner marked it complete; `null` while incomplete. |
 
-#### Completion tracking (deferred)
+#### Completion tracking
 
-The first iteration is **read-only on Inscription's side**: the panel
-shows suggestions and creates draft steps from them, but does not
-write back which suggestions have been acted on. CaseGuide can
-approximate completeness by scanning sessions and matching draft-step
-text against suggestion `action` strings.
-
-When that's not good enough, the next revision of this contract will
-add either:
-
-- a `suggestion_id` column on `draft_steps` (schema bump), or
-- a `<case-root>/.caseguide/completion.json` written by Inscription
-  mapping `suggestion_id → {session_slug, step_id, completed_at}`.
-
-The second option is preferred because it stays additive — no schema
-bump, no migration — and is symmetric with how CaseGuide writes its
-own file. This is left unimplemented until CaseGuide actually exists
-and the real shape of "completion" is clear.
+CaseGuide owns completion state via the `completed` / `completed_at`
+fields on each suggestion. The examiner ticks "Mark complete" in the
+suggestions panel; the row dims and strikes through, and CaseGuide's
+LLM Refine pass leaves completed entries untouched (so re-running
+Refine doesn't undo verified work). Inscription, as a read-only
+consumer, can use the same fields to grey-out completed suggestions
+when it surfaces the panel.
 
 ---
 
