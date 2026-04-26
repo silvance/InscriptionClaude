@@ -40,11 +40,22 @@ def build_command(*, executable_path: str, module_name: str, case_dir: Path) -> 
     ``executable_path`` of ``""`` triggers the PATH-then-python-module
     fall-through. Pure helper so unit tests can exercise the resolution
     order without spawning subprocesses.
+
+    An explicit path is validated to point at an existing regular file
+    before being trusted; if it doesn't, we fall through to the PATH
+    lookup rather than handing a stale or hostile path to ``Popen``.
     """
     case_arg = str(case_dir.resolve())
     explicit = executable_path.strip()
     if explicit:
-        return [explicit, "--case-dir", case_arg]
+        explicit_path = Path(explicit)
+        if explicit_path.is_file():
+            return [explicit, "--case-dir", case_arg]
+        logger.warning(
+            "Configured %s path %r is not a regular file; falling back to PATH.",
+            module_name,
+            explicit,
+        )
     on_path = shutil.which(module_name) or shutil.which(f"{module_name}.exe")
     if on_path:
         return [on_path, "--case-dir", case_arg]

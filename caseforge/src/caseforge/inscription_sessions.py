@@ -60,7 +60,10 @@ def list_inscription_sessions(case_dir: Path) -> list[InscriptionSession]:
         if not child.is_dir():
             continue
         manifest_path = child / MANIFEST_FILENAME
-        if not manifest_path.exists():
+        # ``is_file`` rejects symlinks-to-directories and a directory
+        # that someone substituted for the manifest file — both would
+        # be unhandled OS errors inside ``_parse_manifest``.
+        if not manifest_path.is_file():
             continue
         parsed = _parse_manifest(manifest_path, slug=child.name)
         if parsed is not None:

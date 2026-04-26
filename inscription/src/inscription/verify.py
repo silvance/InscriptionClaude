@@ -25,11 +25,10 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from inscription.storage import SessionRepository
 
 logger = logging.getLogger(__name__)
@@ -84,7 +83,23 @@ def verify_session_integrity(repository: SessionRepository) -> IntegrityResult:
     unhashed: list[str] = []
     ok = 0
 
+    # Resolve session_root once so the per-row prefix check below
+    # compares against a canonical path that doesn't itself contain
+    # ``..`` segments or symlinks.
+    session_root_resolved = session_root.resolve()
+
     for shot in rows:
+        if not _is_inside(session_root_resolved, shot.relative_path):
+            # Path-traversal guard: a row whose ``relative_path``
+            # escapes the session directory (``../../etc/passwd``,
+            # absolute paths, symlink-walked paths) gets reported
+            # as missing rather than read off disk.
+            logger.warning(
+                "Refusing to hash screenshot outside session: %s",
+                shot.relative_path,
+            )
+            missing.append(shot.relative_path)
+            continue
         path = session_root / shot.relative_path
         if not path.exists():
             missing.append(shot.relative_path)
@@ -131,3 +146,20 @@ def _hash_file(path: Path) -> str:
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+def _is_inside(root_resolved: Path, relative: str) -> bool:
+    """True if ``root_resolved / relative`` resolves under ``root_resolved``.
+
+    Belt-and-braces: an absolute ``relative`` short-circuits to False;
+    otherwise we resolve and check the prefix. ``Path.is_relative_to``
+    is the cleanest way to express the prefix comparison.
+    """
+    rel = Path(relative)
+    if rel.is_absolute():
+        return False
+    try:
+        resolved = (root_resolved / rel).resolve()
+    except OSError:
+        return False
+    return resolved.is_relative_to(root_resolved)
