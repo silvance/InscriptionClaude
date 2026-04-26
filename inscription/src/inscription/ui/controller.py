@@ -461,7 +461,15 @@ class SessionController(QObject):
             return
         finally:
             safe_close(capturer)
-        engine.submit(
+        # Recording could have stopped between the queued signal arriving
+        # and the capture finishing; re-check before submit so we don't
+        # silently lose the snapshot to an engine that's no longer
+        # accepting events.
+        engine = self._engine
+        if engine is None:
+            logger.info("Snapshot hotkey: recording stopped before submit")
+            return
+        if not engine.submit(
             RawCaptureEvent(
                 kind=EventKind.MARKER,
                 occurred_at=utcnow(),
@@ -470,7 +478,8 @@ class SessionController(QObject):
                 png_width=image.width,
                 png_height=image.height,
             )
-        )
+        ):
+            logger.warning("Snapshot hotkey: capture queue refused the event")
 
     # ---------------------------------------------------------- step actions
 

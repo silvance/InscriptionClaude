@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from caseguide.llm.client import LLMError
+
 if TYPE_CHECKING:
     from caseguide.case_reader import CaseScope
     from caseguide.llm.augment import SuggestionsRefiner
@@ -55,9 +57,17 @@ class RefineWorker(QThread):
     def run(self) -> None:
         try:
             refined = self._refiner.refine(scope=self._scope, drafts=self._drafts)
+        except LLMError as exc:
+            logger.warning("LLM refinement failed: %s", exc)
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            return
         except Exception as exc:
-            logger.exception("LLM refinement failed")
-            self.failed.emit(str(exc))
+            # Anything that isn't an LLMError is a programmer bug
+            # (parser regression, model construction issue) — log the
+            # full traceback so we have the stack to debug from, and
+            # still report something the UI can show.
+            logger.exception("Unexpected error during LLM refinement")
+            self.failed.emit(f"Unexpected: {type(exc).__name__}: {exc}")
             return
         self.finished_ok.emit(refined)
 
@@ -143,7 +153,16 @@ class RefineProgressDialog(QDialog):
 
     def _on_cancel(self) -> None:
         # QThread can't be killed mid-HTTP, but the request will finish
-        # on its own and the connected slots will no-op after reject().
+        # on its own. Disconnect the worker's signals before we reject
+        # so a late-arriving success doesn't fire ``_on_success`` on a
+        # closed dialog and re-emit ``succeeded`` after the controller
+        # has moved on.
         self._tick_timer.stop()
+        try:
+            self._worker.finished_ok.disconnect(self._on_success)
+            self._worker.failed.disconnect(self._on_failure)
+        except (RuntimeError, TypeError):
+            # Already disconnected (success/failure raced us); fine.
+            pass
         logger.info("User cancelled LLM refinement (request may still complete in background)")
         self.reject()

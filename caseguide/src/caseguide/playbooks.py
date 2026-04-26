@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 #: Wildcard token in match-criteria lists; matches any value.
 WILDCARD = "*"
 
+#: Hard cap on per-playbook list lengths. The matcher walks every entry
+#: against scope text on every match call, so a user-supplied playbook
+#: with thousands of entries would slow the suggestions panel for
+#: every regenerate. The cap is well above any sensible authoring
+#: limit but stops a malformed file from DOSing the matcher.
+_MAX_RULE_ENTRIES = 200
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ToolVariant:
@@ -229,7 +236,8 @@ def _parse_applies_to(raw: object) -> AppliesTo:
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(item) for item in value if item is not None]
+    cleaned = [str(item) for item in value if item is not None]
+    return cleaned[:_MAX_RULE_ENTRIES]
 
 
 # --------------------------------------------------------------- matching
