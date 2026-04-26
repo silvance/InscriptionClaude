@@ -249,14 +249,8 @@ class SuggestionDelegate(QStyledItemDelegate):
         else:
             chip = _PRIORITY_CHIPS.get(priority, _PRIORITY_CHIPS[PRIORITY_RECOMMENDED])
             text = _priority_text(priority)
-        font = QFont(painter.font())
-        font.setPointSize(max(8, font.pointSize() - 1))
-        font.setWeight(QFont.Weight.DemiBold)
-        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 105)
-        metrics = QFontMetrics(font)
-
-        chip_h = metrics.height() + 2 * _CHIP_PADDING_V
-        chip_w = metrics.horizontalAdvance(text) + 2 * _CHIP_PADDING_H
+        font = _chip_font(painter.font())
+        chip_w, chip_h = _chip_size(font, text)
         chip_rect = QRect(rect.left(), rect.top() + 1, chip_w, chip_h)
 
         bg = QColor(chip.bg)
@@ -277,10 +271,7 @@ class SuggestionDelegate(QStyledItemDelegate):
 
     @staticmethod
     def _chip_width(option: QStyleOptionViewItem, text: str) -> int:
-        font = QFont(option.font)
-        font.setPointSize(max(8, option.font.pointSize() - 1))
-        font.setWeight(QFont.Weight.DemiBold)
-        return QFontMetrics(font).horizontalAdvance(text) + 2 * _CHIP_PADDING_H
+        return _chip_size(_chip_font(option.font), text)[0]
 
     @staticmethod
     def _draw_chip(
@@ -350,6 +341,29 @@ class SuggestionDelegate(QStyledItemDelegate):
 
 def _priority_text(priority: str) -> str:
     return (priority or PRIORITY_RECOMMENDED).upper()
+
+
+def _chip_font(base: QFont) -> QFont:
+    """Build the chip font from the row's base font.
+
+    Used by both ``paint()`` (for drawing) and ``sizeHint()`` (for
+    width reservation) so the two paths can never disagree on chip
+    width — the 105% letter spacing in particular widens the chip
+    enough that a sizeHint without it would clip the action text.
+    """
+    font = QFont(base)
+    font.setPointSize(max(8, base.pointSize() - 1))
+    font.setWeight(QFont.Weight.DemiBold)
+    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 105)
+    return font
+
+
+def _chip_size(font: QFont, text: str) -> tuple[int, int]:
+    """Return ``(width, height)`` of a chip drawn with ``font`` and ``text``."""
+    metrics = QFontMetrics(font)
+    width = metrics.horizontalAdvance(text) + 2 * _CHIP_PADDING_H
+    height = metrics.height() + 2 * _CHIP_PADDING_V
+    return width, height
 
 
 __all__ = ["SUGGESTION_ROLE", "SuggestionDelegate"]

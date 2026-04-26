@@ -163,22 +163,33 @@ class SuggestionsPanel(QWidget):
     # ---------------------------------------------------------- internals
 
     def _refresh_watcher(self) -> None:
+        desired = self._desired_watch_paths()
+        if desired == self._watched_paths:
+            return
         if self._watched_paths:
             self._watcher.removePaths(list(self._watched_paths))
-            self._watched_paths.clear()
+        if desired:
+            self._watcher.addPaths(list(desired))
+        self._watched_paths = desired
+
+    def _desired_watch_paths(self) -> set[str]:
+        """The paths the watcher should hold given the current case_dir.
+
+        We watch the parent directory unconditionally so we notice the
+        file being created later, and the file itself when it already
+        exists — QFileSystemWatcher won't fire ``fileChanged`` for a
+        path that doesn't exist at the time it was added.
+        """
         if self._case_dir is None:
-            return
+            return set()
         target = suggestions_path(self._case_dir)
-        # Watch the directory unconditionally so we notice the file
-        # being created later. Watch the file too when it already
-        # exists — QFileSystemWatcher won't fire fileChanged otherwise.
+        paths: set[str] = set()
         directory = target.parent
         if directory.exists():
-            self._watcher.addPath(str(directory))
-            self._watched_paths.add(str(directory))
+            paths.add(str(directory))
         if target.exists():
-            self._watcher.addPath(str(target))
-            self._watched_paths.add(str(target))
+            paths.add(str(target))
+        return paths
 
     def _on_watch_event(self, path: str) -> None:
         logger.debug("CaseGuide suggestions watch event: %s", path)

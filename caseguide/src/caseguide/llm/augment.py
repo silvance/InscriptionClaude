@@ -13,7 +13,6 @@ to the deterministic output when the LLM is unreachable.
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from caseguide.llm.prompt import (
@@ -100,9 +99,3 @@ class SuggestionsRefiner:
             len(completed),
         )
         return out
-
-
-def annotate_with_source(suggestion: Suggestion, *, source_id: str) -> Suggestion:
-    """Helper for callers that need to round-trip the source id field."""
-    # Currently unused; kept for the eventual completion-tracking layer.
-    return replace(suggestion, id=source_id)

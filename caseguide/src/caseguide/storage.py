@@ -15,6 +15,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import overload
 
 from caseguide.model import (
     PRIORITY_RECOMMENDED,
@@ -107,7 +108,7 @@ def _from_json(raw: dict[str, object]) -> SuggestionsDocument:
         schema_version=_coerce_int(
             raw.get("schema_version", 1), default=SUGGESTIONS_SCHEMA_VERSION
         ),
-        generated_at=_parse_iso(raw.get("generated_at")),
+        generated_at=_parse_iso(raw.get("generated_at"), default=utcnow()),
         scope_summary=str(raw.get("scope_summary", "")),
         playbooks=_string_list(raw.get("playbooks")),
         suggestions=[
@@ -130,7 +131,7 @@ def _suggestion_from_json(raw: dict[str, object]) -> Suggestion:
         references=_string_list(raw.get("references")),
         depends_on=_string_list(raw.get("depends_on")),
         completed=_coerce_bool(raw.get("completed"), default=False),
-        completed_at=_parse_optional_iso(raw.get("completed_at")),
+        completed_at=_parse_iso(raw.get("completed_at"), default=None),
     )
 
 
@@ -153,30 +154,26 @@ def _coerce_int(value: object, *, default: int) -> int:
     return default
 
 
-def _parse_iso(value: object) -> datetime:
-    if not isinstance(value, str) or not value:
-        return utcnow()
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return utcnow()
+@overload
+def _parse_iso(value: object, *, default: datetime) -> datetime: ...
+@overload
+def _parse_iso(value: object, *, default: None) -> datetime | None: ...
 
 
-def _parse_optional_iso(value: object) -> datetime | None:
-    """Like ``_parse_iso`` but returns None for missing / unparseable input.
+def _parse_iso(value: object, *, default: datetime | None) -> datetime | None:
+    """Parse an ISO 8601 timestamp; return ``default`` if absent or invalid.
 
-    Used for ``completed_at`` — a missing timestamp legitimately means
-    "never completed", so we must not invent ``utcnow()`` as a fallback
-    the way ``generated_at`` does.
+    Callers pick the fallback explicitly: ``default=utcnow()`` for
+    fields like ``generated_at`` where the document needs *some*
+    timestamp; ``default=None`` for optional fields like
+    ``completed_at`` where a missing value means "not yet".
     """
-    if value is None:
-        return None
     if not isinstance(value, str) or not value:
-        return None
+        return default
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        return None
+        return default
 
 
 def _coerce_bool(value: object, *, default: bool) -> bool:

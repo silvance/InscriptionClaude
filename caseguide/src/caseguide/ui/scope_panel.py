@@ -31,6 +31,17 @@ def _muted(text: str, parent: QWidget | None = None) -> QLabel:
     return label
 
 
+def _value_label(parent: QWidget) -> QLabel:
+    """Read-only value cell next to a form row label.
+
+    Word-wrap is on so a long evidence-items list doesn't shove the
+    panel wider than the splitter handle allows.
+    """
+    label = QLabel("—", parent)
+    label.setWordWrap(True)
+    return label
+
+
 class ScopePanel(QWidget):
     """Renders a :class:`caseguide.case_reader.CaseHandle` as read-only text."""
 
@@ -48,19 +59,11 @@ class ScopePanel(QWidget):
         self._path_label = _muted("", self)
         self._path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        self._exam_type_value = QLabel("—", self)
-        self._primary_tool_value = QLabel("—", self)
-        self._devices_value = QLabel("—", self)
-        self._evidence_value = QLabel("—", self)
-        self._agencies_value = QLabel("—", self)
-        for value_label in (
-            self._exam_type_value,
-            self._primary_tool_value,
-            self._devices_value,
-            self._evidence_value,
-            self._agencies_value,
-        ):
-            value_label.setWordWrap(True)
+        self._exam_type_value = _value_label(self)
+        self._primary_tool_value = _value_label(self)
+        self._devices_value = _value_label(self)
+        self._evidence_value = _value_label(self)
+        self._agencies_value = _value_label(self)
 
         self._summary_box = QPlainTextEdit(self)
         self._summary_box.setReadOnly(True)

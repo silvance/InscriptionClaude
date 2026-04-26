@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from caseguide.model import (
     PRIORITY_CHOICES,
     PRIORITY_RECOMMENDED,
+    PRIORITY_REQUIRED,
     Suggestion,
     utcnow,
 )
@@ -58,7 +59,6 @@ class SuggestionsPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._suggestions: list[Suggestion] = []
-        self._suppress_signals = False
         self._new_counter = 0
 
         self._summary_label = _muted("No suggestions yet.", self)
@@ -186,11 +186,12 @@ class SuggestionsPanel(QWidget):
     # -------------------------------------------------------- internals
 
     def _render(self, *, select_index: int | None = None) -> None:
-        self._suppress_signals = True
-        self._list.clear()
-        for suggestion in self._suggestions:
-            self._list.addItem(_make_item(suggestion))
-        self._suppress_signals = False
+        # Block list signals while we rebuild so itemSelectionChanged
+        # doesn't fire mid-clear for the row that's about to disappear.
+        with QSignalBlocker(self._list):
+            self._list.clear()
+            for suggestion in self._suggestions:
+                self._list.addItem(_make_item(suggestion))
         self._update_summary()
         if select_index is not None and 0 <= select_index < self._list.count():
             self._list.setCurrentRow(select_index)
@@ -203,7 +204,7 @@ class SuggestionsPanel(QWidget):
             self._summary_label.setText("No suggestions yet.")
             return
         plural = "s" if len(self._suggestions) != 1 else ""
-        required = sum(1 for s in self._suggestions if s.priority == "required")
+        required = sum(1 for s in self._suggestions if s.priority == PRIORITY_REQUIRED)
         completed = sum(1 for s in self._suggestions if s.completed)
         self._summary_label.setText(
             f"{len(self._suggestions)} suggestion{plural} · "
@@ -220,8 +221,6 @@ class SuggestionsPanel(QWidget):
         )
 
     def _on_selection_changed(self) -> None:
-        if self._suppress_signals:
-            return
         idx = self._list.currentRow()
         if 0 <= idx < len(self._suggestions):
             self._populate_editor(self._suggestions[idx])
@@ -234,7 +233,17 @@ class SuggestionsPanel(QWidget):
         self._editor_stack.setCurrentIndex(0)
 
     def _populate_editor(self, suggestion: Suggestion) -> None:
-        self._suppress_signals = True
+        # QSignalBlocker on each editor widget keeps programmatic
+        # setText / setCurrentIndex from being mistaken for user input
+        # and round-tripped back into the suggestion as a no-op edit.
+        # Blockers stay alive until the function returns.
+        _blockers = [
+            QSignalBlocker(self._priority_combo),
+            QSignalBlocker(self._category_edit),
+            QSignalBlocker(self._action_edit),
+            QSignalBlocker(self._expected_edit),
+            QSignalBlocker(self._rationale_edit),
+        ]
         for index in range(self._priority_combo.count()):
             if self._priority_combo.itemData(index) == suggestion.priority:
                 self._priority_combo.setCurrentIndex(index)
@@ -244,7 +253,6 @@ class SuggestionsPanel(QWidget):
         self._expected_edit.setPlainText(suggestion.expected_result)
         self._rationale_edit.setPlainText(suggestion.rationale)
         self._refresh_completion_widgets(suggestion)
-        self._suppress_signals = False
 
     def _refresh_completion_widgets(self, suggestion: Suggestion) -> None:
         if suggestion.completed:
@@ -261,8 +269,6 @@ class SuggestionsPanel(QWidget):
             self._completed_label.setText("")
 
     def _on_field_changed(self) -> None:
-        if self._suppress_signals:
-            return
         idx = self._list.currentRow()
         if not (0 <= idx < len(self._suggestions)):
             return
