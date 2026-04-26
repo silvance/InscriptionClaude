@@ -26,16 +26,27 @@ def _write(directory: Path, name: str, payload: dict[str, object]) -> Path:
 
 
 def test_builtin_playbooks_load_and_parse() -> None:
-    """The five shipped JSON files all parse cleanly."""
+    """The shipped JSON files all parse cleanly."""
     playbooks = load_playbooks(user_dir=__import__("pathlib").Path("/nonexistent"))
     ids = {p.id for p in playbooks}
     expected = {
+        # Universal / cross-tool foundations.
         "verify-image-hash",
         "chain-of-custody-intake",
+        "memory-image-acquisition",
+        # AXIOM track.
         "axiom-ci-processing",
         "axiom-timeline-analysis",
+        # X-Ways track.
         "xways-rvs-processing",
+        # Autopsy track.
+        "autopsy-ci-processing",
+        # Cellebrite (mobile) track.
+        "cellebrite-mobile-extraction",
+        "cellebrite-mobile-analysis",
+        # Topical: Windows MRU + CSAM.
         "mru-folder-access",
+        "csam-hash-set-verification",
     }
     assert expected.issubset(ids)
 
@@ -233,6 +244,51 @@ def test_keyword_does_not_override_strict_tool_when_no_match() -> None:
     # Keyword present in scope text → playbook fires regardless of
     # primary_tools, because keywords are an OR short-circuit.
     assert matcher.match(CaseScope(exam_type="timeline analysis")) == [pb]
+
+
+def test_cellebrite_mobile_case_fires_mobile_chain_not_disk_chain() -> None:
+    """A Cellebrite UFED case shouldn't surface AXIOM / X-Ways disk steps."""
+    matcher = PlaybookMatcher(
+        load_playbooks(user_dir=__import__("pathlib").Path("/nonexistent"))
+    )
+    scope = CaseScope(
+        exam_type="CSAM",
+        primary_tool="cellebrite",
+        device_classes=["mobile", "ios"],
+        evidence_items=["UFDR extraction"],
+    )
+    matched_ids = {p.id for p in matcher.match(scope)}
+    assert "cellebrite-mobile-extraction" in matched_ids
+    assert "cellebrite-mobile-analysis" in matched_ids
+    assert "axiom-ci-processing" not in matched_ids
+    assert "xways-rvs-processing" not in matched_ids
+    assert "autopsy-ci-processing" not in matched_ids
+
+
+def test_csam_case_with_image_fires_hash_set_verification() -> None:
+    """A CSAM disk case should pull in the hash-set verification step."""
+    matcher = PlaybookMatcher(
+        load_playbooks(user_dir=__import__("pathlib").Path("/nonexistent"))
+    )
+    scope = CaseScope(
+        exam_type="CSAM possession",
+        primary_tool="axiom",
+        evidence_items=["E01 image"],
+    )
+    matched_ids = {p.id for p in matcher.match(scope)}
+    assert "verify-image-hash" in matched_ids
+    assert "csam-hash-set-verification" in matched_ids
+
+
+def test_incident_response_case_fires_memory_acquisition() -> None:
+    """An IR case picks up the live RAM acquisition step regardless of tool."""
+    matcher = PlaybookMatcher(
+        load_playbooks(user_dir=__import__("pathlib").Path("/nonexistent"))
+    )
+    # No primary_tool — memory acquisition is universal.
+    scope = CaseScope(exam_type="incident response")
+    matched_ids = {p.id for p in matcher.match(scope)}
+    assert "memory-image-acquisition" in matched_ids
 
 
 def test_under_specified_image_acquisition_case_now_fires_image_hash() -> None:

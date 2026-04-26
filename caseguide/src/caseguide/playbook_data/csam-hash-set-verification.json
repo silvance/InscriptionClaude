@@ -1,0 +1,34 @@
+{
+  "id": "csam-hash-set-verification",
+  "title": "CSAM hash-set verification",
+  "category": "verification",
+  "priority": "required",
+  "action": "Run the case's image set against the agency's vetted CSAM hash sets (Project VIC, NCMEC, internal). Record matches with their source set, hash algorithm (typically SHA-1 or PhotoDNA), and the full file path inside the image. PhotoDNA-style perceptual matches must be reviewed by a sworn examiner before they're cited as evidence.",
+  "rationale": "Hash-set verification is the legally defensible baseline for CSAM identification — automated PhotoDNA matches against vetted sets carry the chain-of-custody back to the originating ICAC / NCMEC submission. Manual review of every flagged image fulfils the human-in-the-loop requirement most jurisdictions impose for the charging decision.",
+  "expected_result": "Hash-match report listing flagged files with their source set + match algorithm; reviewer attestation captured against each match; counts totalled by tier (Project VIC categories A/B/C/D, NCMEC tiers).",
+  "depends_on": ["verify-image-hash"],
+  "references": [
+    "NIST SP 800-86 §5.3 (Identifying Files of Interest)",
+    "ICAC Task Force CSAM Hash-Set Standards"
+  ],
+  "tool_variants": {
+    "axiom": {
+      "action": "AXIOM Process → Hash Sets → enable Project VIC + the agency NCMEC import. AXIOM auto-categorises matches by Project VIC tier in the Pictures category; reviewers tag confirmed matches. Use the CSAM Categorization workflow under AXIOM Examine for the per-image reviewer attestation.",
+      "ui_path": "AXIOM Process > Processing Details > Hash Sets > Project VIC; AXIOM Examine > Pictures > CSAM Categorization",
+      "notes": "Project VIC requires a current credentials file from the agency POC; without it the set is registered but won't lookup. AXIOM's PhotoDNA support is gated behind a separate Magnet contract — confirm licensing before counting on it."
+    },
+    "xways": {
+      "action": "X-Ways → Refine Volume Snapshot → Hash database matching. Load the Project VIC + NCMEC sets via Tools → Hash Database Manager. Filter by hash-match category and route flagged items into the Reviewed Files list with the examiner attestation column populated.",
+      "ui_path": "Tools > Hash Database Manager; Refine Volume Snapshot > Match Hash"
+    },
+    "autopsy": {
+      "action": "Autopsy → Tools → Options → Hash Sets → Import the agency Project VIC + NCMEC databases. Re-run Hash Lookup ingest if the set was added post-ingest. Hashset Hits node populates per category; tag confirmed matches with the examiner attestation tag.",
+      "ui_path": "Tools > Options > Hash Sets > Import; Tree > Hashset Hits"
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CSAM", "child exploitation", "ICAC"],
+    "evidence_items": ["E01", "DD", "AD1", "image", "extraction"],
+    "keywords": ["csam", "child", "ncmec", "icac", "photodna", "project vic"]
+  }
+}

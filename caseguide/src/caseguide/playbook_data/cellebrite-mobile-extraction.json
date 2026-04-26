@@ -1,0 +1,26 @@
+{
+  "id": "cellebrite-mobile-extraction",
+  "title": "Cellebrite UFED mobile extraction",
+  "category": "acquisition",
+  "priority": "required",
+  "action": "Connect the device to the UFED workstation, document make/model/IMEI/serial in the extraction log, and pick the highest-fidelity extraction the device supports (Full File System where available, then Advanced Logical, then Logical). Capture the extraction in UFED's case-bound output directory; do not let UFED write to the original device.",
+  "rationale": "UFED's extraction tier dictates what artefacts you'll see downstream: Full File System unlocks app sandbox data and decrypted iOS keychain entries that Logical can't reach. Picking the wrong tier without documenting why creates an integrity question at trial.",
+  "expected_result": "UFED extraction completes; output written as a UFDR / .zip alongside the device-info report; computed hash recorded in UFED's case log and in the chain-of-custody form.",
+  "references": [
+    "Cellebrite Forensic Methodology — Mobile Device Extraction",
+    "SWGDE Best Practices for Mobile Device Evidence Preservation and Acquisition"
+  ],
+  "tool_variants": {
+    "cellebrite": {
+      "action": "UFED 4PC / Touch → Extract → Mobile Device → choose vendor + model. Use the picker's connection guide for cable + mode (DFU, ADB enabled, etc.). Pick extraction type per the tier ladder above; under iOS use Checkm8 / Advanced Logical as available. Output goes to the case folder; record the computed hash from the post-extraction summary screen.",
+      "ui_path": "UFED 4PC > Extract > Mobile Device > [vendor] > [model] > Extraction Type",
+      "notes": "Airplane Mode + Faraday bag the device before attaching; a partial OTA update mid-extraction will tank the timeline. iOS 16+ devices may need supervised mode or Checkm8 for FFS — log the chosen path in the extraction notes."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "credential", "fraud", "CSAM", "homicide", "narcotics", "exfiltration"],
+    "device_classes": ["mobile", "android", "ios", "iphone", "phone", "tablet"],
+    "primary_tools": ["cellebrite"],
+    "keywords": ["mobile", "phone", "android", "ios", "iphone", "ufed", "cellebrite"]
+  }
+}
