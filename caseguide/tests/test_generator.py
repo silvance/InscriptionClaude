@@ -65,7 +65,29 @@ def test_generate_records_matched_playbook_ids() -> None:
     scope = CaseScope(primary_tool="axiom", evidence_items=["E01 image"])
     doc = generate_suggestions(scope=scope, matcher=matcher)
     assert "verify-image-hash" in doc.playbooks
-    assert "axiom-ci-processing" not in doc.playbooks  # exam_type didn't match
+    # Under the soft-match rework an unset exam_type is inconclusive,
+    # so the AXIOM CI playbook fires for an AXIOM-keyed case even
+    # without an explicit "CI" exam_type. The X-Ways playbook still
+    # stays out because primary_tools is the strict field.
+    assert "axiom-ci-processing" in doc.playbooks
+    assert "xways-rvs-processing" not in doc.playbooks
+
+
+def test_generate_rejects_playbook_when_exam_type_actively_disqualifies() -> None:
+    """A populated but non-overlapping exam_type still rules a playbook out."""
+    matcher = PlaybookMatcher(load_playbooks())
+    scope = CaseScope(
+        primary_tool="axiom",
+        exam_type="CSAM possession",  # not in axiom-ci-processing's exam_types
+        evidence_items=["E01 image"],
+    )
+    doc = generate_suggestions(scope=scope, matcher=matcher)
+    # axiom-ci-processing's exam_types list doesn't include CSAM, so
+    # the soft match has actual scope to compare against and rejects.
+    assert "axiom-ci-processing" not in doc.playbooks
+    # verify-image-hash still fires via its keyword path ("image"
+    # appears in the evidence_items text).
+    assert "verify-image-hash" in doc.playbooks
 
 
 def test_generate_scope_summary_falls_back_to_summary_when_no_structured_fields() -> None:

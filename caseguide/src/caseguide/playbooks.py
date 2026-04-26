@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 #: Wildcard token in match-criteria lists; matches any value.
 WILDCARD = "*"
 
+#: Hard cap on per-playbook list lengths. The matcher walks every entry
+#: against scope text on every match call, so a user-supplied playbook
+#: with thousands of entries would slow the suggestions panel for
+#: every regenerate. The cap is well above any sensible authoring
+#: limit but stops a malformed file from DOSing the matcher.
+_MAX_RULE_ENTRIES = 200
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ToolVariant:
@@ -61,16 +68,39 @@ class ToolVariant:
 class AppliesTo:
     """Match criteria for a playbook.
 
-    A playbook applies to a case scope when **every populated list**
-    overlaps the corresponding scope field (case-insensitive substring,
-    or the wildcard ``*``). Empty lists match anything — useful for
-    universal steps like hash verification.
+    There are three classes of constraint, each with different
+    semantics on under-specified scopes:
+
+    - **Soft fields** (``exam_types``, ``device_classes``,
+      ``evidence_items``): if the rule is set but the corresponding
+      scope field is empty, the constraint is *inconclusive* and
+      passes. This favours recall when CaseForge hasn't been told
+      every detail yet — the examiner can dismiss false positives
+      via the suggestions panel's complete/remove controls.
+
+    - **Strict field** (``primary_tools``): if the rule is set and
+      the scope's ``primary_tool`` is empty, the constraint **fails**.
+      This keeps tool-specific playbooks (AXIOM, X-Ways, …) from
+      leaking into cases that haven't picked a tool, where their
+      UI paths would be wrong.
+
+    - **Keywords**: a short-circuit OR. If any keyword (case-insensitive
+      substring) appears anywhere in the joined scope text, the
+      playbook fires regardless of the other constraints. Lets
+      universal steps (hash verification, MRU walk-throughs) catch
+      cases where the structured fields are blank but the exam
+      type or device class strings hint at relevance.
+
+    Empty rule lists still match anything — universal steps need no
+    criteria at all. The wildcard ``*`` keeps its old meaning inside
+    a list.
     """
 
     exam_types: list[str] = field(default_factory=list)
     device_classes: list[str] = field(default_factory=list)
     evidence_items: list[str] = field(default_factory=list)
     primary_tools: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -199,13 +229,15 @@ def _parse_applies_to(raw: object) -> AppliesTo:
         device_classes=_string_list(raw.get("device_classes")),
         evidence_items=_string_list(raw.get("evidence_items")),
         primary_tools=_string_list(raw.get("primary_tools")),
+        keywords=_string_list(raw.get("keywords")),
     )
 
 
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(item) for item in value if item is not None]
+    cleaned = [str(item) for item in value if item is not None]
+    return cleaned[:_MAX_RULE_ENTRIES]
 
 
 # --------------------------------------------------------------- matching
@@ -230,30 +262,74 @@ class PlaybookMatcher:
 
 
 def _matches(criteria: AppliesTo, scope: CaseScope) -> bool:
+    if criteria.keywords and _keyword_present(criteria.keywords, scope):
+        return True
     return (
-        _list_matches(criteria.exam_types, [scope.exam_type])
-        and _list_matches(criteria.device_classes, scope.device_classes)
-        and _list_matches(criteria.evidence_items, scope.evidence_items)
-        and _list_matches(criteria.primary_tools, [scope.primary_tool])
+        _soft_match(criteria.exam_types, [scope.exam_type])
+        and _soft_match(criteria.device_classes, scope.device_classes)
+        and _soft_match(criteria.evidence_items, scope.evidence_items)
+        and _strict_match(criteria.primary_tools, [scope.primary_tool])
     )
 
 
-def _list_matches(rule: list[str], values: list[str]) -> bool:
-    """One side of the playbook match.
+def _soft_match(rule: list[str], values: list[str]) -> bool:
+    """Inconclusive scope counts as a match.
 
-    - Empty rule = no constraint (matches anything).
-    - Rule containing ``*`` = matches anything.
-    - Otherwise: any rule entry must appear (case-insensitive substring)
-      in any of the scope values.
+    Used for the descriptive scope fields (exam_types, device_classes,
+    evidence_items): when the examiner hasn't filled them in we'd
+    rather show a possibly-irrelevant playbook than hide a relevant
+    one. The completion + remove controls in the suggestions panel
+    make false positives cheap.
     """
-    if not rule:
+    if not rule or WILDCARD in rule:
         return True
-    if WILDCARD in rule:
-        return True
-    needles = [r.strip().lower() for r in rule if r.strip()]
+    needles = _normalised(rule)
     if not needles:
         return True
-    haystack = [v.strip().lower() for v in values if v and v.strip()]
+    haystack = _normalised(values)
+    if not haystack:
+        return True  # Inconclusive — pass.
+    return _any_overlap(needles, haystack)
+
+
+def _strict_match(rule: list[str], values: list[str]) -> bool:
+    """Empty scope fails the rule.
+
+    Reserved for primary_tools, where firing an AXIOM playbook on a
+    case that hasn't picked a tool would teach the examiner the
+    wrong UI paths.
+    """
+    if not rule or WILDCARD in rule:
+        return True
+    needles = _normalised(rule)
+    if not needles:
+        return True
+    haystack = _normalised(values)
     if not haystack:
         return False
+    return _any_overlap(needles, haystack)
+
+
+def _keyword_present(keywords: list[str], scope: CaseScope) -> bool:
+    """True if any keyword appears as a substring in the scope text.
+
+    Joins every scope field into one lowercased haystack so
+    ``"image"`` matches ``exam_type="Forensic image acquisition"``
+    even when ``evidence_items`` is empty.
+    """
+    needles = _normalised(keywords)
+    if not needles:
+        return False
+    parts = [scope.exam_type, scope.primary_tool, *scope.device_classes, *scope.evidence_items]
+    haystack = " ".join(p for p in parts if p).lower()
+    if not haystack:
+        return False
+    return any(needle in haystack for needle in needles)
+
+
+def _normalised(values: list[str]) -> list[str]:
+    return [v.strip().lower() for v in values if v and v.strip()]
+
+
+def _any_overlap(needles: list[str], haystack: list[str]) -> bool:
     return any(needle in stack or stack in needle for needle in needles for stack in haystack)

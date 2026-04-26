@@ -19,3 +19,17 @@ Match-criteria lists in `applies_to`:
 - `["*"]` = explicit wildcard, same effect
 - otherwise: case-insensitive substring across the scope's
   matching field
+
+`applies_to.keywords` is an optional short-circuit OR: any keyword
+substring found in the joined scope text fires the playbook
+regardless of the structured fields. Reserve it for steps that
+should surface even on under-specified scopes (image-hash, RAM
+acquisition) — tool-specific steps should leave it empty so they
+don't leak into cases that haven't picked the tool.
+
+The descriptive fields (`exam_types`, `device_classes`,
+`evidence_items`) match softly: an empty scope value is treated
+as inconclusive and passes the rule. Only `primary_tools` is
+strict — an unset tool fails any tool-specific rule, so AXIOM /
+X-Ways / Cellebrite playbooks don't appear for cases that
+haven't picked them.

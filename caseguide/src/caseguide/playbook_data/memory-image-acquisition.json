@@ -1,0 +1,32 @@
+{
+  "id": "memory-image-acquisition",
+  "title": "Live RAM acquisition",
+  "category": "acquisition",
+  "priority": "required",
+  "action": "Capture volatile memory before powering the system down. Use a vetted acquisition tool (Magnet RAM Capture, WinPMEM, DumpIt, or AVML on Linux) writing to an external drive that's separate from the suspect storage. Compute SHA-256 of the resulting raw or AFF4 dump immediately and record it in the chain-of-custody form.",
+  "rationale": "Running processes, network connections, encryption keys, and decrypted DPAPI material live in RAM and disappear at shutdown. Cases involving credential theft, ransomware execution, or anti-forensics tooling routinely turn on artefacts only memory analysis can recover (BitLocker / VeraCrypt keys, in-memory C2 strings, parent-child process trees the disk forensics never sees).",
+  "expected_result": "Memory dump file (.raw / .lime / .aff4) written to the external collection drive; size matches installed RAM; SHA-256 computed and logged.",
+  "references": [
+    "NIST SP 800-86 §5.2.4 (Volatile Data Collection)",
+    "SANS FOR508 — Memory Analysis Methodology"
+  ],
+  "tool_variants": {
+    "axiom": {
+      "action": "Magnet RAM Capture → select output path on the external drive → Start. RAM Capture writes a .raw file with built-in hash logging. Once complete, ingest the .raw into AXIOM Process as a Memory Image evidence source for downstream analysis.",
+      "ui_path": "Magnet RAM Capture (standalone tool that ships with AXIOM)",
+      "notes": "RAM Capture is free and runs from a USB stick — no install footprint on the suspect machine."
+    },
+    "xways": {
+      "action": "X-Ways doesn't ship a memory acquirer; pair it with an external tool. Run WinPMEM (.exe from the X-Ways bench USB) targeting the external drive: `winpmem.exe -o E:\\evidence\\mem.raw`. Hash the output, then add the .raw as an evidence object in X-Ways for raw-string scanning.",
+      "ui_path": "External WinPMEM > X-Ways > Add Evidence Object > File"
+    },
+    "autopsy": {
+      "action": "Use DumpIt (Comae) or WinPMEM externally; Autopsy's memory ingest is limited but you can register the dump as a logical file evidence source for keyword search and string carving. Pair with Volatility for the deep analysis pass.",
+      "ui_path": "External DumpIt / WinPMEM > Autopsy > Add Data Source > Logical Files"
+    }
+  },
+  "applies_to": {
+    "exam_types": ["incident response", "credential", "anti-forensics", "exfiltration", "fraud"],
+    "keywords": ["memory", "ram", "volatile", "incident response", "ransomware", "live response"]
+  }
+}

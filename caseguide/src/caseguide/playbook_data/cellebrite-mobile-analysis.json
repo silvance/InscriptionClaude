@@ -1,0 +1,23 @@
+{
+  "id": "cellebrite-mobile-analysis",
+  "title": "Physical Analyzer / Reader review pass",
+  "category": "analysis",
+  "priority": "required",
+  "action": "Open the UFDR in Physical Analyzer (or Reader for review-only). Walk the standard data categories — Calls, Messages, Chats, Contacts, Locations, Web History, Installed Applications, Device Locations, Wireless Networks. Tag entries that corroborate the case theory. Build a timeline view from Locations + Calls + Chats and export it for the report bundle.",
+  "rationale": "Mobile cases are won on the cross-app timeline (a chat at 14:02, a tower hit at 14:05, a navigation request at 14:07). Physical Analyzer's Timeline view stitches per-app records into one chronology and is the single most defensible analysis artefact in a mobile exam.",
+  "expected_result": "Physical Analyzer / Reader case opens cleanly; categories populate; timeline view renders; tagged items export to the report bundle as a UFED Reader package.",
+  "depends_on": ["cellebrite-mobile-extraction"],
+  "tool_variants": {
+    "cellebrite": {
+      "action": "Physical Analyzer → Open Case → point at the UFDR. Use the Conversation View on Chats / Messages for context-preserved threads. Switch to Timeline View (Analyzed Data → Timeline) for the cross-app chronology; right-click → Add Tag on relevant entries. Report → Generate Report → UFED Reader to ship a self-contained review bundle to opposing counsel or the requestor.",
+      "ui_path": "Physical Analyzer > Open Case > [UFDR] > Analyzed Data > Timeline",
+      "notes": "Reader (the free viewer) covers most review needs; reserve Physical Analyzer for cases needing decoding, decryption, or chain-of-custody-logged tagging. Reader bundles include hash verification of the source UFDR — useful for opposing-counsel deliveries."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "credential", "fraud", "CSAM", "homicide", "narcotics", "exfiltration"],
+    "device_classes": ["mobile", "android", "ios", "iphone", "phone", "tablet"],
+    "primary_tools": ["cellebrite"],
+    "keywords": ["mobile", "phone", "android", "ios", "iphone", "ufdr", "cellebrite"]
+  }
+}

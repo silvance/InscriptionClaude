@@ -72,7 +72,7 @@ class SettingsDialog(QDialog):
             "Each case keeps its own independent examiner block once saved.",
             box,
         )
-        hint.setStyleSheet("color: #6e6e73;")
+        hint.setProperty("muted", "true")
         hint.setWordWrap(True)
 
         form = QFormLayout()

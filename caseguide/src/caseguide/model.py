@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-SUGGESTIONS_SCHEMA_VERSION = 1
+SUGGESTIONS_SCHEMA_VERSION = 2
 
 
 def utcnow() -> datetime:
@@ -48,12 +48,17 @@ PRIORITY_CHOICES: tuple[str, ...] = (
 class Suggestion:
     """One entry in the suggestions feed.
 
-    ``id`` is stable across regenerations; that's the hook completion
-    tracking will use down the line. ``category`` is free-form and
-    drives grouping in the panel ("acquisition", "verification",
-    "analysis", "reporting", ...). ``depends_on`` is a list of other
-    suggestion ids that must be acted on first; the panel can grey
-    those out until their prerequisites are done.
+    ``id`` is stable across regenerations; the completion tracker
+    keys on it so the LLM Refine pass doesn't undo "verified" steps.
+    ``category`` is free-form and drives grouping in the panel
+    ("acquisition", "verification", "analysis", "reporting", ...).
+    ``depends_on`` is a list of other suggestion ids that must be
+    acted on first; the panel can grey those out until their
+    prerequisites are done.
+
+    ``completed`` plus ``completed_at`` are the per-entry tracker
+    state. Once marked complete, the row dims and the LLM Refine
+    pass leaves it untouched.
     """
 
     id: str
@@ -64,6 +69,8 @@ class Suggestion:
     rationale: str = ""
     references: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    completed: bool = False
+    completed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

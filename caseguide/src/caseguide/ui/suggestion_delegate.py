@@ -55,6 +55,13 @@ if TYPE_CHECKING:
 # the panel when it stores the dataclass for the delegate to read.
 SUGGESTION_ROLE = Qt.ItemDataRole.UserRole + 1
 
+# Per-row "blocked by an incomplete prerequisite" flag, computed by the
+# panel (which sees the whole list) and read by the delegate (which
+# only sees one item at a time). The names of the missing
+# prerequisites travel as a tuple of strings so the metadata row can
+# show ``blocked by 2 (incomplete)`` without re-walking the model.
+BLOCKED_ROLE = Qt.ItemDataRole.UserRole + 2
+
 
 @dataclass(frozen=True, slots=True)
 class _ChipPalette:
@@ -69,6 +76,19 @@ _PRIORITY_CHIPS: dict[str, _ChipPalette] = {
     PRIORITY_RECOMMENDED: _ChipPalette(bg="#0066cc", fg="#ffffff"),
     PRIORITY_OPTIONAL: _ChipPalette(bg="#e5e5e7", fg="#3a3a3c"),
 }
+
+# Completed rows swap the priority chip for a calm green "DONE" tag so
+# the eye can scan the list and spot finished work at a glance without
+# losing the row entirely.
+_DONE_CHIP = _ChipPalette(bg="#34c759", fg="#ffffff")
+_DONE_LABEL = "✓ DONE"
+_COMPLETED_OPACITY = 0.55
+
+# Blocked rows fade further than the chrome but stay legible — the
+# examiner needs to read what's coming up, just shouldn't be tempted
+# to start it. A leading lock glyph in the metadata row reinforces
+# the "wait" semantics.
+_BLOCKED_OPACITY = 0.45
 
 _PADDING_H = 12
 _PADDING_V = 10
@@ -111,11 +131,30 @@ class SuggestionDelegate(QStyledItemDelegate):
         rect = opt.rect.adjusted(_PADDING_H, _PADDING_V, -_PADDING_H, -_PADDING_V)
 
         is_selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        is_completed = suggestion.completed
+        # Blocked = at least one prerequisite isn't yet completed. The
+        # panel computes the missing list once per render and stamps
+        # it on the item; we just read it back. Completed wins over
+        # blocked when both are set.
+        blocked_missing_raw = index.data(BLOCKED_ROLE)
+        blocked_missing: tuple[str, ...] = (
+            tuple(blocked_missing_raw)
+            if isinstance(blocked_missing_raw, (list, tuple)) and not is_completed
+            else ()
+        )
+        if is_completed:
+            painter.setOpacity(_COMPLETED_OPACITY)
+        elif blocked_missing:
+            painter.setOpacity(_BLOCKED_OPACITY)
         text_pen = self._text_pen(opt, selected=is_selected)
         muted_pen = self._muted_pen(opt, selected=is_selected)
 
         chip_rect = self._draw_priority_chip(
-            painter, rect, suggestion.priority, selected=is_selected
+            painter,
+            rect,
+            suggestion.priority,
+            selected=is_selected,
+            completed=is_completed,
         )
 
         body_left = chip_rect.right() + _CHIP_GAP
@@ -124,6 +163,8 @@ class SuggestionDelegate(QStyledItemDelegate):
         action_font = QFont(opt.font)
         action_font.setPointSize(opt.font.pointSize())
         action_font.setWeight(QFont.Weight.Medium)
+        if is_completed:
+            action_font.setStrikeOut(True)
         action_metrics = QFontMetrics(action_font)
         wrapped = self._elide_to_two_lines(action_metrics, suggestion.action, body_rect.width())
         line_height = action_metrics.lineSpacing()
@@ -137,15 +178,36 @@ class SuggestionDelegate(QStyledItemDelegate):
                 line,
             )
 
-        # Metadata row below the action text.
         meta_top = body_rect.top() + len(wrapped) * line_height + _META_GAP
+        self._draw_metadata_row(
+            painter,
+            suggestion,
+            body_rect,
+            meta_top,
+            opt,
+            muted_pen,
+            blocked_missing=blocked_missing,
+        )
+
+        painter.restore()
+
+    def _draw_metadata_row(
+        self,
+        painter: QPainter,
+        suggestion: Suggestion,
+        body_rect: QRect,
+        meta_top: int,
+        opt: QStyleOptionViewItem,
+        muted_pen: QPen,
+        *,
+        blocked_missing: tuple[str, ...] = (),
+    ) -> None:
         meta_font = QFont(opt.font)
         meta_font.setPointSize(max(8, opt.font.pointSize() - 1))
         painter.setFont(meta_font)
         painter.setPen(muted_pen)
-
-        meta_x = body_rect.left()
         meta_metrics = QFontMetrics(meta_font)
+        meta_x = body_rect.left()
         if suggestion.category:
             badge_w = self._draw_chip(
                 painter,
@@ -158,30 +220,30 @@ class SuggestionDelegate(QStyledItemDelegate):
             )
             meta_x += badge_w + _BADGE_GAP
 
-        if suggestion.depends_on:
-            count = len(suggestion.depends_on)
-            text = f"↳ depends on {count} step{'s' if count != 1 else ''}"
+        baseline_y = meta_top + meta_metrics.ascent() + _CHIP_PADDING_V
+        if blocked_missing:
+            # Blocked rows shadow the depends_on hint with the actual
+            # incomplete count so the examiner sees how close the row
+            # is to becoming actionable.
+            count = len(blocked_missing)
             painter.setPen(muted_pen)
             painter.drawText(
                 meta_x,
-                meta_top + meta_metrics.ascent() + _CHIP_PADDING_V,
-                text,
+                baseline_y,
+                f"🔒 blocked by {count} incomplete step{'s' if count != 1 else ''}",
             )
+        elif suggestion.depends_on:
+            count = len(suggestion.depends_on)
+            text = f"↳ depends on {count} step{'s' if count != 1 else ''}"
+            painter.setPen(muted_pen)
+            painter.drawText(meta_x, baseline_y, text)
         elif not suggestion.category and suggestion.expected_result:
-            # Show expected_result preview when neither category nor
-            # depends_on filled the row.
             preview = suggestion.expected_result.strip().splitlines()[0]
             preview = meta_metrics.elidedText(
                 preview, Qt.TextElideMode.ElideRight, body_rect.width()
             )
             painter.setPen(muted_pen)
-            painter.drawText(
-                meta_x,
-                meta_top + meta_metrics.ascent() + _CHIP_PADDING_V,
-                f"Expect: {preview}",
-            )
-
-        painter.restore()
+            painter.drawText(meta_x, baseline_y, f"Expect: {preview}")
 
     def sizeHint(  # noqa: N802 - Qt API
         self,
@@ -196,7 +258,8 @@ class SuggestionDelegate(QStyledItemDelegate):
         # Best-effort width: the view passes its own width through
         # option.rect, but on first paint it can be 0.
         width = max(opt.rect.width(), 320)
-        chip_width = self._chip_width(opt, _priority_text(suggestion.priority))
+        chip_label = _DONE_LABEL if suggestion.completed else _priority_text(suggestion.priority)
+        chip_width = self._chip_width(opt, chip_label)
         body_width = width - 2 * _PADDING_H - chip_width - _CHIP_GAP
 
         action_font = QFont(opt.font)
@@ -222,17 +285,16 @@ class SuggestionDelegate(QStyledItemDelegate):
         priority: str,
         *,
         selected: bool,
+        completed: bool = False,
     ) -> QRect:
-        chip = _PRIORITY_CHIPS.get(priority, _PRIORITY_CHIPS[PRIORITY_RECOMMENDED])
-        text = _priority_text(priority)
-        font = QFont(painter.font())
-        font.setPointSize(max(8, font.pointSize() - 1))
-        font.setWeight(QFont.Weight.DemiBold)
-        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 105)
-        metrics = QFontMetrics(font)
-
-        chip_h = metrics.height() + 2 * _CHIP_PADDING_V
-        chip_w = metrics.horizontalAdvance(text) + 2 * _CHIP_PADDING_H
+        if completed:
+            chip = _DONE_CHIP
+            text = _DONE_LABEL
+        else:
+            chip = _PRIORITY_CHIPS.get(priority, _PRIORITY_CHIPS[PRIORITY_RECOMMENDED])
+            text = _priority_text(priority)
+        font = _chip_font(painter.font())
+        chip_w, chip_h = _chip_size(font, text)
         chip_rect = QRect(rect.left(), rect.top() + 1, chip_w, chip_h)
 
         bg = QColor(chip.bg)
@@ -253,10 +315,7 @@ class SuggestionDelegate(QStyledItemDelegate):
 
     @staticmethod
     def _chip_width(option: QStyleOptionViewItem, text: str) -> int:
-        font = QFont(option.font)
-        font.setPointSize(max(8, option.font.pointSize() - 1))
-        font.setWeight(QFont.Weight.DemiBold)
-        return QFontMetrics(font).horizontalAdvance(text) + 2 * _CHIP_PADDING_H
+        return _chip_size(_chip_font(option.font), text)[0]
 
     @staticmethod
     def _draw_chip(
@@ -326,6 +385,29 @@ class SuggestionDelegate(QStyledItemDelegate):
 
 def _priority_text(priority: str) -> str:
     return (priority or PRIORITY_RECOMMENDED).upper()
+
+
+def _chip_font(base: QFont) -> QFont:
+    """Build the chip font from the row's base font.
+
+    Used by both ``paint()`` (for drawing) and ``sizeHint()`` (for
+    width reservation) so the two paths can never disagree on chip
+    width — the 105% letter spacing in particular widens the chip
+    enough that a sizeHint without it would clip the action text.
+    """
+    font = QFont(base)
+    font.setPointSize(max(8, base.pointSize() - 1))
+    font.setWeight(QFont.Weight.DemiBold)
+    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 105)
+    return font
+
+
+def _chip_size(font: QFont, text: str) -> tuple[int, int]:
+    """Return ``(width, height)`` of a chip drawn with ``font`` and ``text``."""
+    metrics = QFontMetrics(font)
+    width = metrics.horizontalAdvance(text) + 2 * _CHIP_PADDING_H
+    height = metrics.height() + 2 * _CHIP_PADDING_V
+    return width, height
 
 
 __all__ = ["SUGGESTION_ROLE", "SuggestionDelegate"]

@@ -39,7 +39,7 @@ class SessionsView(QWidget):
         super().__init__(parent)
 
         self._summary_label = QLabel("No recordings yet.", self)
-        self._summary_label.setStyleSheet("color: #6e6e73;")
+        self._summary_label.setProperty("muted", "true")
 
         self._refresh_btn = QPushButton("Refresh", self)
         self._refresh_btn.clicked.connect(self.refresh_requested)
@@ -60,7 +60,8 @@ class SessionsView(QWidget):
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setWordWrap(True)
         self._empty_label.setProperty("role", "card")
-        self._empty_label.setStyleSheet("color: #6e6e73; padding: 36px;")
+        self._empty_label.setProperty("muted", "true")
+        self._empty_label.setStyleSheet("padding: 36px;")
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self._list)

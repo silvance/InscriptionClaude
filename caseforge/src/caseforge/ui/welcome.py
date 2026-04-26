@@ -52,7 +52,7 @@ class WelcomePage(QWidget):
         self._search.textChanged.connect(self._on_search_changed)
 
         self._count_label = QLabel("", self)
-        self._count_label.setStyleSheet("color: #6e6e73;")
+        self._count_label.setProperty("muted", "true")
         self._count_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self._list = QListWidget(self)
@@ -65,7 +65,8 @@ class WelcomePage(QWidget):
         self._list.customContextMenuRequested.connect(self._on_context_menu)
 
         self._empty_label = QLabel("No cases yet — start one with the button above.", self)
-        self._empty_label.setStyleSheet("color: #6e6e73; padding: 8px;")
+        self._empty_label.setProperty("muted", "true")
+        self._empty_label.setStyleSheet("padding: 8px;")
         self._empty_label.setVisible(False)
 
         card = QFrame(self)
@@ -187,7 +188,7 @@ class WelcomePage(QWidget):
             "Inscription pointed straight at it.",
             self,
         )
-        label.setStyleSheet("color: #6e6e73;")
+        label.setProperty("muted", "true")
         label.setWordWrap(True)
         return label
 

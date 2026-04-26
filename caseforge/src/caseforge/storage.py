@@ -38,6 +38,24 @@ ARCHIVE_DIRNAME = "_archive"
 #: Slug character whitelist; everything else collapses to a single dash.
 _SLUG_INVALID = re.compile(r"[^a-zA-Z0-9._-]+")
 
+#: Windows reserved device names. A directory created with one of these
+#: names (case-insensitive, with or without an extension) is unusable
+#: on Windows — file creation inside it returns ERROR_INVALID_NAME and
+#: the case looks broken to the examiner. We suffix the slug to dodge
+#: the collision while keeping the name recognisable.
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {
+        "con", "prn", "aux", "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
+)
+
+#: Hard cap on the case.json size we'll load. Files in the wild sit in
+#: the low-tens-of-KB range; refuse anything larger to bound the memory
+#: + parse-time exposure for corrupt or hostile files.
+_MAX_CASE_BYTES = 5 * 1024 * 1024
+
 
 class StorageError(Exception):
     """Wrapper around any case.json read/write failure."""
@@ -56,9 +74,18 @@ class DeleteError(StorageError):
 
 
 def slugify(name: str) -> str:
-    """Build a filesystem-safe directory name from a free-form case name."""
+    """Build a filesystem-safe directory name from a free-form case name.
+
+    Beyond character whitelisting, reserved Windows device names (CON,
+    PRN, LPT1, …) get a ``-case`` suffix so a portable case folder
+    works the same on every platform we ship for.
+    """
     text = _SLUG_INVALID.sub("-", name).strip("-._")
-    return text or "case"
+    slug = text or "case"
+    base = slug.split(".", 1)[0].lower()
+    if base in _WINDOWS_RESERVED_NAMES:
+        slug = f"{slug}-case"
+    return slug
 
 
 def case_path_for(workspace_root: Path, name: str) -> Path:
@@ -93,8 +120,16 @@ def write_case(case_dir: Path, case: Case) -> None:
     payload = _to_json(case)
     target = case_dir / CASE_FILENAME
     tmp = target.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    # Drop any leftover .tmp from a prior crash before we write our own.
+    tmp.unlink(missing_ok=True)
+    try:
+        tmp.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        tmp.replace(target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def read_case(case_dir: Path) -> Case:
@@ -102,6 +137,14 @@ def read_case(case_dir: Path) -> Case:
     target = case_dir / CASE_FILENAME
     if not target.exists():
         msg = f"No case.json at {target}"
+        raise StorageError(msg)
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        msg = f"Could not stat {target}: {exc}"
+        raise StorageError(msg) from exc
+    if size > _MAX_CASE_BYTES:
+        msg = f"{target} is {size} bytes; refusing to load (cap is {_MAX_CASE_BYTES})."
         raise StorageError(msg)
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))

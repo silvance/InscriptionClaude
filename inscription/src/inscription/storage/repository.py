@@ -76,6 +76,23 @@ class SessionRepository:
         self._conn = conn
         self._lock = threading.Lock()
 
+    def _commit(self, *, what: str) -> None:
+        """Commit the open transaction, surfacing failures as StorageError.
+
+        SQLite can fail at commit time for reasons the operator needs to
+        know about — disk full, lock contention, constraint violation
+        deferred to commit. The plain ``self._conn.commit()`` call would
+        let those propagate as ``sqlite3.Error`` and most callers swallow
+        them with a bare ``except Exception:`` that logs but doesn't
+        explain. Funnel every commit through here so the message points
+        at the operation that failed.
+        """
+        try:
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            msg = f"Failed to persist {what}: {exc}"
+            raise StorageError(msg) from exc
+
     # ---------------------------------------------------------- lifecycle
 
     @classmethod
@@ -230,7 +247,7 @@ class SessionRepository:
                 "UPDATE session_info SET ended_at = ? WHERE id = 1 AND ended_at IS NULL",
                 (_iso(utcnow()),),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     def add_screenshot(
         self,
@@ -258,7 +275,7 @@ class SessionRepository:
                     _dumps_rect(highlight_rect),
                 ),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
             screenshot_id = cursor.lastrowid
         assert screenshot_id is not None
         return ScreenshotArtifact(
@@ -292,7 +309,7 @@ class SessionRepository:
                     element.owner_process_name,
                 ),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
             element_id = cursor.lastrowid
         assert element_id is not None
         return dataclasses.replace(element, id=element_id)
@@ -341,7 +358,7 @@ class SessionRepository:
                     resolved_element_id,
                 ),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
             event_id = cursor.lastrowid
         assert event_id is not None
         return RawEvent(
@@ -390,7 +407,7 @@ class SessionRepository:
                 step_id = cursor.lastrowid
                 assert step_id is not None
                 saved.append(dataclasses.replace(step, id=step_id, sequence=i))
-            self._conn.commit()
+            self._commit(what="transaction")
         return saved
 
     def append_step(self, step: DraftStep) -> DraftStep:
@@ -425,7 +442,7 @@ class SessionRepository:
             )
             new_id = cursor.lastrowid
             assert new_id is not None
-            self._conn.commit()
+            self._commit(what="transaction")
         return dataclasses.replace(step, id=new_id, sequence=next_sequence)
 
     def extend_step_sources(
@@ -459,7 +476,7 @@ class SessionRepository:
                 "UPDATE draft_steps SET source_event_ids = ?, screenshot_id = ? WHERE id = ?",
                 (json.dumps(list(combined)), shot, step_id),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     def update_step_fields(
         self,
@@ -489,7 +506,7 @@ class SessionRepository:
                 f"UPDATE draft_steps SET {', '.join(sets)} WHERE id = ?",
                 params,
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     def set_step_suppressed(self, step_id: int, *, suppressed: bool) -> None:
         with self._lock:
@@ -497,7 +514,7 @@ class SessionRepository:
                 "UPDATE draft_steps SET suppressed = ? WHERE id = ?",
                 (1 if suppressed else 0, step_id),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     def set_step_evidentiary(self, step_id: int, *, evidentiary: bool) -> None:
         """Mark or unmark a step as evidentiary.
@@ -510,7 +527,7 @@ class SessionRepository:
                 "UPDATE draft_steps SET evidentiary = ? WHERE id = ?",
                 (1 if evidentiary else 0, step_id),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     def reorder_steps(self, ordered_step_ids: list[int]) -> None:
         """Rewrite sequence numbers to match ``ordered_step_ids``."""
@@ -520,7 +537,7 @@ class SessionRepository:
                     "UPDATE draft_steps SET sequence = ? WHERE id = ?",
                     (i, step_id),
                 )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     def merge_steps(self, *, primary_id: int, other_id: int) -> DraftStep:
         """Merge ``other_id`` into ``primary_id``; delete the other row.
@@ -558,7 +575,7 @@ class SessionRepository:
                 (merged_action, merged_result, json.dumps(list(combined_ids)), primary_id),
             )
             self._conn.execute("DELETE FROM draft_steps WHERE id = ?", (other_id,))
-            self._conn.commit()
+            self._commit(what="transaction")
         return dataclasses.replace(
             primary,
             action=merged_action,
@@ -629,7 +646,7 @@ class SessionRepository:
                 """,
                 (json.dumps(list(head)), step_id),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
         first = dataclasses.replace(step, source_event_ids=head, manual_edit=True)
         second = dataclasses.replace(
@@ -647,7 +664,7 @@ class SessionRepository:
                 "UPDATE draft_steps SET screenshot_id = ? WHERE id = ?",
                 (screenshot_id, step_id),
             )
-            self._conn.commit()
+            self._commit(what="transaction")
 
     # ----------------------------------------------------------- manifest
 

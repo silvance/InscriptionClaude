@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TEMPERATURE = 0.2
 
+#: Hard cap on the response body. Even a verbose chat-completion sits
+#: well under 100 KB; we accept up to 10 MB so a chatty model on a
+#: huge session can still complete, but a misbehaving / hostile
+#: endpoint returning gigabytes of garbage doesn't OOM us.
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
+#: Allowed URL schemes for the LLM endpoint. ``urlopen`` would happily
+#: dispatch ``file://`` and ``ftp://`` requests; constrain to plain
+#: HTTP/HTTPS so a config typo can't turn into local file disclosure.
+_ALLOWED_SCHEMES = ("http://", "https://")
+
 
 @runtime_checkable
 class ChatClient(Protocol):
@@ -68,6 +79,11 @@ class LLMClient:
     ) -> None:
         if not base_url:
             msg = "LLM base_url is empty"
+            raise LLMConfigError(msg)
+        if not base_url.lower().startswith(_ALLOWED_SCHEMES):
+            msg = (
+                f"LLM base_url must start with http:// or https:// (got {base_url!r})"
+            )
             raise LLMConfigError(msg)
         if not model:
             msg = "LLM model is empty"
@@ -120,7 +136,15 @@ class LLMClient:
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
-                raw = resp.read()
+                # Read one byte past the cap so we can detect oversized
+                # responses without buffering them entirely first.
+                raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_RESPONSE_BYTES:
+                    msg = (
+                        f"LLM response from {url} exceeds {_MAX_RESPONSE_BYTES} "
+                        f"bytes; aborting."
+                    )
+                    raise LLMResponseError(msg)
         except urllib.error.HTTPError as exc:
             detail = _safe_body(exc.read() if exc.fp else b"")
             msg = f"LLM HTTP {exc.code} from {url}: {detail}"

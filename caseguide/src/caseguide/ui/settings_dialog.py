@@ -1,15 +1,14 @@
-"""Application settings dialog.
+"""Application settings dialog for CaseGuide.
 
-Two sections in one window:
+CaseGuide's settings surface is narrower than Inscription's by design —
+the case metadata (examiner identity, case scope) belongs to CaseForge
+and propagates via ``case.json``, so the only thing CaseGuide owns at
+the user level is the LLM endpoint that powers the Refine pass.
 
-- **Examiner identity** — name, organisation, badge / employee ID.
-  Saved to :class:`Config` and auto-fills the forensic-notes header.
-- **LLM endpoint** — base URL, model, timeout, optional API key, plus
-  a "Test connection" button that fires a tiny chat completion against
-  the configured server and reports back. Examiners shouldn't need to
-  open ``config.ini`` to point Inscription at their local Ollama.
-
-Saving writes through to ``QSettings`` via :class:`Config.sync`.
+The dialog mirrors Inscription's LLM section verbatim — same form
+shape, same "Test connection" worker pattern — so an examiner who's
+configured the local Ollama once can copy the same values across and
+expect identical behaviour.
 """
 
 from __future__ import annotations
@@ -26,29 +25,42 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from inscription.config import (
+from caseguide.config import (
     DEFAULT_LLM_BASE_URL,
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TIMEOUT_S,
     Config,
 )
-from inscription.llm import LLMClient, LLMError
+from caseguide.llm.client import LLMClient, LLMError
 
 logger = logging.getLogger(__name__)
 
 
 class _ConnectionTest(QObject):
-    """One-shot LLM ping; runs on a worker thread so the UI stays live."""
+    """One-shot LLM ping; runs on a worker thread so the UI stays live.
 
-    finished = Signal(bool, str)  # ok, message
+    Two outcome signals (instead of a single ``finished(ok: bool, …)``)
+    so the boolean isn't a positional flag at the call site — the
+    failure message goes through ``failed`` and the success message
+    through ``succeeded``.
+    """
 
-    def __init__(self, *, base_url: str, model: str, timeout_s: float, api_key: str | None) -> None:
+    succeeded = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        timeout_s: float,
+        api_key: str | None,
+    ) -> None:
         super().__init__()
         self._base_url = base_url
         self._model = model
@@ -69,16 +81,16 @@ class _ConnectionTest(QObject):
                 json_mode=True,
             )
         except LLMError as exc:
-            self.finished.emit(False, str(exc))
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
             return
-        except Exception as exc:
-            self.finished.emit(False, f"Unexpected error: {exc}")
+        except Exception as exc:  # noqa: BLE001 - worker's job is to catch everything
+            self.failed.emit(f"Unexpected error: {exc}")
             return
-        self.finished.emit(True, f"Connected. Model replied with {len(reply)} chars.")
+        self.succeeded.emit(f"Connected. Model replied with {len(reply)} chars.")
 
 
 class SettingsDialog(QDialog):
-    """Edit examiner identity and LLM endpoint configuration."""
+    """Edit the LLM endpoint configuration."""
 
     def __init__(self, config: Config, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -87,13 +99,12 @@ class SettingsDialog(QDialog):
         self._test_worker: _ConnectionTest | None = None
 
         self.setWindowTitle("Settings")
-        self.resize(560, 440)
+        self.resize(520, 320)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
 
-        layout.addWidget(self._build_examiner_group())
         layout.addWidget(self._build_llm_group())
         layout.addStretch(1)
 
@@ -107,40 +118,10 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    # ------------------------------------------------------------ examiner
-
-    def _build_examiner_group(self) -> QGroupBox:
-        box = QGroupBox("Examiner identity", self)
-
-        self._name_edit = QLineEdit(self._config.examiner_name, box)
-        self._name_edit.setPlaceholderText("e.g. Alex Smith")
-        self._org_edit = QLineEdit(self._config.examiner_org, box)
-        self._org_edit.setPlaceholderText("e.g. Cyber Crimes Unit")
-        self._id_edit = QLineEdit(self._config.examiner_id, box)
-        self._id_edit.setPlaceholderText("e.g. CCU-0421")
-
-        hint = QLabel(
-            "Auto-fills the forensic-notes header so you don't have to "
-            "type it on every export.",
-            box,
-        )
-        hint.setProperty("muted", "true")
-        hint.setWordWrap(True)
-
-        form = QFormLayout()
-        form.addRow("Name", self._name_edit)
-        form.addRow("Organisation", self._org_edit)
-        form.addRow("Badge / ID", self._id_edit)
-
-        outer = QVBoxLayout(box)
-        outer.addLayout(form)
-        outer.addWidget(hint)
-        return box
-
     # ----------------------------------------------------------------- LLM
 
     def _build_llm_group(self) -> QGroupBox:
-        box = QGroupBox("Local LLM (for AI rewrite)", self)
+        box = QGroupBox("Local LLM (for Refine)", self)
 
         self._base_url_edit = QLineEdit(self._config.llm_base_url, box)
         self._base_url_edit.setPlaceholderText(DEFAULT_LLM_BASE_URL)
@@ -161,6 +142,14 @@ class SettingsDialog(QDialog):
         self._test_status.setWordWrap(True)
         self._test_status.setProperty("muted", "true")
 
+        hint = QLabel(
+            "These match Inscription's LLM settings — point both apps "
+            "at the same local Ollama / LM Studio instance.",
+            box,
+        )
+        hint.setProperty("muted", "true")
+        hint.setWordWrap(True)
+
         form = QFormLayout()
         form.addRow("Base URL", self._base_url_edit)
         form.addRow("Model", self._model_edit)
@@ -174,14 +163,12 @@ class SettingsDialog(QDialog):
         outer = QVBoxLayout(box)
         outer.addLayout(form)
         outer.addLayout(test_row)
+        outer.addWidget(hint)
         return box
 
     # -------------------------------------------------------- internals
 
     def _on_save(self) -> None:
-        self._config.examiner_name = self._name_edit.text().strip()
-        self._config.examiner_org = self._org_edit.text().strip()
-        self._config.examiner_id = self._id_edit.text().strip()
         self._config.llm_base_url = self._base_url_edit.text().strip() or DEFAULT_LLM_BASE_URL
         self._config.llm_model = self._model_edit.text().strip() or DEFAULT_LLM_MODEL
         self._config.llm_timeout_s = float(self._timeout_spin.value())
@@ -199,7 +186,7 @@ class SettingsDialog(QDialog):
 
         self._test_btn.setEnabled(False)
         self._test_status.setText("Testing…")
-        # Reset to muted while the test runs; success/failure paths
+        # Reset to muted while the test runs; success / failure paths
         # set a status colour explicitly via setStyleSheet later.
         self._test_status.setStyleSheet("")
         self._test_status.setProperty("muted", "true")
@@ -212,9 +199,12 @@ class SettingsDialog(QDialog):
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.finished.connect(self._on_test_finished)
-        # Worker emits once; tear the thread down on the next event loop tick.
-        worker.finished.connect(thread.quit)
+        worker.succeeded.connect(self._on_test_succeeded)
+        worker.failed.connect(self._on_test_failed)
+        # Worker emits exactly one outcome signal; tear the thread down
+        # on the next event loop tick after either path lands.
+        worker.succeeded.connect(thread.quit)
+        worker.failed.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
 
@@ -222,35 +212,16 @@ class SettingsDialog(QDialog):
         self._test_thread = thread
         thread.start()
 
-    def _on_test_finished(self, ok: bool, message: str) -> None:
+    def _on_test_succeeded(self, message: str) -> None:
         self._test_btn.setEnabled(True)
         self._test_thread = None
         self._test_worker = None
-        if ok:
-            self._test_status.setStyleSheet("color: #2c7a2c;")
-            self._test_status.setText(f"✓ {message}")
-        else:
-            self._test_status.setStyleSheet("color: #c0392b;")
-            self._test_status.setText(f"✗ {message}")
+        self._test_status.setStyleSheet("color: #2c7a2c;")
+        self._test_status.setText(f"✓ {message}")
 
-
-def prompt_for_examiner_identity(config: Config, parent: QWidget | None = None) -> bool:
-    """First-run helper: open Settings if the examiner hasn't filled in a name.
-
-    Returns True if the user completed (or already had) an identity, False
-    if they cancelled. Callers don't have to use this — Settings is
-    always reachable from the menu — but the forensic-notes export uses
-    it to nudge the user before a header would otherwise read "—".
-    """
-    if config.has_examiner_identity():
-        return True
-    QMessageBox.information(
-        parent,
-        "Examiner identity needed",
-        "Set your examiner name and organisation so the notes header is "
-        "filled in automatically.",
-    )
-    dialog = SettingsDialog(config, parent=parent)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return False
-    return config.has_examiner_identity()
+    def _on_test_failed(self, message: str) -> None:
+        self._test_btn.setEnabled(True)
+        self._test_thread = None
+        self._test_worker = None
+        self._test_status.setStyleSheet("color: #c0392b;")
+        self._test_status.setText(f"✗ {message}")

@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
 
         self._recorder_bar = RecorderBar(self)
         self._workspace = SessionWorkspaceWidget(self)
+        self._workspace.set_case_dir(case_dir)
         self._welcome = WelcomePage(self)
         central = self._build_central()
         self.setCentralWidget(central)

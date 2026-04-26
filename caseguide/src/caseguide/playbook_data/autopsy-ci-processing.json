@@ -1,0 +1,22 @@
+{
+  "id": "autopsy-ci-processing",
+  "title": "Autopsy CI ingest + processing",
+  "category": "processing",
+  "priority": "required",
+  "action": "Ingest the disk image as a new data source in Autopsy with the standard ingest modules enabled (Recent Activity, Hash Lookup, File Type Identification, Embedded File Extraction, Exif Parser, Keyword Search, Email Parser, Encryption Detection, Interesting Files Identifier). Load the case keyword list and the NSRL / Project VIC hash sets before kicking the run.",
+  "rationale": "Autopsy's Recent Activity module pulls the same Windows artefact set AXIOM does (Shellbags, MRU, Recycle Bin, browser history) and Keyword Search runs concurrently with hashing, so a single ingest pass leaves you with the artefacts and the hits the timeline analysis needs.",
+  "expected_result": "Data source appears in the case tree; ingest progress completes without errors; Recent Activity, Keyword Hits, and Hashset Hits nodes populate.",
+  "depends_on": ["verify-image-hash"],
+  "tool_variants": {
+    "autopsy": {
+      "action": "Autopsy → Add Data Source → Disk Image. Step through the wizard and tick every relevant ingest module on the Configure Ingest Modules screen. Under Hash Lookup, point at the local NSRL DB; under Keyword Search, import the case keyword list. Project VIC sits behind the same Hash Lookup config as a separate set. Click Finish; monitor progress in Ingest Progress.",
+      "ui_path": "Tools > Add Data Source > Disk Image > Configure Ingest Modules",
+      "notes": "Autopsy 4.x ingest is single-threaded per data source — large E01s may take several hours. Project VIC hash sets need to be imported through Tools > Options > Hash Sets first; once registered they appear as toggles under Hash Lookup."
+    }
+  },
+  "applies_to": {
+    "exam_types": ["CI", "credential", "fraud", "IP theft", "exfiltration", "incident response", "anti-forensics", "CSAM"],
+    "primary_tools": ["autopsy"],
+    "evidence_items": ["E01", "DD", "image"]
+  }
+}

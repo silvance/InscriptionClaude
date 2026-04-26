@@ -13,7 +13,6 @@ to the deterministic output when the LLM is unreachable.
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from caseguide.llm.prompt import (
@@ -47,19 +46,32 @@ class SuggestionsRefiner:
         Preserves the input draft list when the LLM produces something
         unusable (the caller already has the drafts on hand and
         re-running with a fresh model is cheap).
+
+        Completed entries are deliberately held back from the LLM and
+        merged into the result unchanged: once an examiner has marked
+        a step done we don't want a refine pass to overwrite the
+        action text or drop the entry, since the work has already
+        been performed against that exact wording.
         """
         if not drafts:
             return []
-        user_prompt = build_user_prompt(scope=scope, drafts=drafts)
+        active_drafts = [d for d in drafts if not d.completed]
+        completed = [d for d in drafts if d.completed]
+        if not active_drafts:
+            # Nothing to refine — every entry is already done. Return
+            # the completed entries verbatim so callers don't see an
+            # empty list (which they treat as "LLM failed").
+            return list(completed)
+        user_prompt = build_user_prompt(scope=scope, drafts=active_drafts)
         raw = self._client.chat(system=SYSTEM_PROMPT, user=user_prompt)
         refined = parse_response(raw)
 
         # Preserve the depends_on graph by mapping refined suggestions
         # back to draft ids when possible. The model should emit
         # ``source_id`` for entries it kept; we use it to retain the
-        # original id (so completion tracking, when it lands, remains
-        # stable across regenerations). Genuinely-new suggestions get
-        # a "manual-N" id passed through verbatim.
+        # original id so completion tracking remains stable across
+        # regenerations. Genuinely-new suggestions get a "manual-N" id
+        # passed through verbatim.
         out: list[Suggestion] = []
         for index, item in enumerate(refined):
             kept_id = item.source_id or item.id
@@ -77,13 +89,13 @@ class SuggestionsRefiner:
                     depends_on=list(item.depends_on),
                 )
             )
+        # Sort completed entries to the bottom so the list reads as
+        # "what's left" first, "what's done" after.
+        out.extend(completed)
         logger.info(
-            "Refined %d draft suggestion(s) into %d via LLM", len(drafts), len(out)
+            "Refined %d active draft(s) into %d via LLM (preserved %d completed)",
+            len(active_drafts),
+            len(out) - len(completed),
+            len(completed),
         )
         return out
-
-
-def annotate_with_source(suggestion: Suggestion, *, source_id: str) -> Suggestion:
-    """Helper for callers that need to round-trip the source id field."""
-    # Currently unused; kept for the eventual completion-tracking layer.
-    return replace(suggestion, id=source_id)

@@ -13,12 +13,13 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
-    QFrame,
     QLabel,
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from caseguide.ui.widgets import horizontal_separator
 
 if TYPE_CHECKING:
     from caseguide.case_reader import CaseHandle
@@ -27,6 +28,17 @@ if TYPE_CHECKING:
 def _muted(text: str, parent: QWidget | None = None) -> QLabel:
     label = QLabel(text, parent)
     label.setProperty("muted", "true")
+    label.setWordWrap(True)
+    return label
+
+
+def _value_label(parent: QWidget) -> QLabel:
+    """Read-only value cell next to a form row label.
+
+    Word-wrap is on so a long evidence-items list doesn't shove the
+    panel wider than the splitter handle allows.
+    """
+    label = QLabel("—", parent)
     label.setWordWrap(True)
     return label
 
@@ -48,19 +60,11 @@ class ScopePanel(QWidget):
         self._path_label = _muted("", self)
         self._path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        self._exam_type_value = QLabel("—", self)
-        self._primary_tool_value = QLabel("—", self)
-        self._devices_value = QLabel("—", self)
-        self._evidence_value = QLabel("—", self)
-        self._agencies_value = QLabel("—", self)
-        for value_label in (
-            self._exam_type_value,
-            self._primary_tool_value,
-            self._devices_value,
-            self._evidence_value,
-            self._agencies_value,
-        ):
-            value_label.setWordWrap(True)
+        self._exam_type_value = _value_label(self)
+        self._primary_tool_value = _value_label(self)
+        self._devices_value = _value_label(self)
+        self._evidence_value = _value_label(self)
+        self._agencies_value = _value_label(self)
 
         self._summary_box = QPlainTextEdit(self)
         self._summary_box.setReadOnly(True)
@@ -69,9 +73,7 @@ class ScopePanel(QWidget):
         self._notes_box.setReadOnly(True)
         self._notes_box.setMaximumHeight(160)
 
-        rule = QFrame(self)
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setProperty("muted", "true")
+        rule = horizontal_separator(self)
 
         form = QFormLayout()
         form.addRow("Exam type", self._exam_type_value)

@@ -428,6 +428,7 @@ QTabBar::tab:hover {{
 QTabBar::tab:selected {{
     color: {p.text};
     border-bottom-color: {p.accent};
+    font-weight: 600;
 }}
 
 QTabBar::tab:disabled {{

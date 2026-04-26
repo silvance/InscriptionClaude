@@ -142,6 +142,56 @@ def test_refiner_returns_empty_for_empty_drafts() -> None:
     assert out == []
 
 
+def test_refiner_preserves_completed_drafts_unchanged() -> None:
+    """Completed entries skip the LLM and re-appear after the refined list."""
+    payload = json.dumps(
+        {
+            "suggestions": [
+                {
+                    "id": "axiom-ci-processing",
+                    "action": "Refined active step.",
+                    "priority": "required",
+                    "category": "processing",
+                    "source_id": "axiom-ci-processing",
+                }
+            ]
+        }
+    )
+    fake = _FakeClient(payload)
+    drafts = _drafts()
+    drafts[0] = Suggestion(
+        id="verify-image-hash",
+        action="Verify SHA-256.",
+        priority=PRIORITY_REQUIRED,
+        category="verification",
+        completed=True,
+    )
+    refiner = SuggestionsRefiner(client=fake)
+    out = refiner.refine(scope=CaseScope(primary_tool="axiom"), drafts=drafts)
+
+    assert [s.id for s in out] == ["axiom-ci-processing", "verify-image-hash"]
+    assert out[1].completed is True
+    # The completed entry must not have been included in the prompt
+    # — that's the whole point of the skip.
+    assert "verify-image-hash" not in fake.calls[0][1]
+
+
+def test_refiner_returns_completed_only_when_no_active_drafts() -> None:
+    fake = _FakeClient("should not be called")
+    drafts = [
+        Suggestion(
+            id="done",
+            action="Already done.",
+            priority=PRIORITY_REQUIRED,
+            completed=True,
+        ),
+    ]
+    refiner = SuggestionsRefiner(client=fake)
+    out = refiner.refine(scope=CaseScope(), drafts=drafts)
+    assert [s.id for s in out] == ["done"]
+    assert fake.calls == []
+
+
 def test_refiner_falls_through_source_id_for_new_entries() -> None:
     """LLM-added suggestions get their ``source_id`` carried as the row id."""
     payload = json.dumps(

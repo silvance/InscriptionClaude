@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 CASE_FILENAME = "case.json"
 
+# Hard cap on the case.json size we'll load. CaseForge writes files in
+# the low-tens-of-KB range; refuse to ingest anything wildly larger to
+# bound our memory exposure to corrupt or stale files.
+_MAX_CASE_BYTES = 5 * 1024 * 1024
+
 
 class CaseReadError(Exception):
     """Raised when case.json is missing or malformed."""
@@ -53,6 +58,14 @@ def read_case(case_dir: Path) -> CaseHandle:
     target = case_dir / CASE_FILENAME
     if not target.exists():
         msg = f"No case.json at {target}"
+        raise CaseReadError(msg)
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        msg = f"Could not stat {target}: {exc}"
+        raise CaseReadError(msg) from exc
+    if size > _MAX_CASE_BYTES:
+        msg = f"{target} is {size} bytes; refusing to load (cap is {_MAX_CASE_BYTES})."
         raise CaseReadError(msg)
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
