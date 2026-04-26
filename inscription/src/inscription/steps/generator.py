@@ -22,6 +22,8 @@ from inscription.steps._dedup import (
     CLICK_DEDUP_WINDOW_S,
     WINDOW_FOCUS_COALESCE_S,
     ClickDedup,
+    KeyPressDedup,
+    ScrollDedup,
 )
 
 if TYPE_CHECKING:
@@ -34,8 +36,19 @@ logger = logging.getLogger(__name__)
 #: Resolver-confidence threshold above which we trust the UIA name + type.
 HIGH_CONFIDENCE = 0.6
 
+#: Milestone keys whose presses are dropped entirely (mirrors the live
+#: generator's set). Backspace/Delete are corrective input, not
+#: procedural content; the raw events remain on disk for the AI rewrite
+#: but never appear as their own step.
+_DROP_KEY_NAMES = frozenset({"backspace", "delete"})
+
 #: Re-exported for callers that import the dedup window through this module.
-__all__ = ["CLICK_DEDUP_WINDOW_S", "WINDOW_FOCUS_COALESCE_S", "render_step_action"]
+__all__ = [
+    "CLICK_DEDUP_WINDOW_S",
+    "WINDOW_FOCUS_COALESCE_S",
+    "render_repeat_key_press",
+    "render_step_action",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +101,22 @@ def _render_key_press(event: RawEvent) -> str:
     if event.window_title:
         return f"Press {key.capitalize()} in {event.window_title}."
     return f"Press {key.capitalize()}."
+
+
+def render_repeat_key_press(event: RawEvent, *, count: int) -> str:
+    """Render a key-press step that has merged ``count`` repeats.
+
+    Used by both step generators when the keypress dedup machine signals
+    a merge: ``Press Enter 3 times in Notepad`` rather than three
+    separate "Press Enter" steps. ``count == 1`` falls back to the
+    single-press wording so the same renderer handles both cases.
+    """
+    if count <= 1:
+        return _render_key_press(event)
+    key = (event.key or "a key").replace("_", " ")
+    if event.window_title:
+        return f"Press {key.capitalize()} {count} times in {event.window_title}."
+    return f"Press {key.capitalize()} {count} times."
 
 
 def _render_window_focus(event: RawEvent) -> str:
@@ -187,20 +216,78 @@ class StepGenerator:
 
     def _reduce_to_actions(self, events: list[RawEvent]) -> list[_Action]:
         actions: list[_Action] = []
-        dedup = ClickDedup()
+        click_dedup = ClickDedup()
+        key_dedup = KeyPressDedup()
+        scroll_dedup = ScrollDedup()
 
         for i, event in enumerate(events):
             if event.kind is EventKind.WINDOW_FOCUS and self._window_focus_is_noise(events, i):
                 continue
 
+            # Drop corrective key presses (Backspace, Delete) — same
+            # rule as the live generator. Reset all dedup state so a
+            # post-drop event doesn't accidentally merge into a step
+            # that no longer exists in the action list.
+            if (
+                event.kind is EventKind.KEY_PRESS
+                and event.key
+                and event.key.lower() in _DROP_KEY_NAMES
+            ):
+                click_dedup.reset()
+                key_dedup.reset()
+                scroll_dedup.reset()
+                continue
+
             resolved = self._resolve(event.resolved_element_id)
 
-            should_merge = dedup.observe(
+            # Drop clicks that resolved to UIA "Text" labels — they are
+            # positional accidents, not intentional interactions.
+            if (
+                event.kind in {EventKind.CLICK, EventKind.DOUBLE_CLICK}
+                and resolved is not None
+                and resolved.control_type == "Text"
+                and resolved.name
+            ):
+                click_dedup.reset()
+                key_dedup.reset()
+                scroll_dedup.reset()
+                continue
+
+            ts = event.occurred_at.timestamp()
+
+            if click_dedup.observe(
                 kind=event.kind,
                 key=(event.resolved_element_id, event.window_title),
-                ts=event.occurred_at.timestamp(),
+                ts=ts,
+            ) and actions:
+                last = actions[-1]
+                actions[-1] = _Action(
+                    kind=last.kind,
+                    source_event_ids=(*last.source_event_ids, event.id or 0),
+                    screenshot_id=last.screenshot_id or event.screenshot_id,
+                    action=last.action,
+                    result=last.result,
+                )
+                continue
+
+            merge_key, key_count = key_dedup.observe(
+                kind=event.kind, key=(event.key, event.window_title), ts=ts
             )
-            if should_merge:
+            if merge_key and actions:
+                last = actions[-1]
+                actions[-1] = _Action(
+                    kind=last.kind,
+                    source_event_ids=(*last.source_event_ids, event.id or 0),
+                    screenshot_id=last.screenshot_id or event.screenshot_id,
+                    action=render_repeat_key_press(event, count=key_count),
+                    result=last.result,
+                )
+                continue
+
+            merge_scroll, _ = scroll_dedup.observe(
+                kind=event.kind, key=(event.text, event.window_title), ts=ts
+            )
+            if merge_scroll and actions:
                 last = actions[-1]
                 actions[-1] = _Action(
                     kind=last.kind,

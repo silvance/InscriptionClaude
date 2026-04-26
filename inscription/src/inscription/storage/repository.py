@@ -451,13 +451,18 @@ class SessionRepository:
         *,
         extra_event_ids: tuple[int, ...],
         screenshot_id: int | None = None,
+        action: str | None = None,
     ) -> None:
         """Append more source events (and optionally a screenshot) to a step.
 
         Used when the live generator decides a new event collapses into
-        the previous step (rapid double-click on the same UIA element).
-        Does **not** touch the action/result text — preserves whatever
-        the live generator wrote first.
+        the previous step. Pass ``action`` to also overwrite the step's
+        action text (e.g. updating "Press Backspace" → "Press Backspace
+        9 times" as repeats arrive). When ``action`` is ``None`` the
+        text is preserved.
+
+        Does NOT set ``manual_edit``; coalesced steps remain eligible
+        for the post-recording AI rewrite.
         """
         if not extra_event_ids:
             return
@@ -472,10 +477,18 @@ class SessionRepository:
             existing = tuple(json.loads(row["source_event_ids"]))
             combined = (*existing, *extra_event_ids)
             shot = row["screenshot_id"] if row["screenshot_id"] is not None else screenshot_id
-            self._conn.execute(
-                "UPDATE draft_steps SET source_event_ids = ?, screenshot_id = ? WHERE id = ?",
-                (json.dumps(list(combined)), shot, step_id),
-            )
+            if action is not None:
+                self._conn.execute(
+                    "UPDATE draft_steps SET source_event_ids = ?, screenshot_id = ?, "
+                    "action = ? WHERE id = ?",
+                    (json.dumps(list(combined)), shot, action, step_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE draft_steps SET source_event_ids = ?, screenshot_id = ? "
+                    "WHERE id = ?",
+                    (json.dumps(list(combined)), shot, step_id),
+                )
             self._commit(what="transaction")
 
     def update_step_fields(
