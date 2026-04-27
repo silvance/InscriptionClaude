@@ -1,5 +1,8 @@
 # Suite setup — Windows (PowerShell)
 
+> Building a portable bundle for an offline / air-gapped workstation?
+> See **`AIR_GAPPED.md`** instead.
+
 This repo contains three tools that share a tiny common package:
 
 | Package | What it does |
