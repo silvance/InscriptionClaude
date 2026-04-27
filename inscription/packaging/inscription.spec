@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
-SPEC_DIR    = Path(__file__).resolve().parent   # inscription/packaging/
+SPEC_DIR    = Path(SPECPATH).resolve()          # inscription/packaging/
 ROOT        = SPEC_DIR.parent                    # inscription/
 SRC         = ROOT / "src"
 ENTRY       = SRC / "inscription" / "__main__.py"

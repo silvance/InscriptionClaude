@@ -12,7 +12,7 @@ workstation and run CaseForge.exe.
 
 from pathlib import Path
 
-SPEC_DIR    = Path(__file__).resolve().parent
+SPEC_DIR    = Path(SPECPATH).resolve()
 ROOT        = SPEC_DIR.parent
 SRC         = ROOT / "src"
 ENTRY       = SRC / "caseforge" / "__main__.py"
