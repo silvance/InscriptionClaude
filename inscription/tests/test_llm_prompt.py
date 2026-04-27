@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
+from suite_common.llm import LLMResponseError
 
-from inscription.llm.client import LLMResponseError
 from inscription.llm.prompt import SYSTEM_PROMPT, build_user_prompt, parse_response
 from inscription.model import DraftStep, EventKind, RawEvent, ResolvedElement, utcnow
 

@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 
 import pytest
+from suite_common.llm import LLMResponseError
 
 from caseguide.case_reader import CaseScope
 from caseguide.llm.augment import SuggestionsRefiner
-from caseguide.llm.client import LLMResponseError
 from caseguide.llm.prompt import (
     SYSTEM_PROMPT,
     build_user_prompt,

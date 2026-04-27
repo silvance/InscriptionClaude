@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
 )
 
+from caseforge import __version__
 from caseforge.config import Config
 from caseforge.model import Case
 from caseforge.ui.case_view import CaseView
@@ -26,7 +27,6 @@ from caseforge.ui.controller import CaseController
 from caseforge.ui.new_case_dialog import NewCaseDialog
 from caseforge.ui.settings_dialog import SettingsDialog
 from caseforge.ui.welcome import WelcomePage
-from caseforge.version import __version__
 
 logger = logging.getLogger(__name__)
 

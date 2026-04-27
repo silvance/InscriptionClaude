@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
+from suite_common.llm import LLMRequestError
 
-from inscription.llm.client import LLMRequestError
 from inscription.llm.rewriter import StepRewriter
 from inscription.model import EventKind, ResolvedElement, utcnow
 from inscription.steps import generate_steps

@@ -23,8 +23,9 @@ from caseguide.llm.prompt import (
 from caseguide.model import Suggestion
 
 if TYPE_CHECKING:
+    from suite_common.llm import ChatClient
+
     from caseguide.case_reader import CaseScope
-    from caseguide.llm.client import ChatClient
 
 logger = logging.getLogger(__name__)
 

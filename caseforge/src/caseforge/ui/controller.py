@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from caseforge import __version__
 from caseforge.config import Config
 from caseforge.inscription_sessions import InscriptionSession, list_inscription_sessions
-from caseforge.launcher import launch_caseguide, launch_inscription
+from caseforge.launcher import launch_tool
 from caseforge.model import Case, CaseSummary, ExaminerIdentity, ExamScope, utcnow
 from caseforge.paths import WORKSPACE_DIR
 from caseforge.storage import (
@@ -33,7 +34,6 @@ from caseforge.storage import (
     touch_updated_at,
     write_case,
 )
-from caseforge.version import __version__
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -200,29 +200,35 @@ class CaseController(QObject):
 
     # ----------------------------------------------------------- launching
 
-    def launch_inscription(self) -> None:
+    def _launch(self, *, tool_label: str, module_name: str, executable_path: str) -> None:
         if self._case_dir is None:
             return
-        result = launch_inscription(
-            inscription_path=self._config.inscription_path,
+        result = launch_tool(
+            tool_label=tool_label,
+            module_name=module_name,
+            executable_path=executable_path,
             case_dir=self._case_dir,
         )
         if not result.ok:
             QMessageBox.warning(self._parent_widget, "Launch failed", result.message)
             return
-        QMessageBox.information(self._parent_widget, "Inscription launched", result.message)
+        QMessageBox.information(
+            self._parent_widget, f"{tool_label} launched", result.message
+        )
+
+    def launch_inscription(self) -> None:
+        self._launch(
+            tool_label="Inscription",
+            module_name="inscription",
+            executable_path=self._config.inscription_path,
+        )
 
     def launch_caseguide(self) -> None:
-        if self._case_dir is None:
-            return
-        result = launch_caseguide(
-            caseguide_path=self._config.caseguide_path,
-            case_dir=self._case_dir,
+        self._launch(
+            tool_label="CaseGuide",
+            module_name="caseguide",
+            executable_path=self._config.caseguide_path,
         )
-        if not result.ok:
-            QMessageBox.warning(self._parent_widget, "Launch failed", result.message)
-            return
-        QMessageBox.information(self._parent_widget, "CaseGuide launched", result.message)
 
     # ----------------------------------------------------- helpers
 

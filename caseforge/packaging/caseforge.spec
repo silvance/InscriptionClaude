@@ -12,10 +12,11 @@ workstation and run CaseForge.exe.
 
 from pathlib import Path
 
-SPEC_DIR = Path(__file__).resolve().parent
-ROOT     = SPEC_DIR.parent
-SRC      = ROOT / "src"
-ENTRY    = SRC / "caseforge" / "__main__.py"
+SPEC_DIR    = Path(__file__).resolve().parent
+ROOT        = SPEC_DIR.parent
+SRC         = ROOT / "src"
+ENTRY       = SRC / "caseforge" / "__main__.py"
+COMMON_SRC  = ROOT.parent / "suite_common" / "src"
 
 HIDDEN_IMPORTS = [
     "PySide6.QtCore",
@@ -33,7 +34,7 @@ HIDDEN_IMPORTS = [
 
 a = Analysis(
     [str(ENTRY)],
-    pathex=[str(SRC)],
+    pathex=[str(SRC), str(COMMON_SRC)],
     binaries=[],
     datas=[],
     hiddenimports=HIDDEN_IMPORTS,

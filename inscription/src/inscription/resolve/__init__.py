@@ -3,21 +3,85 @@
 Given a screen coordinate, a resolver returns a :class:`ResolvedElement`
 describing what the user clicked. The best-effort hierarchy is:
 
-- ``UiaElementResolver`` — Windows UIA via ``pywinauto``. High confidence
-  (~0.9) when successful; reports control type, name, automation id.
+- ``UiaElementResolver`` — Windows UIA via ``pywinauto`` (in ``resolve.uia``).
 - ``ForegroundFallbackResolver`` — when UIA is unavailable, fall back to
   the foreground window's title and process name. Low confidence (~0.3).
 - ``NullResolver`` — returns a zero-confidence placeholder.
 
-:func:`create_element_resolver` picks the best available at runtime.
+UIA-backed resolution lives in :mod:`inscription.resolve.uia`; the
+fallbacks here work on any platform so the rest of the pipeline stays
+testable without a display server.
 """
 
-from inscription.resolve.base import (
-    ElementResolver,
-    ForegroundFallbackResolver,
-    NullResolver,
-    create_element_resolver,
-)
+from __future__ import annotations
+
+import logging
+import os
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+from inscription.model import ResolvedElement
+
+if TYPE_CHECKING:
+    from inscription.platform import ForegroundInfo, ForegroundInspector
+
+logger = logging.getLogger(__name__)
+
+
+class ElementResolver(ABC):
+    """Return a :class:`ResolvedElement` for a screen coordinate."""
+
+    @abstractmethod
+    def resolve_at(self, x: int, y: int) -> ResolvedElement:
+        """Return the best-effort resolution at ``(x, y)``."""
+
+
+class NullResolver(ElementResolver):
+    """Returns a zero-confidence placeholder. Used when nothing better exists."""
+
+    def resolve_at(self, x: int, y: int) -> ResolvedElement:
+        return ResolvedElement(id=None, confidence=0.0, method="none")
+
+
+class ForegroundFallbackResolver(ElementResolver):
+    """Resolve using only foreground window metadata.
+
+    No knowledge of the clicked element itself — just which window/process
+    was in focus. Confidence is intentionally low so step generation can
+    produce more generic text ("Click in Notepad") instead of fabricating
+    a control name.
+    """
+
+    def __init__(self, inspector: ForegroundInspector) -> None:
+        self._inspector = inspector
+
+    def resolve_at(self, x: int, y: int) -> ResolvedElement:
+        fg: ForegroundInfo = self._inspector.inspect()
+        if not fg.window_title and not fg.process_name:
+            return ResolvedElement(id=None, confidence=0.0, method="none")
+        return ResolvedElement(
+            id=None,
+            name=fg.window_title or None,
+            control_type=None,
+            automation_id=None,
+            class_name=fg.process_name or None,
+            role="window",
+            confidence=0.3,
+            method="foreground-only",
+        )
+
+
+def create_element_resolver(inspector: ForegroundInspector) -> ElementResolver:
+    """Return the best resolver available on the current platform."""
+    if os.name == "nt":
+        try:
+            from inscription.resolve.uia import UiaElementResolver  # noqa: PLC0415
+
+            return UiaElementResolver(fallback=ForegroundFallbackResolver(inspector))
+        except Exception as exc:  # pragma: no cover - runtime import-only path
+            logger.info("UIA resolver unavailable (%s); using foreground-only", exc)
+    return ForegroundFallbackResolver(inspector)
+
 
 __all__ = [
     "ElementResolver",

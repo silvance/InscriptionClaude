@@ -15,6 +15,8 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from caseguide.model import coerce_int, string_list
+
 logger = logging.getLogger(__name__)
 
 CASE_FILENAME = "case.json"
@@ -76,12 +78,10 @@ def read_case(case_dir: Path) -> CaseHandle:
         msg = f"{target}: top-level JSON must be an object"
         raise CaseReadError(msg)
 
-    examiner_raw = raw.get("examiner", {}) or {}
-    if not isinstance(examiner_raw, dict):
-        examiner_raw = {}
-    scope_raw = raw.get("scope", {}) or {}
-    if not isinstance(scope_raw, dict):
-        scope_raw = {}
+    examiner_raw = raw.get("examiner") if isinstance(raw.get("examiner"), dict) else {}
+    scope_raw = raw.get("scope") if isinstance(raw.get("scope"), dict) else {}
+    assert isinstance(examiner_raw, dict)
+    assert isinstance(scope_raw, dict)
 
     return CaseHandle(
         name=str(raw.get("name", "")),
@@ -90,30 +90,11 @@ def read_case(case_dir: Path) -> CaseHandle:
         scope=CaseScope(
             exam_type=str(scope_raw.get("exam_type", "")),
             primary_tool=str(scope_raw.get("primary_tool", "")),
-            device_classes=_string_list(scope_raw.get("device_classes")),
-            evidence_items=_string_list(scope_raw.get("evidence_items")),
-            agencies=_string_list(scope_raw.get("agencies")),
+            device_classes=string_list(scope_raw.get("device_classes")),
+            evidence_items=string_list(scope_raw.get("evidence_items")),
+            agencies=string_list(scope_raw.get("agencies")),
             summary=str(scope_raw.get("summary", "")),
             notes=str(scope_raw.get("notes", "")),
         ),
-        schema_version=_coerce_int(raw.get("schema_version", 1), default=1),
+        schema_version=coerce_int(raw.get("schema_version", 1), default=1),
     )
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if item is not None]
-
-
-def _coerce_int(value: object, *, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default

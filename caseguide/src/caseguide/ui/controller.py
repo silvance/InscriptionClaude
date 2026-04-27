@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+from caseguide import __version__
 from caseguide.case_reader import CaseReadError, read_case
 from caseguide.config import Config
 from caseguide.generator import generate_suggestions
@@ -25,7 +26,6 @@ from caseguide.markdown_export import render_markdown
 from caseguide.model import SuggestionsDocument, utcnow
 from caseguide.playbooks import PlaybookMatcher, load_playbooks
 from caseguide.storage import StorageError, read_suggestions, write_suggestions
-from caseguide.version import __version__
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget

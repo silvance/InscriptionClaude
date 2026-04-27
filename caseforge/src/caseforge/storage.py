@@ -17,7 +17,6 @@ import json
 import logging
 import re
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 from caseforge.model import (
@@ -27,6 +26,10 @@ from caseforge.model import (
     CustodyRecord,
     ExaminerIdentity,
     ExamScope,
+    coerce_int,
+    parse_iso,
+    parse_optional_iso,
+    string_list,
     utcnow,
 )
 
@@ -287,23 +290,17 @@ def _to_json(case: Case) -> dict[str, object]:
 
 
 def _from_json(raw: dict[str, object]) -> Case:
-    schema_version = _coerce_int(raw.get("schema_version", 1), default=1)
+    schema_version = coerce_int(raw.get("schema_version", 1), default=1)
     raw = _migrate(raw, schema_version)
-    examiner_raw = raw.get("examiner", {}) or {}
-    scope_raw = raw.get("scope", {}) or {}
-    custody_raw = raw.get("custody", {}) or {}
-    if not isinstance(examiner_raw, dict):
-        examiner_raw = {}
-    if not isinstance(scope_raw, dict):
-        scope_raw = {}
-    if not isinstance(custody_raw, dict):
-        custody_raw = {}
+    examiner_raw = _sub(raw, "examiner")
+    scope_raw = _sub(raw, "scope")
+    custody_raw = _sub(raw, "custody")
 
     return Case(
         name=str(raw.get("name", "")),
         case_reference=str(raw.get("case_reference", "")),
-        created_at=_parse_iso(str(raw.get("created_at", ""))),
-        updated_at=_parse_iso(str(raw.get("updated_at", ""))),
+        created_at=parse_iso(raw.get("created_at")),
+        updated_at=parse_iso(raw.get("updated_at")),
         examiner=ExaminerIdentity(
             name=str(examiner_raw.get("name", "")),
             organisation=str(examiner_raw.get("organisation", "")),
@@ -311,18 +308,18 @@ def _from_json(raw: dict[str, object]) -> Case:
         ),
         scope=ExamScope(
             exam_type=str(scope_raw.get("exam_type", "")),
-            device_classes=_string_list(scope_raw.get("device_classes")),
-            evidence_items=_string_list(scope_raw.get("evidence_items")),
-            agencies=_string_list(scope_raw.get("agencies")),
+            device_classes=string_list(scope_raw.get("device_classes")),
+            evidence_items=string_list(scope_raw.get("evidence_items")),
+            agencies=string_list(scope_raw.get("agencies")),
             primary_tool=str(scope_raw.get("primary_tool", "")),
             summary=str(scope_raw.get("summary", "")),
             notes=str(scope_raw.get("notes", "")),
         ),
         custody=CustodyRecord(
-            received_at=_parse_optional_iso(custody_raw.get("received_at")),
+            received_at=parse_optional_iso(custody_raw.get("received_at")),
             received_from=str(custody_raw.get("received_from", "")),
             delivery_method=str(custody_raw.get("delivery_method", "")),
-            evidence_bag_ids=_string_list(custody_raw.get("evidence_bag_ids")),
+            evidence_bag_ids=string_list(custody_raw.get("evidence_bag_ids")),
             seal_intact=_coerce_optional_bool(custody_raw.get("seal_intact")),
             notes=str(custody_raw.get("notes", "")),
         ),
@@ -360,44 +357,10 @@ def _summary_for(*, case: Case, path: Path) -> CaseSummary:
     )
 
 
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if item is not None]
-
-
-def _coerce_int(value: object, *, default: int) -> int:
-    if isinstance(value, bool):  # bool is an int subclass; reject explicitly
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
-def _parse_iso(text: str) -> datetime:
-    if not text:
-        return utcnow()
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        logger.warning("Unparseable timestamp in case.json: %r", text)
-        return utcnow()
-
-
-def _parse_optional_iso(value: object) -> datetime | None:
-    if value is None or value == "":
-        return None
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
+def _sub(raw: dict[str, object], key: str) -> dict[str, object]:
+    """Return ``raw[key]`` if it is a dict, else an empty dict."""
+    value = raw.get(key)
+    return value if isinstance(value, dict) else {}
 
 
 def _coerce_optional_bool(value: object) -> bool | None:

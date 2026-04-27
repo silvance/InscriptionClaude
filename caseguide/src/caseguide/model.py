@@ -32,6 +32,47 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# JSON-tolerant coercion helpers shared across storage.py, case_reader.py,
+# playbooks.py, and llm/prompt.py. Each returns a sensible default when the
+# input is missing, wrong type, or unparseable.
+
+def coerce_int(value: object, *, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_bool(value: object, *, default: bool) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def parse_iso(value: object, *, default: datetime | None) -> datetime | None:
+    """Parse an ISO 8601 timestamp; return ``default`` if absent or invalid.
+
+    Callers pick the fallback explicitly: ``default=utcnow()`` for fields
+    that need *some* timestamp; ``default=None`` for optional fields.
+    """
+    if not isinstance(value, str) or not value:
+        return default
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return default
+
+
+def string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
+
+
 #: Stable priority labels. The picker uses these verbatim; downstream
 #: tools can sort / filter on the exact string.
 PRIORITY_REQUIRED = "required"

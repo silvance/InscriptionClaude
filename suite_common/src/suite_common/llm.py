@@ -1,17 +1,14 @@
 """OpenAI-compatible chat-completions client.
 
-Stdlib-only on purpose — a thin synchronous ``urllib`` POST keeps the
-dependency surface flat and matches the one-shot, non-streaming usage
-:class:`SuggestionsRefiner` needs. Any OpenAI-compatible endpoint
-works: Ollama's ``/v1``, LM Studio's server, ``llama.cpp --server``,
-or a remote provider.
+Stdlib-only — a thin synchronous ``urllib`` POST keeps the dependency
+surface flat and matches the one-shot, non-streaming usage pattern both
+Inscription's step rewriter and CaseGuide's suggestions refiner need.
+Any OpenAI-compatible endpoint works: Ollama's ``/v1``, LM Studio's
+server, ``llama.cpp --server``, or a remote provider.
 
-This is intentionally a near-verbatim copy of Inscription's
-``inscription.llm.client`` — the protocol is identical, the suite is
-expected to point both apps at the same Ollama instance, and keeping
-the implementations parallel avoids cross-package coupling between
-two PyInstaller bundles. If divergence ever pays off (different auth
-shapes, streaming tokens) we'll factor into a shared package then.
+Failures raise :class:`LLMError` (or a subclass) with a human-readable
+message; callers show that to the user and fall back to deterministic
+defaults.
 """
 
 from __future__ import annotations
@@ -25,31 +22,26 @@ from typing import Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TEMPERATURE = 0.2
-
-#: Hard cap on the response body. Even a verbose chat-completion sits
-#: well under 100 KB; we accept up to 10 MB so a chatty model on a
-#: huge case can still complete, but a misbehaving / hostile endpoint
-#: returning gigabytes of garbage doesn't OOM us.
-_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
-
-#: Allowed URL schemes for the LLM endpoint. ``urlopen`` would happily
-#: dispatch ``file://`` and ``ftp://`` requests; we constrain to plain
-#: HTTP/HTTPS so a config typo can't turn into local file disclosure.
-_ALLOWED_SCHEMES = ("http://", "https://")
-
 
 @runtime_checkable
 class ChatClient(Protocol):
-    """Structural type for anything that can chat.
-
-    :class:`LLMClient` is the concrete implementation; tests supply fakes.
-    Only the kwargs we actually use are required — callers may accept and
-    ignore additional ones.
-    """
+    """Structural type for anything that can chat. Tests supply fakes."""
 
     def chat(self, *, system: str, user: str) -> str:  # pragma: no cover - protocol
         ...
+
+DEFAULT_TEMPERATURE = 0.2
+
+#: Hard cap on the response body. A verbose chat-completion sits well
+#: under 100 KB; we accept up to 10 MB so a chatty model on a huge input
+#: can still complete, but a misbehaving / hostile endpoint returning
+#: gigabytes of garbage doesn't OOM us.
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+
+#: Allowed URL schemes for the LLM endpoint. ``urlopen`` would happily
+#: dispatch ``file://`` and ``ftp://`` requests; constrain to plain
+#: HTTP/HTTPS so a config typo can't turn into local file disclosure.
+_ALLOWED_SCHEMES = ("http://", "https://")
 
 
 class LLMError(Exception):
@@ -110,8 +102,7 @@ class LLMClient:
 
         ``json_mode`` sets ``response_format={"type": "json_object"}`` which
         Ollama, LM Studio, and OpenAI respect — the model is biased toward
-        emitting strict JSON. The caller is still responsible for parsing
-        and validating.
+        emitting strict JSON. The caller is still responsible for parsing.
         """
         body: dict[str, object] = {
             "model": self._model,
@@ -130,7 +121,7 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         url = f"{self._base_url}/chat/completions"
-        req = urllib.request.Request(  # noqa: S310 - http(s) only via the base_url config
+        req = urllib.request.Request(  # noqa: S310 - http(s) only via base_url validation
             url,
             data=json.dumps(body).encode("utf-8"),
             headers=headers,
@@ -138,7 +129,7 @@ class LLMClient:
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:  # noqa: S310
-                # Read one byte past the cap so we can detect oversized
+                # Read one byte past the cap to detect oversized
                 # responses without first buffering them entirely.
                 raw = resp.read(_MAX_RESPONSE_BYTES + 1)
                 if len(raw) > _MAX_RESPONSE_BYTES:

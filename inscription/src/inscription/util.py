@@ -1,10 +1,8 @@
-"""Time formatting helpers.
+"""Cross-cutting helpers that don't belong to a specific subsystem.
 
 Inscription consistently shows event timestamps in the user's local
 clock time so an examiner correlating Inscription notes with other
 artefacts (event logs, video, dispatch logs) reads the same numbers.
-The conversion + format string was copy-pasted to seven UI / export
-sites; this module is the single seam.
 """
 
 from __future__ import annotations
@@ -14,8 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datetime import datetime
 
-#: HH:MM:SS in the user's local timezone. The default for per-step
-#: timestamps in lists, exports, and the compact dock.
+#: HH:MM:SS in the user's local timezone.
 CLOCK_TIME_FMT = "%H:%M:%S"
 
 

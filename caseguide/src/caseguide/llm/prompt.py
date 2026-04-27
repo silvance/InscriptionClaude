@@ -23,10 +23,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from caseguide.llm.client import LLMResponseError
+from suite_common.llm import LLMResponseError
+
 from caseguide.model import (
     PRIORITY_CHOICES,
     PRIORITY_RECOMMENDED,
+    string_list,
 )
 
 if TYPE_CHECKING:
@@ -199,13 +201,9 @@ def _coerce_suggestion(item: object, *, index: int) -> RefinedSuggestion | None:
         category=str(item.get("category", "")),
         expected_result=str(item.get("expected_result", "")),
         rationale=str(item.get("rationale", "")),
-        references=_string_list(item.get("references")),
-        depends_on=_string_list(item.get("depends_on")),
+        references=string_list(item.get("references")),
+        depends_on=string_list(item.get("depends_on")),
         source_id=str(item.get("source_id", "")),
     )
 
 
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(x) for x in value if x is not None]

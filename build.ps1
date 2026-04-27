@@ -10,10 +10,13 @@
 
     Prerequisites — from the repo root, activate the shared venv then run:
         .\.venv\Scripts\Activate.ps1
+        python -m pip install -e suite_common -e inscription[dev] -e caseforge[dev] -e caseguide[dev]
         .\build.ps1
 
-    If each sub-package has its own venv, activate the appropriate one before
-    passing -App to build individually.
+    The [dev] extras include PyInstaller; without them the script will fail
+    with "pyinstaller : The term 'pyinstaller' is not recognized". The
+    suite_common package is the shared LLM client + JSON helpers all three
+    apps depend on.
 
 .PARAMETER App
     Which app to build: 'inscription', 'caseforge', 'caseguide', or 'all'.

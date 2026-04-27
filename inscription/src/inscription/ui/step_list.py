@@ -19,7 +19,7 @@ from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QWidget
 
-from inscription.util.timefmt import format_clock_time
+from inscription.util import format_clock_time
 
 if TYPE_CHECKING:
     from datetime import datetime

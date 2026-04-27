@@ -17,6 +17,7 @@ ROOT         = SPEC_DIR.parent
 SRC          = ROOT / "src"
 ENTRY        = SRC / "caseguide" / "__main__.py"
 PLAYBOOK_DIR = SRC / "caseguide" / "playbook_data"
+COMMON_SRC   = ROOT.parent / "suite_common" / "src"
 
 HIDDEN_IMPORTS = [
     "PySide6.QtCore",
@@ -26,7 +27,7 @@ HIDDEN_IMPORTS = [
 
 a = Analysis(
     [str(ENTRY)],
-    pathex=[str(SRC)],
+    pathex=[str(SRC), str(COMMON_SRC)],
     binaries=[],
     datas=[
         # Built-in forensic playbooks. paths.py resolves them via

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from inscription.llm.client import LLMClient, LLMConfigError, LLMRequestError, LLMResponseError
+from suite_common.llm import LLMClient, LLMConfigError, LLMRequestError, LLMResponseError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
