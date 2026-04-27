@@ -181,3 +181,78 @@ def _safe_body(raw: bytes, *, limit: int = 500) -> str:
     if len(text) > limit:
         return text[:limit] + "…"
     return text
+
+
+def list_available_models(
+    *,
+    base_url: str,
+    timeout_s: float = 5.0,
+    api_key: str | None = None,
+) -> list[str]:
+    """Return the model IDs the endpoint advertises.
+
+    Hits the OpenAI-compatible ``GET /models`` endpoint Ollama, LM Studio
+    and OpenAI all expose. Returns sorted ``model:tag`` strings on success;
+    raises :class:`LLMError` on connection / HTTP / parse failures so the
+    caller can decide whether to fall back to free-text entry.
+    """
+    if not base_url:
+        msg = "LLM base_url is empty"
+        raise LLMConfigError(msg)
+    if not base_url.lower().startswith(_ALLOWED_SCHEMES):
+        msg = f"LLM base_url must start with http:// or https:// (got {base_url!r})"
+        raise LLMConfigError(msg)
+    if timeout_s <= 0:
+        msg = f"LLM timeout_s must be > 0 (got {timeout_s})"
+        raise LLMConfigError(msg)
+
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(  # noqa: S310 - http(s) only via base_url validation
+        url, headers=headers, method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
+            raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+            if len(raw) > _MAX_RESPONSE_BYTES:
+                msg = (
+                    f"LLM response from {url} exceeds {_MAX_RESPONSE_BYTES} "
+                    f"bytes; aborting."
+                )
+                raise LLMResponseError(msg)
+    except urllib.error.HTTPError as exc:
+        detail = _safe_body(exc.read() if exc.fp else b"")
+        msg = f"LLM HTTP {exc.code} from {url}: {detail}"
+        raise LLMRequestError(msg) from exc
+    except urllib.error.URLError as exc:
+        msg = f"LLM request to {url} failed: {exc.reason}"
+        raise LLMRequestError(msg) from exc
+    except TimeoutError as exc:
+        msg = f"LLM request to {url} timed out after {timeout_s}s"
+        raise LLMRequestError(msg) from exc
+    except OSError as exc:
+        if isinstance(exc, socket.timeout):
+            msg = f"LLM request to {url} timed out after {timeout_s}s"
+            raise LLMRequestError(msg) from exc
+        msg = f"LLM request to {url} failed: {exc}"
+        raise LLMRequestError(msg) from exc
+
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        msg = f"LLM returned non-JSON from {url}: {_safe_body(raw)}"
+        raise LLMResponseError(msg) from exc
+
+    data = parsed.get("data") if isinstance(parsed, dict) else None
+    if not isinstance(data, list):
+        msg = f"LLM /models response missing 'data' list: {parsed!r}"
+        raise LLMResponseError(msg)
+    ids: list[str] = []
+    for entry in data:
+        if isinstance(entry, dict):
+            mid = entry.get("id")
+            if isinstance(mid, str) and mid.strip():
+                ids.append(mid.strip())
+    return sorted(set(ids))

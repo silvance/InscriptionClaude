@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from suite_common.llm import LLMClient, LLMConfigError, LLMRequestError, LLMResponseError
+from suite_common.llm import (
+    LLMClient,
+    LLMConfigError,
+    LLMRequestError,
+    LLMResponseError,
+    list_available_models,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -181,3 +187,83 @@ def test_client_times_out_on_slow_server() -> None:
         client = LLMClient(base_url=url, model="m", timeout_s=0.15)
         with pytest.raises(LLMRequestError, match="timed out"):
             client.chat(system="s", user="u")
+
+
+# ----------------------------------------------------------- list_available_models
+
+
+@contextmanager
+def _models_server(get_handler: Callable[[BaseHTTPRequestHandler], None]) -> Iterator[str]:
+    """Sister fixture to ``_server`` but routing GET (the /models verb)."""
+
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            get_handler(self)
+
+        def log_message(self, *args: object) -> None:
+            return
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    server = HTTPServer(("127.0.0.1", port), _H)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{port}/v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_list_available_models_returns_sorted_unique_ids() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        captured["path"] = h.path
+        captured["auth"] = h.headers.get("Authorization")
+        body = {
+            "object": "list",
+            "data": [
+                {"id": "gemma4:latest"},
+                {"id": "granite4:tiny-h"},
+                {"id": "gemma4:latest"},  # duplicate, should dedupe
+                {"id": ""},                # empty id, should drop
+                {"not_id": "ignored"},     # malformed entry, should drop
+            ],
+        }
+        _send_json(h, 200, body)
+
+    with _models_server(handler) as url:
+        ids = list_available_models(base_url=url, api_key="sk-x", timeout_s=2)
+
+    assert ids == ["gemma4:latest", "granite4:tiny-h"]
+    assert captured["path"] == "/v1/models"
+    assert captured["auth"] == "Bearer sk-x"
+
+
+def test_list_available_models_raises_on_http_error() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        _send_json(h, 500, {"error": "down"})
+
+    with _models_server(handler) as url:
+        with pytest.raises(LLMRequestError):
+            list_available_models(base_url=url, timeout_s=2)
+
+
+def test_list_available_models_raises_on_malformed_body() -> None:
+    def handler(h: BaseHTTPRequestHandler) -> None:
+        _send_json(h, 200, {"unexpected": "shape"})
+
+    with _models_server(handler) as url:
+        with pytest.raises(LLMResponseError):
+            list_available_models(base_url=url, timeout_s=2)
+
+
+def test_list_available_models_validates_base_url() -> None:
+    with pytest.raises(LLMConfigError):
+        list_available_models(base_url="", timeout_s=2)
+    with pytest.raises(LLMConfigError):
+        list_available_models(base_url="file:///etc/passwd", timeout_s=2)

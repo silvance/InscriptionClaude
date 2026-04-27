@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QSignalBlocker, QThread, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from suite_common.llm import LLMClient, LLMError
+from suite_common.llm import LLMClient, LLMError, list_available_models
 
 from caseguide.config import (
     DEFAULT_LLM_BASE_URL,
@@ -89,6 +90,30 @@ class _ConnectionTest(QObject):
         self.succeeded.emit(f"Connected. Model replied with {len(reply)} chars.")
 
 
+class _ModelListFetch(QObject):
+    """Fetch the endpoint's model catalogue on a worker thread.
+
+    Failures emit an empty list — the combobox stays editable so users can
+    still type any tag they want.
+    """
+
+    finished = Signal(list)  # list[str]
+
+    def __init__(self, *, base_url: str, api_key: str | None) -> None:
+        super().__init__()
+        self._base_url = base_url
+        self._api_key = api_key
+
+    def run(self) -> None:
+        try:
+            ids = list_available_models(
+                base_url=self._base_url, api_key=self._api_key, timeout_s=3.0,
+            )
+        except Exception:  # noqa: BLE001 - silent fallback to free-text entry
+            ids = []
+        self.finished.emit(ids)
+
+
 class SettingsDialog(QDialog):
     """Edit the LLM endpoint configuration."""
 
@@ -97,6 +122,8 @@ class SettingsDialog(QDialog):
         self._config = config
         self._test_thread: QThread | None = None
         self._test_worker: _ConnectionTest | None = None
+        self._models_thread: QThread | None = None
+        self._models_worker: _ModelListFetch | None = None
 
         self.setWindowTitle("Settings")
         self.resize(520, 320)
@@ -107,6 +134,10 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(self._build_llm_group())
         layout.addStretch(1)
+
+        # Populate the model dropdown from whatever the configured endpoint
+        # advertises. Silent on failure; the combobox stays editable.
+        self._refresh_model_options()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel,
@@ -125,8 +156,13 @@ class SettingsDialog(QDialog):
 
         self._base_url_edit = QLineEdit(self._config.llm_base_url, box)
         self._base_url_edit.setPlaceholderText(DEFAULT_LLM_BASE_URL)
-        self._model_edit = QLineEdit(self._config.llm_model, box)
-        self._model_edit.setPlaceholderText(DEFAULT_LLM_MODEL)
+        self._model_edit = QComboBox(box)
+        self._model_edit.setEditable(True)
+        self._model_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._model_edit.setEditText(self._config.llm_model)
+        line_edit = self._model_edit.lineEdit()
+        if line_edit is not None:
+            line_edit.setPlaceholderText(DEFAULT_LLM_MODEL)
         self._timeout_spin = QDoubleSpinBox(box)
         self._timeout_spin.setRange(5.0, 1800.0)
         self._timeout_spin.setSingleStep(10.0)
@@ -170,7 +206,7 @@ class SettingsDialog(QDialog):
 
     def _on_save(self) -> None:
         self._config.llm_base_url = self._base_url_edit.text().strip() or DEFAULT_LLM_BASE_URL
-        self._config.llm_model = self._model_edit.text().strip() or DEFAULT_LLM_MODEL
+        self._config.llm_model = self._model_edit.currentText().strip() or DEFAULT_LLM_MODEL
         self._config.llm_timeout_s = float(self._timeout_spin.value())
         self._config.llm_api_key = self._api_key_edit.text().strip() or None
         self._config.sync()
@@ -180,7 +216,7 @@ class SettingsDialog(QDialog):
         if self._test_thread is not None:
             return  # already running
         base_url = self._base_url_edit.text().strip() or DEFAULT_LLM_BASE_URL
-        model = self._model_edit.text().strip() or DEFAULT_LLM_MODEL
+        model = self._model_edit.currentText().strip() or DEFAULT_LLM_MODEL
         timeout = float(self._timeout_spin.value())
         api_key = self._api_key_edit.text().strip() or None
 
@@ -218,6 +254,8 @@ class SettingsDialog(QDialog):
         self._test_worker = None
         self._test_status.setStyleSheet("color: #2c7a2c;")
         self._test_status.setText(f"✓ {message}")
+        # Endpoint just confirmed as reachable — refresh the model list too.
+        self._refresh_model_options()
 
     def _on_test_failed(self, message: str) -> None:
         self._test_btn.setEnabled(True)
@@ -225,3 +263,34 @@ class SettingsDialog(QDialog):
         self._test_worker = None
         self._test_status.setStyleSheet("color: #c0392b;")
         self._test_status.setText(f"✗ {message}")
+
+    def _refresh_model_options(self) -> None:
+        """Kick off an async fetch of the endpoint's model list."""
+        if self._models_thread is not None:
+            return  # already running
+        base_url = self._base_url_edit.text().strip() or DEFAULT_LLM_BASE_URL
+        api_key = self._api_key_edit.text().strip() or None
+
+        worker = _ModelListFetch(base_url=base_url, api_key=api_key)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_models_fetched)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        self._models_worker = worker
+        self._models_thread = thread
+        thread.start()
+
+    def _on_models_fetched(self, ids: list[str]) -> None:
+        self._models_thread = None
+        self._models_worker = None
+        if not ids:
+            return
+        current = self._model_edit.currentText()
+        with QSignalBlocker(self._model_edit):
+            self._model_edit.clear()
+            self._model_edit.addItems(ids)
+            self._model_edit.setEditText(current)
