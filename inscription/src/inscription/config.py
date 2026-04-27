@@ -34,7 +34,7 @@ _K_MINI_DOCK_POSITION: Final = "tray/mini_dock_position"
 DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
 #: Small enough to run on a laptop, strong enough to rewrite a few dozen
 #: steps. Users with bigger hardware point at their preferred model.
-DEFAULT_LLM_MODEL: Final = "granite4.0:8b"
+DEFAULT_LLM_MODEL: Final = "gemma4:latest"
 DEFAULT_LLM_TIMEOUT_S: Final = 180.0
 
 

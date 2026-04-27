@@ -21,13 +21,12 @@
         - Activated venv with all four packages installed editable
           (see SETUP.md).
         - Ollama installed and on PATH.
-        - The two default models already pulled:
-              ollama pull granite4.0:8b
+        - The default model already pulled:
               ollama pull gemma4:latest
 
 .PARAMETER Models
-    Models to bundle. Defaults to the two app defaults; override only if
-    you've changed the apps' DEFAULT_LLM_MODEL constants.
+    Models to bundle. Defaults to the single shared app default; override
+    only if you've changed the apps' DEFAULT_LLM_MODEL constants.
 
 .PARAMETER OllamaRoot
     Where the user's Ollama binaries live on this machine. Default is the
@@ -42,10 +41,10 @@
 
 .EXAMPLE
     .\scripts\package-airgapped.ps1
-    .\scripts\package-airgapped.ps1 -Models granite3.3:8b -SkipBuild
+    .\scripts\package-airgapped.ps1 -Models gemma4:latest,granite4:tiny-h -SkipBuild
 #>
 param(
-    [string[]]$Models = @("granite4.0:8b", "gemma4:latest"),
+    [string[]]$Models = @("gemma4:latest"),
     [string]$OllamaRoot = "$env:LOCALAPPDATA\Programs\Ollama",
     [string]$OllamaModelsRoot = "$env:USERPROFILE\.ollama\models",
     [switch]$SkipBuild

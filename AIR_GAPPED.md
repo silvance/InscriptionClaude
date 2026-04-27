@@ -17,14 +17,14 @@ InscriptionSuite-Airgapped\
 ├── CaseForge\            ~150 MB    case intake + reporting
 ├── CaseGuide\            ~150 MB    LLM coach
 ├── ollama\               ~150 MB    bundled Ollama Windows runtime
-├── models\               ~15 GB     two model snapshots
+├── models\               ~10 GB     gemma4 weight snapshot
 │   ├── blobs\            (sha256-* weight files)
 │   └── manifests\        (one per model:tag pulled)
 ├── start-suite.ps1                  first-run launcher
 └── README.txt                       operator notes
 ```
 
-Total: **~16 GB**. Use a 32 GB USB drive or larger.
+Total: **~11 GB**. Use a 16 GB USB drive or larger.
 
 ---
 
@@ -37,11 +37,10 @@ A Windows 10/11 box with internet access during the build only.
 2. Install Ollama for Windows from <https://ollama.com/download/windows>.
 3. From any PowerShell window:
    ```powershell
-   ollama pull granite4.0:8b
    ollama pull gemma4:latest
    ```
-   These are the defaults the apps point at. They take a while
-   (~15 GB combined download).
+   This is the shared default both Inscription and CaseGuide point at
+   (~10 GB download).
 
 ---
 
@@ -77,7 +76,7 @@ dist\InscriptionSuite-Airgapped\
 .\scripts\package-airgapped.ps1 -SkipBuild
 
 # Different model set (only when you've changed the apps' DEFAULT_LLM_MODEL).
-.\scripts\package-airgapped.ps1 -Models granite3.3:8b
+.\scripts\package-airgapped.ps1 -Models gemma4:latest,granite4:tiny-h
 
 # Non-standard Ollama install.
 .\scripts\package-airgapped.ps1 `

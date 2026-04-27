@@ -33,10 +33,10 @@ any time to bring it back up.
 Models bundled
 --------------
 
-  granite4.0:8b   Inscription's default for the AI rewrite step.
-  gemma4:latest   CaseGuide's default for suggestion refinement.
+  gemma4:latest   Shared default for both Inscription's AI rewrite step
+                  and CaseGuide's suggestion refinement.
 
-Both are cached under .\models. The apps are pre-configured to talk to
+Cached under .\models. The apps are pre-configured to talk to
 http://localhost:11434 — no further setup needed.
 
 Troubleshooting

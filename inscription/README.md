@@ -91,7 +91,7 @@ OpenAI-compatible chat-completions endpoint works.
 
 ```powershell
 # Install Ollama, then pull a model.
-ollama pull granite4.0:8b     # or llama3.1:8b, qwen2.5:7b-instruct, etc.
+ollama pull gemma4:latest     # or granite4:tiny-h, llama3.1:8b, etc.
 ```
 
 Ollama exposes `http://localhost:11434/v1` automatically; that's the
@@ -101,7 +101,7 @@ default Inscription points at. To change model or endpoint, edit
 ```ini
 [llm]
 base_url=http://localhost:11434/v1
-model=granite3.3:8b
+model=gemma4:latest
 timeout_s=180
 ```
 
