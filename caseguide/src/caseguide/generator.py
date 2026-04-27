@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from caseguide import __version__
 from caseguide.model import Suggestion, SuggestionsDocument, utcnow
-from caseguide.version import __version__
 
 if TYPE_CHECKING:
     from caseguide.case_reader import CaseScope

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from inscription.ui.widgets import section_label
-from inscription.util.timefmt import format_clock_time
+from inscription.util import format_clock_time
 
 if TYPE_CHECKING:
     from datetime import datetime

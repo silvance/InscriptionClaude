@@ -17,12 +17,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from inscription.llm.client import LLMResponseError
+from suite_common.llm import LLMResponseError
+
 from inscription.llm.prompt import SYSTEM_PROMPT, build_user_prompt, parse_response
 from inscription.model import DraftStep
 
 if TYPE_CHECKING:
-    from inscription.llm.client import ChatClient
+    from suite_common.llm import ChatClient
+
     from inscription.llm.prompt import RewrittenStep
     from inscription.model import RawEvent, ResolvedElement
     from inscription.storage import SessionRepository

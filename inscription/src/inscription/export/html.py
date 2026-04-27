@@ -24,7 +24,7 @@ from inscription.export._common import (
     stage_step_asset,
 )
 from inscription.model import ExportDocument, utcnow
-from inscription.util.timefmt import format_clock_time
+from inscription.util import format_clock_time
 
 if TYPE_CHECKING:
     from collections.abc import Callable

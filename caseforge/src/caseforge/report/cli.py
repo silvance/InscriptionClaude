@@ -18,11 +18,11 @@ import logging
 import sys
 from pathlib import Path
 
+from caseforge import __version__
 from caseforge.logging_setup import configure_logging
 from caseforge.report.context import build_context
 from caseforge.report.render import RenderError, render_report
 from caseforge.storage import StorageError
-from caseforge.version import __version__
 
 logger = logging.getLogger("caseforge.report")
 

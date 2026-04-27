@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import re
 import sqlite3
 import threading
 from datetime import datetime
@@ -35,12 +36,28 @@ from inscription.storage.errors import (
 )
 from inscription.storage.manifest import read_manifest, write_manifest
 from inscription.storage.schema import initialise_schema, migrate_to_latest
-from inscription.storage.slug import slugify
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_SAFE_SLUG = re.compile(r"[^A-Za-z0-9._-]")
+_COLLAPSE_DASH = re.compile(r"-{2,}")
+
+
+def slugify(name: str) -> str:
+    """Filesystem-safe slug for ``name``.
+
+    Alphanumerics, ``.``, ``_``, ``-`` pass through; other characters
+    become ``-``; runs of ``-`` collapse; leading/trailing ``-`` strip;
+    empty results raise ``ValueError``.
+    """
+    slug = _COLLAPSE_DASH.sub("-", _SAFE_SLUG.sub("-", name.strip())).strip("-")
+    if not slug:
+        msg = f"Name {name!r} produces an empty slug"
+        raise ValueError(msg)
+    return slug
 
 
 def _iso(dt: datetime) -> str:

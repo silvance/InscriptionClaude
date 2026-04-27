@@ -10,12 +10,12 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
+from caseguide import __version__
 from caseguide.logging_setup import configure_logging
 from caseguide.paths import ensure_dirs
 from caseguide.ui.app_icon import build_app_icon
 from caseguide.ui.main_window import MainWindow
 from caseguide.ui.style import apply_global_style
-from caseguide.version import __version__
 
 logger = logging.getLogger(__name__)
 

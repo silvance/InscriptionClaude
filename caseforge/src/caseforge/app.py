@@ -9,12 +9,12 @@ import sys
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
+from caseforge import __version__
 from caseforge.logging_setup import configure_logging
 from caseforge.paths import ensure_dirs
 from caseforge.ui.app_icon import build_app_icon
 from caseforge.ui.main_window import MainWindow
 from caseforge.ui.style import apply_global_style
-from caseforge.version import __version__
 
 logger = logging.getLogger(__name__)
 

@@ -26,8 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from caseforge import __version__
 from caseforge.ui.recents_delegate import CASE_SUMMARY_ROLE, RecentsDelegate
-from caseforge.version import __version__
 
 if TYPE_CHECKING:
     from caseforge.model import CaseSummary

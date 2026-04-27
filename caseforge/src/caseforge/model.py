@@ -41,6 +41,49 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# JSON-tolerant coercion helpers shared by storage.py, inscription_sessions.py,
+# and report/. Each returns a sensible default when the input is missing,
+# wrong type, or unparseable — case files we read may have been written by
+# an older or partially-corrupted CaseForge install.
+
+def coerce_int(value: object, *, default: int) -> int:
+    if isinstance(value, bool):  # bool is an int subclass; reject explicitly
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def parse_iso(value: object) -> datetime:
+    """Return ``value`` as a datetime; fall back to utcnow on bad input."""
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+    return utcnow()
+
+
+def parse_optional_iso(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ExaminerIdentity:
     """Who's working the case at intake. Inscription mirrors these

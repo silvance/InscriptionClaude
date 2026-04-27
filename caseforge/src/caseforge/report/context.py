@@ -103,6 +103,7 @@ from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from caseforge import __version__
 from caseforge.inscription_sessions import (
     InscriptionSession,
     list_inscription_sessions,
@@ -113,7 +114,6 @@ from caseforge.report.suggestions_reader import (
     read_suggestions,
 )
 from caseforge.storage import read_case
-from caseforge.version import __version__
 
 if TYPE_CHECKING:
     from pathlib import Path

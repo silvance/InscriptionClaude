@@ -12,8 +12,7 @@ from inscription.storage.errors import (
     SessionNotFoundError,
     StorageError,
 )
-from inscription.storage.repository import SessionRepository, list_sessions
-from inscription.storage.slug import slugify
+from inscription.storage.repository import SessionRepository, list_sessions, slugify
 
 __all__ = [
     "SchemaVersionError",

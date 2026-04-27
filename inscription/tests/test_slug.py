@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from inscription.storage.slug import slugify
+from inscription.storage import slugify
 
 
 def test_simple_name_passes_through() -> None:

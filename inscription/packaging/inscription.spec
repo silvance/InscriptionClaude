@@ -15,10 +15,11 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
-SPEC_DIR = Path(__file__).resolve().parent   # inscription/packaging/
-ROOT     = SPEC_DIR.parent                    # inscription/
-SRC      = ROOT / "src"
-ENTRY    = SRC / "inscription" / "__main__.py"
+SPEC_DIR    = Path(SPECPATH).resolve()          # inscription/packaging/
+ROOT        = SPEC_DIR.parent                    # inscription/
+SRC         = ROOT / "src"
+ENTRY       = SRC / "inscription" / "__main__.py"
+COMMON_SRC  = ROOT.parent / "suite_common" / "src"
 
 HIDDEN_IMPORTS = [
     # PySide6 — the hook usually picks these up, but listing them
@@ -51,7 +52,7 @@ HIDDEN_IMPORTS = [
 
 a = Analysis(
     [str(ENTRY)],
-    pathex=[str(SRC)],
+    pathex=[str(SRC), str(COMMON_SRC)],
     binaries=[],
     datas=[],
     hiddenimports=HIDDEN_IMPORTS,

@@ -32,6 +32,9 @@ dependencies = [
     # which don't install on non-Windows platforms. On macOS/Linux the
     # resolver falls back to foreground-only (see inscription.resolve).
     'pywinauto>=0.6; sys_platform == "win32"',
+    # Shared LLM client + JSON helpers. Editable-installed from the
+    # sibling suite_common/ directory; see SETUP.md.
+    "suite_common",
 ]
 
 [project.optional-dependencies]

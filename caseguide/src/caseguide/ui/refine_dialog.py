@@ -24,8 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from caseguide.llm.client import LLMError
+from suite_common.llm import LLMError
 
 if TYPE_CHECKING:
     from caseguide.case_reader import CaseScope

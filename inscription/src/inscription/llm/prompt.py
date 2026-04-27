@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from inscription.llm.client import LLMResponseError
+from suite_common.llm import LLMResponseError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

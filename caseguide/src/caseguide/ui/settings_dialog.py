@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from suite_common.llm import LLMClient, LLMError
 
 from caseguide.config import (
     DEFAULT_LLM_BASE_URL,
@@ -36,7 +37,6 @@ from caseguide.config import (
     DEFAULT_LLM_TIMEOUT_S,
     Config,
 )
-from caseguide.llm.client import LLMClient, LLMError
 
 logger = logging.getLogger(__name__)
 

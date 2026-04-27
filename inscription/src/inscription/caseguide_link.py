@@ -1,8 +1,10 @@
 """Tolerant JSON reader for ``<case-root>/.caseguide/suggestions.json``.
 
-The contract lives in :file:`inscription/docs/integration.md`; this
-module is the minimum needed to surface that file in Inscription's
-suggestions panel without coupling to CaseGuide's source.
+Inscription deliberately does not import from the ``caseguide`` package —
+they're sibling apps that communicate through the on-disk contract
+documented in :file:`inscription/docs/integration.md`. This module
+parses that file into local dataclasses so a missing or stale CaseGuide
+install never breaks Inscription.
 
 Schema versions accepted:
 
@@ -10,10 +12,10 @@ Schema versions accepted:
   them to ``False`` / ``None`` so a v1 file renders as "all open".
 - v2 — adds per-suggestion completion fields.
 
-The reader is **forgiving by design**. Forensic workstations may have
-an older or partially-written suggestions.json; the panel hides itself
-when this module returns ``None``, so the user just sees the regular
-Inscription experience instead of an error.
+Forensic workstations may have an older or partially-written
+suggestions.json; the panel hides itself when this module returns
+``None``, so the user just sees the regular Inscription experience
+instead of an error.
 """
 
 from __future__ import annotations
@@ -40,9 +42,9 @@ PRIORITY_OPTIONAL = "optional"
 class SuggestionsReadError(Exception):
     """Raised when the file is present but unparseable.
 
-    Callers should treat this the same as "no file" for UI purposes —
-    we surface it to logs so the underlying problem isn't silent, but
-    the panel still degrades to hidden rather than crashing.
+    Callers treat this the same as "no file" for UI purposes — surfaced
+    to logs so the underlying problem isn't silent, but the panel still
+    degrades to hidden rather than crashing.
     """
 
 
@@ -105,9 +107,6 @@ def read_suggestions(case_dir: Path) -> CaseguideDocument | None:
     return _document_from_json(raw)
 
 
-# ------------------------------------------------------------ parsers
-
-
 def _document_from_json(raw: dict[str, object]) -> CaseguideDocument:
     suggestions_raw = raw.get("suggestions", [])
     suggestions_list = suggestions_raw if isinstance(suggestions_raw, list) else []
@@ -135,7 +134,7 @@ def _suggestion_from_json(raw: dict[str, object]) -> CaseguideSuggestion:
         rationale=str(raw.get("rationale", "")),
         references=_string_list(raw.get("references")),
         depends_on=_string_list(raw.get("depends_on")),
-        completed=_coerce_bool(raw.get("completed"), default=False),
+        completed=isinstance(raw.get("completed"), bool) and bool(raw.get("completed")),
         completed_at=_parse_optional_iso(raw.get("completed_at")),
     )
 
@@ -156,12 +155,6 @@ def _coerce_int(value: object, *, default: int) -> int:
             return int(value)
         except ValueError:
             return default
-    return default
-
-
-def _coerce_bool(value: object, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
     return default
 
 

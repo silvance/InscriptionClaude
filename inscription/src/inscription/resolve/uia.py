@@ -18,7 +18,7 @@ from typing import Any
 import psutil
 
 from inscription.model import ResolvedElement
-from inscription.resolve.base import ElementResolver
+from inscription.resolve import ElementResolver
 
 logger = logging.getLogger(__name__)
 

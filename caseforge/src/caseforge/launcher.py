@@ -91,21 +91,13 @@ def _spawn(command: list[str], *, tool_label: str, case_dir: Path) -> LaunchResu
     )
 
 
-def launch_inscription(*, inscription_path: str, case_dir: Path) -> LaunchResult:
-    """Spawn Inscription pointed at ``case_dir``. Non-blocking."""
+def launch_tool(
+    *, tool_label: str, module_name: str, executable_path: str, case_dir: Path
+) -> LaunchResult:
+    """Spawn ``module_name`` pointed at ``case_dir``. Non-blocking."""
     command = build_command(
-        executable_path=inscription_path,
-        module_name="inscription",
+        executable_path=executable_path,
+        module_name=module_name,
         case_dir=case_dir,
     )
-    return _spawn(command, tool_label="Inscription", case_dir=case_dir)
-
-
-def launch_caseguide(*, caseguide_path: str, case_dir: Path) -> LaunchResult:
-    """Spawn CaseGuide pointed at ``case_dir``. Non-blocking."""
-    command = build_command(
-        executable_path=caseguide_path,
-        module_name="caseguide",
-        case_dir=case_dir,
-    )
-    return _spawn(command, tool_label="CaseGuide", case_dir=case_dir)
+    return _spawn(command, tool_label=tool_label, case_dir=case_dir)

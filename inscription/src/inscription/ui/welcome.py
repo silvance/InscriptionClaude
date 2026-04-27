@@ -29,8 +29,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inscription import __version__
 from inscription.storage import list_sessions
-from inscription.version import __version__
 
 if TYPE_CHECKING:
     from pathlib import Path

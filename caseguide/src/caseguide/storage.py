@@ -13,15 +13,17 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from pathlib import Path
-from typing import overload
 
 from caseguide.model import (
     PRIORITY_RECOMMENDED,
     SUGGESTIONS_SCHEMA_VERSION,
     Suggestion,
     SuggestionsDocument,
+    coerce_bool,
+    coerce_int,
+    parse_iso,
+    string_list,
     utcnow,
 )
 
@@ -134,12 +136,12 @@ def _from_json(raw: dict[str, object]) -> SuggestionsDocument:
     if not isinstance(suggestions_raw, list):
         suggestions_raw = []
     return SuggestionsDocument(
-        schema_version=_coerce_int(
+        schema_version=coerce_int(
             raw.get("schema_version", 1), default=SUGGESTIONS_SCHEMA_VERSION
         ),
-        generated_at=_parse_iso(raw.get("generated_at"), default=utcnow()),
+        generated_at=parse_iso(raw.get("generated_at"), default=utcnow()) or utcnow(),
         scope_summary=str(raw.get("scope_summary", "")),
-        playbooks=_string_list(raw.get("playbooks")),
+        playbooks=string_list(raw.get("playbooks")),
         suggestions=[
             _suggestion_from_json(item)
             for item in suggestions_raw
@@ -157,55 +159,8 @@ def _suggestion_from_json(raw: dict[str, object]) -> Suggestion:
         priority=str(raw.get("priority", PRIORITY_RECOMMENDED)),
         expected_result=str(raw.get("expected_result", "")),
         rationale=str(raw.get("rationale", "")),
-        references=_string_list(raw.get("references")),
-        depends_on=_string_list(raw.get("depends_on")),
-        completed=_coerce_bool(raw.get("completed"), default=False),
-        completed_at=_parse_iso(raw.get("completed_at"), default=None),
+        references=string_list(raw.get("references")),
+        depends_on=string_list(raw.get("depends_on")),
+        completed=coerce_bool(raw.get("completed"), default=False),
+        completed_at=parse_iso(raw.get("completed_at"), default=None),
     )
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if item is not None]
-
-
-def _coerce_int(value: object, *, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
-
-
-@overload
-def _parse_iso(value: object, *, default: datetime) -> datetime: ...
-@overload
-def _parse_iso(value: object, *, default: None) -> datetime | None: ...
-
-
-def _parse_iso(value: object, *, default: datetime | None) -> datetime | None:
-    """Parse an ISO 8601 timestamp; return ``default`` if absent or invalid.
-
-    Callers pick the fallback explicitly: ``default=utcnow()`` for
-    fields like ``generated_at`` where the document needs *some*
-    timestamp; ``default=None`` for optional fields like
-    ``completed_at`` where a missing value means "not yet".
-    """
-    if not isinstance(value, str) or not value:
-        return default
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return default
-
-
-def _coerce_bool(value: object, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    return default

@@ -64,15 +64,19 @@ class _Action:
 
 def _render_click(event: RawEvent, resolved: ResolvedElement | None) -> str:
     verb = "Double-click" if event.kind is EventKind.DOUBLE_CLICK else "Click"
-    if resolved and resolved.confidence >= HIGH_CONFIDENCE and resolved.name:
-        # UIA "Text" elements are static labels, not interactive controls.
-        # Clicks that resolve to them are almost always positional accidents
-        # (e.g. clicking near a label or on the recording tool's own UI).
-        # Fall through to the lower-confidence window-title path instead.
-        if resolved.control_type != "Text":
-            control = resolved.control_type or "item"
-            in_window = _in_window_clause(event, resolved)
-            return f"{verb} the {resolved.name!r} {control}{in_window}.".replace("''", "'")
+    # UIA "Text" elements are static labels, not interactive controls.
+    # Clicks that resolve to them are almost always positional accidents
+    # (e.g. clicking near a label or on the recording tool's own UI).
+    # Fall through to the lower-confidence window-title path instead.
+    if (
+        resolved
+        and resolved.confidence >= HIGH_CONFIDENCE
+        and resolved.name
+        and resolved.control_type != "Text"
+    ):
+        control = resolved.control_type or "item"
+        in_window = _in_window_clause(event, resolved)
+        return f"{verb} the {resolved.name!r} {control}{in_window}.".replace("''", "'")
     if event.window_title:
         return f"{verb} in the {event.window_title} window."
     return f"{verb} the mouse."

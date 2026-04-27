@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inscription import __version__
 from inscription.capture import (
     CaptureEngine,
     ClickSource,
@@ -66,7 +67,6 @@ from inscription.ui.session_dialogs import SessionListDialog
 from inscription.ui.settings_dialog import SettingsDialog
 from inscription.ui.verify_dialog import IntegrityResultDialog
 from inscription.verify import verify_session_integrity
-from inscription.version import __version__
 
 if TYPE_CHECKING:
     from collections.abc import Callable

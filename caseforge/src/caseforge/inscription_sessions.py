@@ -9,9 +9,7 @@ the manifest carries everything the case home page needs.
 
 The manifest schema lives in Inscription
 (``inscription/storage/manifest.py``) and is part of the integration
-contract documented in ``inscription/docs/integration.md``. CaseForge
-tolerates missing or extra fields so a future Inscription bump that
-adds keys doesn't break this view.
+contract documented in ``inscription/docs/integration.md``.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from caseforge.model import utcnow
+from caseforge.model import coerce_int, parse_iso, parse_optional_iso
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +59,7 @@ def list_inscription_sessions(case_dir: Path) -> list[InscriptionSession]:
             continue
         manifest_path = child / MANIFEST_FILENAME
         # ``is_file`` rejects symlinks-to-directories and a directory
-        # that someone substituted for the manifest file — both would
-        # be unhandled OS errors inside ``_parse_manifest``.
+        # that someone substituted for the manifest file.
         if not manifest_path.is_file():
             continue
         parsed = _parse_manifest(manifest_path, slug=child.name)
@@ -84,42 +81,9 @@ def _parse_manifest(path: Path, *, slug: str) -> InscriptionSession | None:
     return InscriptionSession(
         slug=slug,
         name=str(raw.get("name") or slug),
-        started_at=_parse_iso(raw.get("started_at")),
-        ended_at=_parse_optional_iso(raw.get("ended_at")),
-        event_count=_coerce_int(raw.get("event_count"), default=0),
-        step_count=_coerce_int(raw.get("step_count"), default=0),
+        started_at=parse_iso(raw.get("started_at")),
+        ended_at=parse_optional_iso(raw.get("ended_at")),
+        event_count=coerce_int(raw.get("event_count"), default=0),
+        step_count=coerce_int(raw.get("step_count"), default=0),
         path=str(path.parent.resolve()),
     )
-
-
-def _parse_iso(value: object) -> datetime:
-    if not isinstance(value, str) or not value:
-        return utcnow()
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return utcnow()
-
-
-def _parse_optional_iso(value: object) -> datetime | None:
-    if value is None or value == "":
-        return None
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _coerce_int(value: object, *, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default

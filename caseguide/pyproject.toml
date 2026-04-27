@@ -12,6 +12,9 @@ license = { text = "Proprietary" }
 authors = [{ name = "Silvance" }]
 dependencies = [
     "PySide6>=6.7",
+    # Shared LLM client + JSON helpers. Editable-installed from the
+    # sibling suite_common/ directory; see SETUP.md.
+    "suite_common",
 ]
 
 [project.optional-dependencies]

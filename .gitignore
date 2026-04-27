@@ -28,6 +28,16 @@ inscription/**/__pycache__/
 inscription/*.egg-info/
 inscription/src/*.egg-info/
 
+suite_common/.venv/
+suite_common/dist/
+suite_common/build/
+suite_common/.pytest_cache/
+suite_common/.mypy_cache/
+suite_common/.ruff_cache/
+suite_common/**/__pycache__/
+suite_common/*.egg-info/
+suite_common/src/*.egg-info/
+
 # Suite-root virtualenv used by the recommended setup recipe (one
 # venv that holds all three apps installed editable).
 .venv/

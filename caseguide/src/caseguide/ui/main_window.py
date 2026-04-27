@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from caseguide import __version__
 from caseguide.config import Config
 from caseguide.model import Suggestion, SuggestionsDocument, utcnow
 from caseguide.ui.controller import CaseGuideController
@@ -36,7 +37,6 @@ from caseguide.ui.scope_panel import ScopePanel
 from caseguide.ui.settings_dialog import SettingsDialog
 from caseguide.ui.suggestions_panel import SuggestionsPanel
 from caseguide.ui.widgets import empty_state
-from caseguide.version import __version__
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QCloseEvent

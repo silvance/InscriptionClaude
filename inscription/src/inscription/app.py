@@ -10,12 +10,12 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
+from inscription import __version__
 from inscription.logging_setup import configure_logging
 from inscription.paths import ensure_dirs
 from inscription.ui.app_icon import build_app_icon
 from inscription.ui.main_window import MainWindow
 from inscription.ui.style import apply_global_style
-from inscription.version import __version__
 
 logger = logging.getLogger(__name__)
 

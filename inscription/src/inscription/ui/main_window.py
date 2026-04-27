@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from inscription import __version__
 from inscription.config import Config
 from inscription.ui.app_icon import build_app_icon
 from inscription.ui.controller import SessionController
@@ -28,7 +29,6 @@ from inscription.ui.recorder_bar import RecorderBar
 from inscription.ui.tray import SystemTrayController, quit_application
 from inscription.ui.welcome import WelcomePage
 from inscription.ui.workspace import SessionWorkspaceWidget
-from inscription.version import __version__
 
 if TYPE_CHECKING:
     from pathlib import Path

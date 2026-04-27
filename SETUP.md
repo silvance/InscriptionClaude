@@ -1,9 +1,13 @@
 # Suite setup — Windows (PowerShell)
 
-This repo contains three tools that work together:
+> Building a portable bundle for an offline / air-gapped workstation?
+> See **`AIR_GAPPED.md`** instead.
 
-| Tool | What it does |
+This repo contains three tools that share a tiny common package:
+
+| Package | What it does |
 |---|---|
+| **suite_common** | Shared LLM client + JSON-tolerant coercion helpers (no UI; depended on by all three apps) |
 | **Inscription** | Capture a Windows workflow; generate an annotated step guide |
 | **CaseForge** | Case intake, chain-of-custody, and report generation |
 | **CaseGuide** | LLM-assisted exam coach that suggests next actions |
@@ -20,9 +24,11 @@ from the **repo root** in a PowerShell terminal:
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# 2. Upgrade pip, then install all three tools in editable mode
+# 2. Upgrade pip, then install everything in editable mode.
+#    suite_common comes first so it's on PYTHONPATH when the others
+#    resolve their dependencies.
 python -m pip install --upgrade pip
-python -m pip install -e inscription -e caseforge -e caseguide
+python -m pip install -e suite_common -e inscription[dev] -e caseforge[dev] -e caseguide[dev]
 
 # 3. Verify all three entry points are reachable
 python -m inscription --help
@@ -57,11 +63,12 @@ the Python extension reads `.venv\` from the workspace root.
 ```powershell
 .venv\Scripts\Activate.ps1
 
-# All three tools
-pytest inscription/tests caseguide/tests caseforge/tests -v
-
-# Individual tool
-pytest inscription/tests -v
+# Each suite — pytest test discovery doesn't span sibling packages, so
+# run them independently:
+pushd suite_common; pytest tests -v; popd
+pushd inscription; pytest tests -v; popd
+pushd caseforge; pytest tests -v; popd
+pushd caseguide; pytest tests -v; popd
 ```
 
 ---
