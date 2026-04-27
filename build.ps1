@@ -55,7 +55,12 @@ function Invoke-Build {
             Write-Host "  Removing dist\..." -ForegroundColor Yellow
             Remove-Item -Recurse -Force "dist"
         }
-        pyinstaller "packaging\$SpecName" --noconfirm
+        # Invoke through `python -m` so we don't depend on the
+        # pip-installed Scripts directory being on PATH. Bare `pyinstaller`
+        # works in a developer venv but trips on bare GitHub-Actions
+        # Windows runners where Scripts\ may not be picked up by
+        # PowerShell at the time this runs.
+        python -m PyInstaller "packaging\$SpecName" --noconfirm
         if ($LASTEXITCODE -ne 0) {
             throw "PyInstaller exited with code $LASTEXITCODE for $Label"
         }
