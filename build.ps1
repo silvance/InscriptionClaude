@@ -61,7 +61,7 @@ function Invoke-Build {
         Pop-Location
     }
 
-    Write-Host "=== $Label: OK ===" -ForegroundColor Green
+    Write-Host "=== ${Label}: OK ===" -ForegroundColor Green
 }
 
 $builds = @(
