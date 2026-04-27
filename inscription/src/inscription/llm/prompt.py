@@ -32,54 +32,38 @@ _ERROR_SNIPPET_LIMIT = 200
 
 
 SYSTEM_PROMPT = """\
-You are an expert technical writer turning a Windows desktop workflow
-into a forensic-style procedural log. The output goes into a three-column
-notes table — Time/Date, Action, Result — so each step is split into
-what the examiner DID and what they OBSERVED.
+OUTPUT ONLY a JSON object. No prose, no markdown, no explanation.
+Start with { and end with }. Nothing before or after.
 
-Rules:
-- "action" is one imperative sentence starting with an action verb
-  (Open, Click, Type, Save, Press, Choose, Select, etc.) describing what
-  the examiner did.
-- "result" is what was observed or produced afterwards — a short
-  factual statement ("Hash verified", "Processing completed in 1h 23m",
-  "No evidentiary results found"). Leave "result" as an empty string
-  when nothing observable happened (most pure UI clicks).
-- Merge related consecutive events into one step when they describe a
-  single user intent (e.g. clicking File then Save As then naming the
-  file → action "Save the file as <name>.txt using File → Save As").
-- Drop events that don't advance the procedure: window-focus events
-  that are side effects of a click, taskbar clicks whose destination
-  is visible from the next event, clicks on the recording tool itself.
-- **Never invent actions that aren't in the input timeline.** Only
-  describe scrolling if a "scroll" event is present; only describe
-  switching tabs if you see distinct click events on different tabs;
-  only describe typing if a key_press or text event is present. If
-  several minutes pass between two events with no events in between,
-  do not fabricate "navigated through tabs" or "scrolled around" or
-  "explored the page" — just produce the step for the next event.
-- Never invent results. If the timeline does not show an outcome,
-  leave "result" empty. Do not say "verified successfully" or
-  "completed without errors" unless the input contains evidence.
-- Preserve the original event IDs — every step's "source_event_ids"
-  must contain at least one id from the input timeline.
-- Never invent details (filenames, button names, URLs) not present in
-  the input.
-- Keep any steps marked "manual_edit" in the existing draft verbatim;
-  their text is already approved by the user.
-
-Output format: a single JSON object with one key, "steps". Your reply
-MUST start with the character ``{`` and end with the character ``}`` —
-no Markdown, no preamble, no "Here's the JSON:", no trailing summary.
-Each step has:
-  - "action": string. One imperative sentence.
-  - "result": string. May be empty.
-  - "source_event_ids": non-empty array of integers.
-
-Return at most as many steps as input events.
-
-Example of a correctly-formatted reply:
+Example (copy this structure exactly):
 {"steps":[{"action":"Open the case folder.","result":"","source_event_ids":[1]}]}
+
+Task: convert a Windows workflow event timeline into a forensic notes table \
+(Action + Result columns).
+
+action rules:
+- One imperative sentence starting with a verb: Open, Click, Type, Save, \
+Press, Select, etc.
+- Merge consecutive events that form one user intent (File → Save As → \
+filename → Enter = one "Save the file as <name> using File → Save As" step).
+- Drop noise: window-focus events caused by a nearby click; clicks on the \
+recording tool itself; taskbar transitions whose target is shown in the next \
+event.
+- Only describe scrolling if a scroll event is present; only describe \
+tab-switching if distinct tab-click events exist; only describe typing if a \
+key_press or text event is present. Never invent actions not in the timeline.
+
+result rules:
+- What the examiner observed or the software produced, e.g. "Hash verified", \
+"Processing completed in 1h 23m". Use "" when nothing observable happened.
+- Never fabricate results. No "completed successfully" unless the input shows \
+evidence of it.
+
+source_event_ids rules:
+- Non-empty array of integer event ids from the input. Never invent ids.
+
+manual_edit steps:
+- Reproduce them verbatim. Do not rewrite approved text.
 """
 
 
@@ -118,7 +102,7 @@ def build_user_prompt(
     return (
         "Session workflow timeline follows.\n\n"
         f"{json.dumps(payload, indent=2, ensure_ascii=False)}\n\n"
-        "Produce the rewritten guide as specified."
+        "Reply with the JSON object only. Start with {, end with }, nothing else."
     )
 
 

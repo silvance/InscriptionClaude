@@ -91,7 +91,7 @@ OpenAI-compatible chat-completions endpoint works.
 
 ```powershell
 # Install Ollama, then pull a model.
-ollama pull granite3.3:8b     # or gemma2:9b, llama3.1:8b, etc.
+ollama pull granite4.0:8b     # or llama3.1:8b, qwen2.5:7b-instruct, etc.
 ```
 
 Ollama exposes `http://localhost:11434/v1` automatically; that's the
