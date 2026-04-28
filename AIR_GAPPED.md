@@ -17,14 +17,15 @@ InscriptionSuite-Airgapped\
 ├── CaseForge\            ~150 MB    case intake + reporting
 ├── CaseGuide\            ~150 MB    LLM coach
 ├── ollama\               ~150 MB    bundled Ollama Windows runtime
-├── models\               ~15 GB     two model snapshots
+├── models\               ~14 GB     two model snapshots
 │   ├── blobs\            (sha256-* weight files)
 │   └── manifests\        (one per model:tag pulled)
-├── start-suite.ps1                  first-run launcher
+├── start-suite.ps1                  first-run launcher (asks which model
+│                                    to use this session)
 └── README.txt                       operator notes
 ```
 
-Total: **~16 GB**. Use a 32 GB USB drive or larger.
+Total: **~15 GB**. Use a 32 GB USB drive or larger.
 
 ---
 
@@ -37,11 +38,13 @@ A Windows 10/11 box with internet access during the build only.
 2. Install Ollama for Windows from <https://ollama.com/download/windows>.
 3. From any PowerShell window:
    ```powershell
-   ollama pull granite4.0:8b
    ollama pull gemma4:latest
+   ollama pull granite4:tiny-h
    ```
-   These are the defaults the apps point at. They take a while
-   (~15 GB combined download).
+   `gemma4:latest` is the shared default both Inscription and CaseGuide
+   point at (~10 GB). `granite4:tiny-h` ships as a smaller (~4 GB)
+   fallback the operator can switch to via `start-suite.ps1` on
+   workstations that can't fit gemma4 in memory.
 
 ---
 
@@ -77,7 +80,7 @@ dist\InscriptionSuite-Airgapped\
 .\scripts\package-airgapped.ps1 -SkipBuild
 
 # Different model set (only when you've changed the apps' DEFAULT_LLM_MODEL).
-.\scripts\package-airgapped.ps1 -Models granite3.3:8b
+.\scripts\package-airgapped.ps1 -Models gemma4:latest,granite4:tiny-h
 
 # Non-standard Ollama install.
 .\scripts\package-airgapped.ps1 `
@@ -119,6 +122,14 @@ Then it spawns `<bundle>\ollama\ollama.exe serve` in the background and
 polls `http://127.0.0.1:11434/api/tags` until it answers 200. After
 that, the apps reach Ollama via their normal default base URL
 (`http://localhost:11434/v1`) — no change to app config needed.
+
+When more than one model is bundled, the launcher walks
+`models\manifests\registry.ollama.ai\library\` to enumerate them, asks
+the operator which to use this session, and exports
+`SUITE_LLM_MODEL=<chosen>` before launching any app. Inscription and
+CaseGuide both honour that variable as their default — the user can
+still override per-app via Settings, where the model field is now an
+editable dropdown populated from `/v1/models`.
 
 Closing the launcher window stops the spawned Ollama process. The apps
 continue to run if launched, but their AI features will fail until you

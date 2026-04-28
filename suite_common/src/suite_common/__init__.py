@@ -23,6 +23,7 @@ from suite_common.llm import (
     LLMError,
     LLMRequestError,
     LLMResponseError,
+    list_available_models,
 )
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "LLMResponseError",
     "coerce_bool",
     "coerce_int",
+    "list_available_models",
     "parse_iso",
     "parse_optional_iso",
     "string_list",

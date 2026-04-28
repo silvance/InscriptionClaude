@@ -6,12 +6,18 @@ they can be inspected and edited outside the application when needed.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Final
 
 from PySide6.QtCore import QByteArray, QSettings
 
 from inscription.paths import CONFIG_FILE, WORKSPACE_DIR
+
+#: Env var the air-gapped launcher sets to share one model choice across
+#: the suite. Empty string is treated as "not set" so a stale unset
+#: shell variable doesn't accidentally override the bundled default.
+_ENV_SUITE_LLM_MODEL: Final = "SUITE_LLM_MODEL"
 
 _K_WINDOW_GEOMETRY: Final = "window/geometry"
 _K_WINDOW_STATE: Final = "window/state"
@@ -34,7 +40,18 @@ _K_MINI_DOCK_POSITION: Final = "tray/mini_dock_position"
 DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
 #: Small enough to run on a laptop, strong enough to rewrite a few dozen
 #: steps. Users with bigger hardware point at their preferred model.
-DEFAULT_LLM_MODEL: Final = "granite4.0:8b"
+DEFAULT_LLM_MODEL: Final = "gemma4:latest"
+
+
+def _bundled_default_model() -> str:
+    """Resolve the model the apps fall back to when the user hasn't picked one.
+
+    The air-gapped launcher sets ``SUITE_LLM_MODEL`` after asking the
+    operator which bundled model to use. Honour it so the launcher's
+    choice propagates to whichever app the user opens next, while still
+    yielding to an explicit per-user override saved via Settings.
+    """
+    return os.environ.get(_ENV_SUITE_LLM_MODEL, "").strip() or DEFAULT_LLM_MODEL
 DEFAULT_LLM_TIMEOUT_S: Final = 180.0
 
 
@@ -130,7 +147,7 @@ class Config:
 
     @property
     def llm_model(self) -> str:
-        return str(self._qs.value(_K_LLM_MODEL, DEFAULT_LLM_MODEL))
+        return str(self._qs.value(_K_LLM_MODEL, _bundled_default_model()))
 
     @llm_model.setter
     def llm_model(self, value: str) -> None:

@@ -25,19 +25,26 @@ The launcher will:
   1. Point Ollama at the .\models directory inside this folder.
   2. Start a local Ollama server on 127.0.0.1:11434.
   3. Wait until the server reports ready.
-  4. Show a small picker — pick the app you want to open.
+  4. If more than one model is bundled, ask which one the apps should
+     use this session.
+  5. Show a small picker — pick the app you want to open.
 
 Closing the picker stops the bundled Ollama server. Re-run start-suite.ps1
-any time to bring it back up.
+any time to bring it back up; the model question is asked again so you
+can switch without rebooting.
 
 Models bundled
 --------------
 
-  granite4.0:8b   Inscription's default for the AI rewrite step.
-  gemma4:latest   CaseGuide's default for suggestion refinement.
+  gemma4:latest    Shared default for both Inscription's AI rewrite step
+                   and CaseGuide's suggestion refinement (~10 GB).
+  granite4:tiny-h  Smaller fallback (~4 GB) for workstations that can't
+                   keep gemma4 resident in memory.
 
-Both are cached under .\models. The apps are pre-configured to talk to
-http://localhost:11434 — no further setup needed.
+Both are cached under .\models. The launcher asks which to use; the
+apps read the choice from the SUITE_LLM_MODEL env var. You can still
+override per app from Settings — the Model field is an editable
+dropdown populated from whatever Ollama lists.
 
 Troubleshooting
 ---------------

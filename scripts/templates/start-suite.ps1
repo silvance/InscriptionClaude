@@ -7,11 +7,14 @@
         1. Points Ollama at the bundled models directory.
         2. Starts the bundled Ollama server on 127.0.0.1:11434.
         3. Waits until /api/tags answers 200.
-        4. Opens a small picker so the operator can launch
+        4. If more than one model is bundled, asks which one the apps
+           should use this session and exports SUITE_LLM_MODEL.
+        5. Opens a small picker so the operator can launch
            Inscription, CaseForge, or CaseGuide.
 
     Quitting the picker stops the Ollama server. Re-run this script to
-    bring everything back up.
+    bring everything back up — the model question is asked once per run
+    so the operator can switch without a reboot.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -64,6 +67,52 @@ if (Test-OllamaUp) {
     Write-Host "Ollama ready." -ForegroundColor Green
 }
 
+# ------------------------------------------------------- pick a model
+# Walk the bundled manifest tree to find every model:tag the bundle
+# ships. The launcher exports SUITE_LLM_MODEL before launching the
+# apps so both Inscription and CaseGuide pick up the operator's choice.
+
+function Get-BundledModels {
+    $libRoot = Join-Path $Root "models\manifests\registry.ollama.ai\library"
+    if (-not (Test-Path $libRoot)) { return @() }
+    $found = @()
+    foreach ($nameDir in Get-ChildItem -Directory $libRoot -ErrorAction SilentlyContinue) {
+        foreach ($tagFile in Get-ChildItem -File $nameDir.FullName -ErrorAction SilentlyContinue) {
+            $found += "$($nameDir.Name):$($tagFile.Name)"
+        }
+    }
+    return $found | Sort-Object
+}
+
+$bundledModels = Get-BundledModels
+if ($bundledModels.Count -eq 0) {
+    Write-Host "No bundled models found under .\models — the apps will fall back to their built-in default." -ForegroundColor Yellow
+} elseif ($bundledModels.Count -eq 1) {
+    $env:SUITE_LLM_MODEL = $bundledModels[0]
+    Write-Host "Using bundled model: $($bundledModels[0])" -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host "Bundled models" -ForegroundColor Cyan
+    Write-Host "==============" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $bundledModels.Count; $i++) {
+        $marker = if ($i -eq 0) { " (default)" } else { "" }
+        Write-Host ("  [{0}] {1}{2}" -f ($i + 1), $bundledModels[$i], $marker)
+    }
+    Write-Host ""
+    $pick = Read-Host "Pick a model (Enter for default)"
+    $chosen = $bundledModels[0]
+    if ($pick) {
+        $idx = 0
+        if ([int]::TryParse($pick, [ref]$idx) -and $idx -ge 1 -and $idx -le $bundledModels.Count) {
+            $chosen = $bundledModels[$idx - 1]
+        } else {
+            Write-Host "Unknown selection — falling back to default." -ForegroundColor Yellow
+        }
+    }
+    $env:SUITE_LLM_MODEL = $chosen
+    Write-Host "Using bundled model: $chosen" -ForegroundColor Green
+}
+
 # ----------------------------------------------------------------- the menu
 
 $apps = @(
@@ -96,6 +145,8 @@ try {
             Write-Host "Missing $exe — bundle is incomplete." -ForegroundColor Red
             continue
         }
+        # SUITE_LLM_MODEL is already in the script's environment; Start-Process
+        # inherits it on Windows so each launched .exe sees the operator's choice.
         Start-Process -FilePath $exe
     }
 } finally {

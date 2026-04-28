@@ -7,12 +7,17 @@ expectation.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Final
 
 from PySide6.QtCore import QByteArray, QSettings
 
 from caseguide.paths import CONFIG_FILE
+
+#: Env var the air-gapped launcher sets to share one model choice across
+#: the suite. Empty string is treated as "not set".
+_ENV_SUITE_LLM_MODEL: Final = "SUITE_LLM_MODEL"
 
 _K_WINDOW_GEOMETRY: Final = "window/geometry"
 _K_WINDOW_STATE: Final = "window/state"
@@ -26,6 +31,15 @@ _K_RECENT_CASE_PATHS: Final = "browser/recent_case_paths"
 DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
 DEFAULT_LLM_MODEL: Final = "gemma4:latest"
 DEFAULT_LLM_TIMEOUT_S: Final = 180.0
+
+
+def _bundled_default_model() -> str:
+    """Resolve the model the apps fall back to when the user hasn't picked one.
+
+    The air-gapped launcher sets ``SUITE_LLM_MODEL`` after asking the
+    operator which bundled model to use.
+    """
+    return os.environ.get(_ENV_SUITE_LLM_MODEL, "").strip() or DEFAULT_LLM_MODEL
 
 
 class Config:
@@ -71,7 +85,7 @@ class Config:
 
     @property
     def llm_model(self) -> str:
-        return str(self._qs.value(_K_LLM_MODEL, DEFAULT_LLM_MODEL))
+        return str(self._qs.value(_K_LLM_MODEL, _bundled_default_model()))
 
     @llm_model.setter
     def llm_model(self, value: str) -> None:
