@@ -30,7 +30,7 @@ _K_RECENT_CASE_PATHS: Final = "browser/recent_case_paths"
 #: Defaults match Inscription's so a single Ollama instance serves both.
 DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
 DEFAULT_LLM_MODEL: Final = "gemma4:latest"
-DEFAULT_LLM_TIMEOUT_S: Final = 180.0
+DEFAULT_LLM_TIMEOUT_S: Final = 600.0
 
 
 def _bundled_default_model() -> str:
