@@ -8,7 +8,7 @@
         caseforge\dist\CaseForge\CaseForge.exe
         caseguide\dist\CaseGuide\CaseGuide.exe
 
-    Prerequisites — from the repo root, activate the shared venv then run:
+    Prerequisites -- from the repo root, activate the shared venv then run:
         .\.venv\Scripts\Activate.ps1
         python -m pip install -e suite_common -e inscription[dev] -e caseforge[dev] -e caseguide[dev]
         .\build.ps1

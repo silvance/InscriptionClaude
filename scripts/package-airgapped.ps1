@@ -3,18 +3,18 @@
     Produce a self-contained InscriptionSuite folder for air-gapped deployment.
 
 .DESCRIPTION
-    Output: dist\InscriptionSuite-Airgapped\ — copy the whole folder to a USB
+    Output: dist\InscriptionSuite-Airgapped\ -- copy the whole folder to a USB
     stick, drop it onto the air-gapped workstation, and double-click
     start-suite.ps1.
 
     The bundle contains:
-        Inscription\         — Inscription one-folder PyInstaller bundle
-        CaseForge\           — CaseForge one-folder bundle
-        CaseGuide\           — CaseGuide one-folder bundle
-        ollama\              — Bundled Ollama Windows runtime (ollama.exe + libs)
-        models\              — Pre-pulled Ollama model blobs and manifests
-        start-suite.ps1      — First-run launcher (starts Ollama, opens menu)
-        README.txt           — Operator notes for the destination machine
+        Inscription\         -- Inscription one-folder PyInstaller bundle
+        CaseForge\           -- CaseForge one-folder bundle
+        CaseGuide\           -- CaseGuide one-folder bundle
+        ollama\              -- Bundled Ollama Windows runtime (ollama.exe + libs)
+        models\              -- Pre-pulled Ollama model blobs and manifests
+        start-suite.ps1      -- First-run launcher (starts Ollama, opens menu)
+        README.txt           -- Operator notes for the destination machine
 
     Prerequisites on this (connected) machine:
         - Windows 10/11 with PowerShell.
@@ -111,7 +111,7 @@ foreach ($app in $apps) {
     if (-not (Test-Path $src)) {
         throw "Build output missing: $src. Re-run build.ps1 (drop -SkipBuild)."
     }
-    Write-Host "  Copying $($app.Name)…"
+    Write-Host "  Copying $($app.Name)..."
     Copy-Item -Recurse -Force $src (Join-Path $BundleRoot $app.Name)
 }
 
@@ -149,7 +149,7 @@ foreach ($m in $Models) {
     foreach ($layer in $manifest.layers) {
         if ($layer.digest) { [void]$digestsToCopy.Add($layer.digest) }
     }
-    Write-Host "  $m → manifest staged, $($manifest.layers.Count) layers referenced"
+    Write-Host "  $m -> manifest staged, $($manifest.layers.Count) layers referenced"
 }
 
 $blobCount = 0
