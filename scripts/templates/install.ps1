@@ -36,6 +36,12 @@
     its installer with /qb (basic UI). Skipped silently when no MSI
     is present.
 
+.PARAMETER SkipVerify
+    Skip the SHA-256 manifest check. Verifying ~15 GB takes 30-60s on
+    a typical workstation; the verify pass guards against a bad copy
+    off USB so it's worth running on first install. Subsequent
+    re-runs against the same bundle can use this to save time.
+
 .EXAMPLE
     .\install.ps1
     Default per-user install with a Start Menu shortcut.
@@ -53,7 +59,8 @@ param(
     [string]$InstallRoot = "$env:LOCALAPPDATA\Programs\InscriptionSuite",
     [switch]$Force,
     [switch]$DesktopShortcut,
-    [switch]$InstallPowerShell7
+    [switch]$InstallPowerShell7,
+    [switch]$SkipVerify
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +97,66 @@ if ($bundleResolved -ieq $installNormalised) {
 }
 if ($installNormalised -like ($bundleResolved + '\*') -or $bundleResolved -like ($installNormalised + '\*')) {
     throw "Source ($BundleSrc) and -InstallRoot ($InstallRoot) overlap. Pick a destination that is not a subdirectory of the bundle (and vice versa)."
+}
+
+# 1b. Verify SHA-256 manifest -----------------------------------------------
+# A USB transfer can occasionally truncate or corrupt a file; the
+# bundle ships with a manifest.json (sha256 of every file as written
+# by prepare-bundle.ps1) so we can detect that before copying onto
+# the target machine. Older bundles built before this feature have no
+# manifest -- fall through with a warning rather than a hard error.
+
+$manifestPath = Join-Path $BundleSrc "manifest.json"
+$versionPath  = Join-Path $BundleSrc "version.json"
+
+if ($SkipVerify) {
+    Write-Step "Skipping bundle integrity check (per -SkipVerify)"
+} elseif (-not (Test-Path $manifestPath)) {
+    Write-Step "No manifest.json in bundle -- skipping integrity check"
+    Write-Host "  (Bundles built before manifest support went in. Rebuild with prepare-bundle.ps1 to get one.)" -ForegroundColor Yellow
+} else {
+    Write-Step "Verifying bundle integrity (SHA-256)"
+    try {
+        $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    } catch {
+        throw "manifest.json is present but unreadable: $_"
+    }
+    $entries = $manifest.files.PSObject.Properties
+    $count = 0
+    $bad = @()
+    foreach ($entry in $entries) {
+        $relPath = $entry.Name
+        $expected = $entry.Value -replace '^sha256:', ''
+        $absPath = Join-Path $BundleSrc ($relPath -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $absPath)) {
+            $bad += "  missing: $relPath"
+            continue
+        }
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $absPath).Hash.ToLower()
+        if ($actual -ne $expected.ToLower()) {
+            $bad += "  hash mismatch: $relPath"
+        }
+        $count++
+    }
+    if ($bad.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Bundle integrity check failed:" -ForegroundColor Red
+        $bad | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        throw "Bundle is corrupt -- $($bad.Count) file(s) failed verification. Rebuild and re-copy onto the USB."
+    }
+    Write-Host "  OK ($count files verified)"
+}
+
+# 1c. Surface bundle version -------------------------------------------------
+if (Test-Path $versionPath) {
+    try {
+        $version = Get-Content -Raw -LiteralPath $versionPath | ConvertFrom-Json
+        $sha = if ($version.git_sha) { $version.git_sha.Substring(0, [Math]::Min(8, $version.git_sha.Length)) } else { "unknown" }
+        $built = if ($version.build_timestamp) { $version.build_timestamp } else { "unknown" }
+        Write-Host "  Bundle version: $sha (built $built)" -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  version.json present but unreadable; continuing." -ForegroundColor Yellow
+    }
 }
 
 # 2. Confirm + clear destination ---------------------------------------------

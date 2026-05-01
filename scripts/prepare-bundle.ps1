@@ -140,7 +140,71 @@ if ($IncludePowerShell7) {
     }
 }
 
-# 5. Copy to external drive --------------------------------------------------
+# 5. Write version.json + manifest.json -------------------------------------
+# Stamps the bundle with build provenance (git SHA + timestamp + model
+# list) and a SHA-256 manifest of every file. install.ps1 verifies the
+# manifest before copying onto the workstation so a bad USB transfer
+# fails loudly instead of producing a silently-corrupt install.
+
+Write-Step "Stamping version + writing SHA-256 manifest"
+
+$gitSha = ""
+$gitBranch = ""
+try {
+    $gitSha = (& git -C $RepoRoot rev-parse HEAD 2>$null).Trim()
+    $gitBranch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null).Trim()
+} catch {
+    # Not a git checkout (or git not on PATH). Stamp as "unknown" so
+    # the manifest is still useful, just less informative.
+}
+if (-not $gitSha) { $gitSha = "unknown" }
+if (-not $gitBranch) { $gitBranch = "unknown" }
+
+$buildTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+$versionPath = Join-Path $BundleSrc "version.json"
+$versionPayload = [ordered]@{
+    bundle_format_version = 1
+    build_timestamp       = $buildTimestamp
+    git_sha               = $gitSha
+    git_branch            = $gitBranch
+    models                = @($Models)
+}
+$versionPayload | ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath $versionPath -Encoding utf8
+
+# Hash every file in the bundle except manifest.json itself (chicken-
+# and-egg) and version.json (already finalised, will be hashed below).
+# Drive the walk off Get-ChildItem so we naturally pick up nested
+# files like models\blobs\sha256-* and Inscription\_internal\... .
+$manifestPath = Join-Path $BundleSrc "manifest.json"
+$files = Get-ChildItem -LiteralPath $BundleSrc -Recurse -File |
+    Where-Object { $_.FullName -ne $manifestPath } |
+    Sort-Object FullName
+
+$manifestEntries = [ordered]@{}
+$bundleRootLength = $BundleSrc.TrimEnd('\').Length + 1  # +1 for separator
+$hashed = 0
+foreach ($file in $files) {
+    $rel = $file.FullName.Substring($bundleRootLength).Replace('\', '/')
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLower()
+    $manifestEntries[$rel] = "sha256:$hash"
+    $hashed++
+}
+
+$manifestPayload = [ordered]@{
+    manifest_version = 1
+    git_sha          = $gitSha
+    created_at       = $buildTimestamp
+    files            = $manifestEntries
+}
+$manifestPayload | ConvertTo-Json -Depth 5 |
+    Set-Content -LiteralPath $manifestPath -Encoding utf8
+
+Write-Host "  version.json: git $gitSha (branch $gitBranch)"
+Write-Host "  manifest.json: $hashed files hashed"
+
+# 6. Copy to external drive --------------------------------------------------
 
 if ($Destination) {
     if (-not (Test-Path $Destination)) {
@@ -158,7 +222,7 @@ if ($Destination) {
     $finalPath = $BundleSrc
 }
 
-# 6. Report ------------------------------------------------------------------
+# 7. Report ------------------------------------------------------------------
 
 $totalBytes = (Get-ChildItem -Recurse -File $finalPath | Measure-Object -Property Length -Sum).Sum
 $totalGB = [math]::Round($totalBytes / 1GB, 2)

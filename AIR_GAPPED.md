@@ -27,6 +27,12 @@ InscriptionSuite-Airgapped\
 ├── start-suite.ps1                  daily launcher (called by the
 │                                    Start Menu shortcut after install,
 │                                    asks which model to use this session)
+├── version.json                     build provenance (git SHA, build
+│                                    timestamp, bundled model list)
+├── manifest.json                    SHA-256 of every file in the
+│                                    bundle -- install.ps1 verifies
+│                                    this before copying onto the
+│                                    workstation
 └── README.txt                       operator notes
 ```
 

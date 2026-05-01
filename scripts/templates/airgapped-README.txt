@@ -14,7 +14,15 @@ Contents
   CaseGuide\          LLM-assisted exam coach (next-action suggestions).
   ollama\             Local LLM runtime (Ollama).
   models\             Pre-staged model weights and manifests.
-  start-suite.ps1     First-run launcher (this is what you double-click).
+  install.ps1         One-shot installer (verifies integrity, copies the
+                      bundle, creates a Start Menu shortcut).
+  start-suite.ps1     Daily launcher (the Start Menu shortcut runs this).
+  version.json        Build provenance: git SHA, build timestamp, bundled
+                      model list. Useful for "which build is this?" later.
+  manifest.json       SHA-256 of every file. install.ps1 reads this and
+                      verifies the bundle before installing -- a bad USB
+                      transfer fails loudly instead of producing a silently
+                      corrupt install.
 
 To start
 --------
