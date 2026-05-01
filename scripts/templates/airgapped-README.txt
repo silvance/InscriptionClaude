@@ -19,15 +19,31 @@ Contents
 To start
 --------
 
-  Right-click  start-suite.ps1  and pick  "Run with PowerShell".
+  First time on this workstation:
+    Right-click  install.ps1  and pick  "Run with PowerShell".
+    The installer copies the bundle to
+        %LOCALAPPDATA%\Programs\InscriptionSuite\
+    and creates a Start Menu shortcut under
+        InscriptionSuite \ Inscription Suite.
+
+  Daily use after that:
+    Start Menu -> InscriptionSuite -> "Inscription Suite".
+
+  Quick test before installing (optional):
+    Right-click  start-suite.ps1  and pick  "Run with PowerShell".
+    Runs the launcher straight from this folder without copying
+    anything to the workstation. Useful when you just want to verify
+    the bundle is intact.
 
 The launcher will:
-  1. Point Ollama at the .\models directory inside this folder.
-  2. Start a local Ollama server on 127.0.0.1:11434.
-  3. Wait until the server reports ready.
-  4. If more than one model is bundled, ask which one the apps should
+  1. Re-launch itself elevated (one UAC prompt) so the UI-automation
+     resolver can read elevated forensic tools like AXIOM Examine.
+  2. Point Ollama at the .\models directory inside this folder.
+  3. Start a local Ollama server on 127.0.0.1:11434.
+  4. Wait until the server reports ready.
+  5. If more than one model is bundled, ask which one the apps should
      use this session.
-  5. Show a small picker -- pick the app you want to open.
+  6. Show a small picker -- pick the app you want to open.
 
 Closing the picker stops the bundled Ollama server. Re-run start-suite.ps1
 any time to bring it back up; the model question is asked again so you

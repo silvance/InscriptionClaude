@@ -20,8 +20,13 @@ InscriptionSuite-Airgapped\
 ├── models\               ~14 GB     two model snapshots
 │   ├── blobs\            (sha256-* weight files)
 │   └── manifests\        (one per model:tag pulled)
-├── start-suite.ps1                  first-run launcher (asks which model
-│                                    to use this session)
+├── install.ps1                      one-shot installer (run on first
+│                                    setup -- copies the bundle to a
+│                                    permanent location and creates a
+│                                    Start Menu shortcut)
+├── start-suite.ps1                  daily launcher (called by the
+│                                    Start Menu shortcut after install,
+│                                    asks which model to use this session)
 └── README.txt                       operator notes
 ```
 
@@ -121,20 +126,48 @@ dist\InscriptionSuite-Airgapped\
 
 ## Transferring to the air-gapped workstation
 
-1. Copy `dist\InscriptionSuite-Airgapped\` to a USB drive.
-2. On the offline workstation, copy the folder to anywhere with write
-   access (Desktop is fine).
-3. Right-click `start-suite.ps1` → **Run with PowerShell**.
+1. Plug the USB drive into the offline workstation.
+2. From inside `<USB>\InscriptionSuite-Airgapped\`, right-click
+   `install.ps1` → **Run with PowerShell**.
+3. The installer copies the bundle to
+   `%LOCALAPPDATA%\Programs\InscriptionSuite\` and creates a Start
+   Menu shortcut under `InscriptionSuite \ Inscription Suite`.
+4. From here on, launch via Start Menu → **Inscription Suite**.
+   (The shortcut runs the installed copy of `start-suite.ps1`, which
+   self-elevates for UIA visibility into elevated forensic tools.)
 
-If the workstation refuses to run the script with
-`UnauthorizedAccess`, run this once as the local user:
+If the workstation refuses to run the script with `UnauthorizedAccess`,
+run this once as the local user:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-This is per-user, doesn't need administrator, and only affects this
-account.
+This is per-user, doesn't need administrator, and only affects this account.
+
+### Installer flags
+
+```powershell
+# Default: per-user install at %LOCALAPPDATA%\Programs\InscriptionSuite,
+# Start Menu shortcut, no admin needed.
+.\install.ps1
+
+# Add a Desktop shortcut alongside the Start Menu one.
+.\install.ps1 -DesktopShortcut
+
+# Replace an existing install without prompting.
+.\install.ps1 -Force
+
+# System-wide install (right-click -> Run as administrator first).
+.\install.ps1 -InstallRoot "C:\Program Files\InscriptionSuite"
+
+# If the bundle was built with -IncludePowerShell7, also install PS 7.
+.\install.ps1 -InstallPowerShell7
+```
+
+Re-running `install.ps1` only replaces the binaries. User configuration
+(`%LOCALAPPDATA%\Inscription\`, `%LOCALAPPDATA%\CaseForge\`,
+`%LOCALAPPDATA%\CaseGuide\`) and saved cases are kept intact.
 
 ---
 

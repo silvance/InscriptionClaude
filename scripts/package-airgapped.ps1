@@ -165,15 +165,21 @@ foreach ($digest in $digestsToCopy) {
 }
 Write-Host "  Copied $blobCount unique blobs."
 
-# 7. Drop in the launcher script + README -----------------------------------
+# 7. Drop in the launcher script + installer + README ----------------------
 
-Write-Step "Writing start-suite.ps1 and README.txt"
+Write-Step "Writing start-suite.ps1, install.ps1, and README.txt"
 
 $startScript = Join-Path $PSScriptRoot "templates\start-suite.ps1"
 if (-not (Test-Path $startScript)) {
     throw "Launcher template missing at $startScript. The repository may be incomplete."
 }
 Copy-Item -Force $startScript (Join-Path $BundleRoot "start-suite.ps1")
+
+$installScript = Join-Path $PSScriptRoot "templates\install.ps1"
+if (-not (Test-Path $installScript)) {
+    throw "Installer template missing at $installScript. The repository may be incomplete."
+}
+Copy-Item -Force $installScript (Join-Path $BundleRoot "install.ps1")
 
 $readme = Join-Path $PSScriptRoot "templates\airgapped-README.txt"
 if (Test-Path $readme) {
