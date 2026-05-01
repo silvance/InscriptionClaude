@@ -52,7 +52,7 @@ def _bundled_default_model() -> str:
     yielding to an explicit per-user override saved via Settings.
     """
     return os.environ.get(_ENV_SUITE_LLM_MODEL, "").strip() or DEFAULT_LLM_MODEL
-DEFAULT_LLM_TIMEOUT_S: Final = 180.0
+DEFAULT_LLM_TIMEOUT_S: Final = 600.0
 
 
 class Config:
