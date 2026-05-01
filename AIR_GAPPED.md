@@ -50,7 +50,36 @@ A Windows 10/11 box with internet access during the build only.
 
 ## Building the bundle
 
-From the repo root, with the venv activated:
+### One-shot wrapper (recommended)
+
+`scripts\prepare-bundle.ps1` pulls the chosen models, runs `package-airgapped.ps1`, optionally fetches the latest PowerShell 7 MSI alongside it, and (with `-Destination`) copies the finished bundle to an external drive in one go. Typical use from the repo root with the venv activated:
+
+```powershell
+.venv\Scripts\Activate.ps1
+.\scripts\prepare-bundle.ps1 -Destination E:\
+```
+
+That stages everything into `E:\InscriptionSuite-Airgapped\` ready to carry. Useful flags:
+
+```powershell
+# Add the 70B fallback for the operator who's willing to wait on heavier rewrites.
+.\scripts\prepare-bundle.ps1 -Destination F:\ -Include70B
+
+# Override the model set entirely.
+.\scripts\prepare-bundle.ps1 -Models gemma4:latest,granite4:tiny-h -Destination E:\
+
+# Drop a PowerShell 7 MSI in the bundle for offline install on the workstation.
+.\scripts\prepare-bundle.ps1 -Destination E:\ -IncludePowerShell7
+
+# Already pulled the models and just want to rebuild + restage onto a new drive.
+.\scripts\prepare-bundle.ps1 -SkipPull -Destination E:\
+```
+
+Defaults target an RTX 3070 (8 GB VRAM) plus a Xeon / 128 GB RAM workstation: a fully GPU-resident `qwen2.5:7b-instruct-q5_K_M` paired with a partial-offload `qwen2.5:14b-instruct-q4_K_M`. Total bundle is ~15 GB; with `-Include70B` it grows to ~57 GB (plan for a 64 GB+ drive).
+
+### Manual flow
+
+If you want finer control, the underlying script is `scripts\package-airgapped.ps1`:
 
 ```powershell
 .venv\Scripts\Activate.ps1
@@ -62,7 +91,7 @@ The script will:
 1. Run `build.ps1` to produce the three PyInstaller one-folder bundles.
 2. Copy the bundled Ollama runtime into the staging folder.
 3. Read each requested model's manifest, follow it to the referenced
-   blobs, and copy *only those* into `models\` — your other locally
+   blobs, and copy *only those* into `models\` -- your other locally
    pulled models stay out of the bundle, keeping size predictable.
 4. Drop in `start-suite.ps1` and `README.txt`.
 5. Print the bundle path and total size when done.
