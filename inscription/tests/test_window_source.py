@@ -132,3 +132,103 @@ def test_capture_falls_back_when_rect_is_missing() -> None:
     # No rect → primary fallback path.
     assert cap.last_index == 1
     assert png == b"x"
+
+
+# --------------- announce process on first focus ----------------
+
+
+from inscription.capture.events import RawCaptureEvent  # noqa: E402, TC001
+from inscription.model import EventKind  # noqa: E402
+
+
+class _RecordingEngine:
+    """Catches every ``submit`` call so the source's emissions are inspectable."""
+
+    def __init__(self) -> None:
+        self.submitted: list[RawCaptureEvent] = []
+
+    def submit(self, event: RawCaptureEvent) -> None:
+        self.submitted.append(event)
+
+
+def _info_with_path(*, path: str | None, name: str = "axiom.exe") -> ForegroundInfo:
+    return ForegroundInfo(
+        window_title="AXIOM Examine",
+        process_name=name,
+        process_id=4242,
+        process_path=path,
+        hwnd=99,
+    )
+
+
+def test_first_focus_emits_marker_with_version() -> None:
+    src = WindowFocusSource(
+        inspector=_StubInspector(_info_with_path(path=r"C:\Magnet\axiom.exe")),
+        version_reader=lambda _path: "8.6.0.42301",
+    )
+    engine = _RecordingEngine()
+
+    src._announce_process_if_new(engine, _info_with_path(path=r"C:\Magnet\axiom.exe"))  # type: ignore[arg-type]
+
+    assert len(engine.submitted) == 1
+    marker = engine.submitted[0]
+    assert marker.kind is EventKind.MARKER
+    assert marker.text == "Foreground app: axiom.exe v8.6.0.42301"
+
+
+def test_repeat_focus_for_same_process_does_not_re_announce() -> None:
+    src = WindowFocusSource(
+        inspector=_StubInspector(_info_with_path(path=r"C:\Magnet\axiom.exe")),
+        version_reader=lambda _p: "8.6.0.42301",
+    )
+    engine = _RecordingEngine()
+
+    info = _info_with_path(path=r"C:\Magnet\axiom.exe")
+    src._announce_process_if_new(engine, info)  # type: ignore[arg-type]
+    src._announce_process_if_new(engine, info)  # type: ignore[arg-type]
+    src._announce_process_if_new(engine, info)  # type: ignore[arg-type]
+
+    assert len(engine.submitted) == 1
+
+
+def test_focus_with_unreadable_version_still_announces_name() -> None:
+    src = WindowFocusSource(
+        inspector=_StubInspector(_info_with_path(path=r"C:\foo.exe")),
+        version_reader=lambda _p: None,
+    )
+    engine = _RecordingEngine()
+
+    src._announce_process_if_new(engine, _info_with_path(path=r"C:\foo.exe", name="foo.exe"))  # type: ignore[arg-type]
+
+    assert engine.submitted[0].text == "Foreground app: foo.exe"
+
+
+def test_focus_without_process_path_emits_nothing() -> None:
+    """The non-Windows fallback inspector returns ``process_path=None`` --
+    we shouldn't fabricate a marker out of an unknown binary."""
+    src = WindowFocusSource(
+        inspector=_StubInspector(_info_with_path(path=None)),
+        version_reader=lambda _p: "x",  # would still return something
+    )
+    engine = _RecordingEngine()
+
+    src._announce_process_if_new(engine, _info_with_path(path=None))  # type: ignore[arg-type]
+
+    assert engine.submitted == []
+
+
+def test_focus_announces_each_distinct_process_once() -> None:
+    src = WindowFocusSource(
+        inspector=_StubInspector(_info_with_path(path=r"C:\a.exe")),
+        version_reader=lambda p: "1.0.0.0" if "a" in p else "2.0.0.0",
+    )
+    engine = _RecordingEngine()
+
+    src._announce_process_if_new(engine, _info_with_path(path=r"C:\a.exe", name="a.exe"))  # type: ignore[arg-type]
+    src._announce_process_if_new(engine, _info_with_path(path=r"C:\b.exe", name="b.exe"))  # type: ignore[arg-type]
+    src._announce_process_if_new(engine, _info_with_path(path=r"C:\a.exe", name="a.exe"))  # type: ignore[arg-type]
+
+    assert [e.text for e in engine.submitted] == [
+        "Foreground app: a.exe v1.0.0.0",
+        "Foreground app: b.exe v2.0.0.0",
+    ]

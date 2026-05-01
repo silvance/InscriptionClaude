@@ -26,8 +26,11 @@ from inscription.capture.engine import CaptureSource
 from inscription.capture.events import RawCaptureEvent
 from inscription.model import EventKind, utcnow
 from inscription.platform import create_screen_capturer, safe_close
+from inscription.platform.version import read_file_version
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from inscription.capture.engine import CaptureEngine
     from inscription.platform import (
         CapturedImage,
@@ -62,15 +65,22 @@ class WindowFocusSource(CaptureSource):
         inspector: ForegroundInspector,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
         auto_screenshot: bool = True,
+        version_reader: Callable[[str | None], str | None] = read_file_version,
     ) -> None:
         self._inspector = inspector
         self._interval = interval_s
         self._auto_screenshot = auto_screenshot
+        self._version_reader = version_reader
         self._engine: CaptureEngine | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._screen: ScreenCapturer | None = None
         self._last_identity: tuple[int | str, str] | None = None
+        # Process paths we've already announced this session. First focus
+        # of a new process emits a MARKER carrying its name + file
+        # version; subsequent focus events on the same process don't
+        # repeat the metadata.
+        self._announced_processes: set[str] = set()
 
     def start(self, engine: CaptureEngine) -> None:
         self._engine = engine
@@ -115,10 +125,11 @@ class WindowFocusSource(CaptureSource):
             return
         previous = self._last_identity
         self._last_identity = identity
-        # Ignore the very first observation — it's the window that was
+        # Ignore the very first observation -- it's the window that was
         # already active when recording started, not a transition.
         if previous is None:
             return
+        self._announce_process_if_new(engine, info)
         png, w, h = self._capture(info) if self._auto_screenshot else (None, 0, 0)
         engine.submit(
             RawCaptureEvent(
@@ -127,6 +138,36 @@ class WindowFocusSource(CaptureSource):
                 png_bytes=png,
                 png_width=w,
                 png_height=h,
+            )
+        )
+
+    def _announce_process_if_new(self, engine: CaptureEngine, info: ForegroundInfo) -> None:
+        """Emit a MARKER with process name + version on first focus.
+
+        Lets the timeline carry "Magnet AXIOM Examine v8.6.0.42301"
+        as a discrete, rendered step rather than burying it in the
+        WINDOW_FOCUS row -- the AI rewrite pass picks it up as
+        provenance and the exported notes include it verbatim.
+
+        Skipped silently when there's no executable path to read from
+        (non-Windows fallback inspector, or psutil refused) or when
+        we've already announced this binary in the current session.
+        """
+        path = info.process_path
+        if not path or path in self._announced_processes:
+            return
+        self._announced_processes.add(path)
+        version = self._version_reader(path)
+        process_name = info.process_name or path
+        if version:
+            text = f"Foreground app: {process_name} v{version}"
+        else:
+            text = f"Foreground app: {process_name}"
+        engine.submit(
+            RawCaptureEvent(
+                kind=EventKind.MARKER,
+                occurred_at=utcnow(),
+                text=text,
             )
         )
 
