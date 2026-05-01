@@ -5,11 +5,14 @@ Both tools resolve the same way:
 1. The explicit path from CaseForge's config (``inscription_path`` /
    ``caseguide_path``).
 2. The tool's exe on ``PATH``.
-3. ``python -m <module>`` in the same Python that's running CaseForge
+3. A sibling app folder relative to the running .exe — only when frozen
+   into the air-gapped PyInstaller bundle. Layout:
+   ``<bundle>\\Inscription\\Inscription.exe`` / ``CaseGuide\\CaseGuide.exe``.
+4. ``python -m <module>`` in the same Python that's running CaseForge
    (development fall-back).
 
 Returns a :class:`LaunchResult` describing what was tried and what
-ran. Failures don't raise — the UI wants a friendly message either way.
+ran. Failures don't raise -- the UI wants a friendly message either way.
 """
 
 from __future__ import annotations
@@ -34,12 +37,33 @@ class LaunchResult:
     tool_label: str = ""
 
 
+def _frozen_sibling_exe(module_name: str) -> Path | None:
+    """Find a sibling app's .exe in the air-gapped bundle, if we're frozen.
+
+    The PyInstaller spec emits each app under its own one-folder bundle,
+    and ``package-airgapped.ps1`` stages them as siblings under
+    ``InscriptionSuite-Airgapped\\``. Resolving relative to the running
+    ``CaseForge.exe`` finds the matching ``Inscription\\Inscription.exe``
+    or ``CaseGuide\\CaseGuide.exe`` without the operator setting a path.
+    Returns ``None`` outside a PyInstaller bundle so dev runs fall through
+    to ``python -m <module>`` as before.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    bundle_root = Path(sys.executable).resolve().parent.parent
+    name_cap = module_name.capitalize()
+    candidate = bundle_root / name_cap / f"{name_cap}.exe"
+    if candidate.is_file():
+        return candidate
+    return None
+
+
 def build_command(*, executable_path: str, module_name: str, case_dir: Path) -> list[str]:
     """Compose the argv that should run a tool against ``case_dir``.
 
-    ``executable_path`` of ``""`` triggers the PATH-then-python-module
-    fall-through. Pure helper so unit tests can exercise the resolution
-    order without spawning subprocesses.
+    ``executable_path`` of ``""`` triggers the PATH-then-bundle-then-
+    python-module fall-through. Pure helper so unit tests can exercise
+    the resolution order without spawning subprocesses.
 
     An explicit path is validated to point at an existing regular file
     before being trusted; if it doesn't, we fall through to the PATH
@@ -59,6 +83,9 @@ def build_command(*, executable_path: str, module_name: str, case_dir: Path) -> 
     on_path = shutil.which(module_name) or shutil.which(f"{module_name}.exe")
     if on_path:
         return [on_path, "--case-dir", case_arg]
+    sibling = _frozen_sibling_exe(module_name)
+    if sibling is not None:
+        return [str(sibling), "--case-dir", case_arg]
     return [sys.executable, "-m", module_name, "--case-dir", case_arg]
 
 

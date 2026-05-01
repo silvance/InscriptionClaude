@@ -80,3 +80,52 @@ def test_whitespace_only_path_falls_through(tmp_path: Path) -> None:
             executable_path="   ", module_name="inscription", case_dir=tmp_path
         )
     assert cmd[:3] == [sys.executable, "-m", "inscription"]
+
+
+def test_frozen_bundle_resolves_to_sibling_exe(tmp_path: Path) -> None:
+    """In the air-gapped bundle, CaseForge.exe must launch the real
+    Inscription.exe rather than re-launching itself via the python-module
+    fallback (which PyInstaller silently ignores, opening a second
+    CaseForge window instead).
+    """
+    bundle_root = tmp_path / "InscriptionSuite-Airgapped"
+    (bundle_root / "CaseForge").mkdir(parents=True)
+    (bundle_root / "Inscription").mkdir()
+    (bundle_root / "CaseGuide").mkdir()
+    fake_caseforge = bundle_root / "CaseForge" / "CaseForge.exe"
+    fake_caseforge.write_bytes(b"")
+    fake_inscription = bundle_root / "Inscription" / "Inscription.exe"
+    fake_inscription.write_bytes(b"")
+
+    with (
+        patch("caseforge.launcher.sys.frozen", create=True, new=True),
+        patch("caseforge.launcher.sys.executable", str(fake_caseforge)),
+        patch("caseforge.launcher.shutil.which", return_value=None),
+    ):
+        cmd = build_command(
+            executable_path="", module_name="inscription", case_dir=tmp_path
+        )
+    assert cmd[0] == str(fake_inscription)
+    assert cmd[1:3] == ["--case-dir", str(tmp_path.resolve())]
+
+
+def test_frozen_bundle_with_missing_sibling_falls_through(tmp_path: Path) -> None:
+    """If the bundle is incomplete (e.g. a corrupted copy lost CaseGuide),
+    fall through to the python-module path rather than synthesising a
+    nonexistent .exe path that Popen would then crash on.
+    """
+    bundle_root = tmp_path / "InscriptionSuite-Airgapped"
+    (bundle_root / "CaseForge").mkdir(parents=True)
+    fake_caseforge = bundle_root / "CaseForge" / "CaseForge.exe"
+    fake_caseforge.write_bytes(b"")
+    # No Inscription/Inscription.exe present.
+
+    with (
+        patch("caseforge.launcher.sys.frozen", create=True, new=True),
+        patch("caseforge.launcher.sys.executable", str(fake_caseforge)),
+        patch("caseforge.launcher.shutil.which", return_value=None),
+    ):
+        cmd = build_command(
+            executable_path="", module_name="inscription", case_dir=tmp_path
+        )
+    assert cmd[:3] == [str(fake_caseforge), "-m", "inscription"]
