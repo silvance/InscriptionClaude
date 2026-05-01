@@ -53,6 +53,15 @@ def test_system_prompt_anchors_the_role() -> None:
     assert "do not invent" in text or "never invent" in text
 
 
+def test_system_prompt_names_the_forensic_context() -> None:
+    """The exam context (digital forensics, disclosure / court risk)
+    should land early so the model treats output as procedural log
+    rather than casual chat."""
+    head = SYSTEM_PROMPT[:400].lower()
+    assert "forensic" in head
+    assert "examiner" in head
+
+
 def test_user_prompt_carries_scope_and_drafts() -> None:
     scope = CaseScope(exam_type="CI", primary_tool="axiom")
     prompt = build_user_prompt(scope=scope, drafts=_drafts())
