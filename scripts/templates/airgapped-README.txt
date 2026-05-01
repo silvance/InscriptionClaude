@@ -1,4 +1,4 @@
-Inscription suite — air-gapped bundle
+Inscription suite -- air-gapped bundle
 =====================================
 
 This folder is a self-contained install of three forensic tools plus the
@@ -27,7 +27,7 @@ The launcher will:
   3. Wait until the server reports ready.
   4. If more than one model is bundled, ask which one the apps should
      use this session.
-  5. Show a small picker — pick the app you want to open.
+  5. Show a small picker -- pick the app you want to open.
 
 Closing the picker stops the bundled Ollama server. Re-run start-suite.ps1
 any time to bring it back up; the model question is asked again so you
@@ -43,7 +43,7 @@ Models bundled
 
 Both are cached under .\models. The launcher asks which to use; the
 apps read the choice from the SUITE_LLM_MODEL env var. You can still
-override per app from Settings — the Model field is an editable
+override per app from Settings -- the Model field is an editable
 dropdown populated from whatever Ollama lists.
 
 Troubleshooting

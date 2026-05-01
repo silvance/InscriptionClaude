@@ -13,7 +13,7 @@
            Inscription, CaseForge, or CaseGuide.
 
     Quitting the picker stops the Ollama server. Re-run this script to
-    bring everything back up — the model question is asked once per run
+    bring everything back up -- the model question is asked once per run
     so the operator can switch without a reboot.
 #>
 
@@ -46,9 +46,9 @@ function Test-OllamaUp {
 
 $ourProcess = $null
 if (Test-OllamaUp) {
-    Write-Host "Ollama is already responding on 127.0.0.1:11434 — reusing it." -ForegroundColor Yellow
+    Write-Host "Ollama is already responding on 127.0.0.1:11434 -- reusing it." -ForegroundColor Yellow
 } else {
-    Write-Host "Starting bundled Ollama server…" -ForegroundColor Cyan
+    Write-Host "Starting bundled Ollama server..." -ForegroundColor Cyan
     $ourProcess = Start-Process -FilePath $ollamaExe `
         -ArgumentList "serve" `
         -WindowStyle Hidden `
@@ -86,7 +86,7 @@ function Get-BundledModels {
 
 $bundledModels = Get-BundledModels
 if ($bundledModels.Count -eq 0) {
-    Write-Host "No bundled models found under .\models — the apps will fall back to their built-in default." -ForegroundColor Yellow
+    Write-Host "No bundled models found under .\models -- the apps will fall back to their built-in default." -ForegroundColor Yellow
 } elseif ($bundledModels.Count -eq 1) {
     $env:SUITE_LLM_MODEL = $bundledModels[0]
     Write-Host "Using bundled model: $($bundledModels[0])" -ForegroundColor Green
@@ -106,7 +106,7 @@ if ($bundledModels.Count -eq 0) {
         if ([int]::TryParse($pick, [ref]$idx) -and $idx -ge 1 -and $idx -le $bundledModels.Count) {
             $chosen = $bundledModels[$idx - 1]
         } else {
-            Write-Host "Unknown selection — falling back to default." -ForegroundColor Yellow
+            Write-Host "Unknown selection -- falling back to default." -ForegroundColor Yellow
         }
     }
     $env:SUITE_LLM_MODEL = $chosen
@@ -124,7 +124,7 @@ $apps = @(
 try {
     while ($true) {
         Write-Host ""
-        Write-Host "Inscription suite — air-gapped" -ForegroundColor Cyan
+        Write-Host "Inscription suite -- air-gapped" -ForegroundColor Cyan
         Write-Host "==============================" -ForegroundColor Cyan
         foreach ($a in $apps) {
             Write-Host ("  [{0}] {1}" -f $a.Key, $a.Label)
@@ -142,7 +142,7 @@ try {
         }
         $exe = Join-Path $Root $picked.Exe
         if (-not (Test-Path $exe)) {
-            Write-Host "Missing $exe — bundle is incomplete." -ForegroundColor Red
+            Write-Host "Missing $exe -- bundle is incomplete." -ForegroundColor Red
             continue
         }
         # SUITE_LLM_MODEL is already in the script's environment; Start-Process
@@ -151,7 +151,7 @@ try {
     }
 } finally {
     if ($ourProcess -and -not $ourProcess.HasExited) {
-        Write-Host "Stopping bundled Ollama server…" -ForegroundColor Cyan
+        Write-Host "Stopping bundled Ollama server..." -ForegroundColor Cyan
         Stop-Process -Id $ourProcess.Id -Force -ErrorAction SilentlyContinue
     }
 }
