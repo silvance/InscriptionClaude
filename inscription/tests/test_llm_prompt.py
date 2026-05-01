@@ -94,6 +94,37 @@ def test_system_prompt_forbids_invented_actions() -> None:
     assert "tab" in text
 
 
+def test_system_prompt_anchors_forensic_role_up_front() -> None:
+    """The role and exam context should land in the first ~400 chars so
+    smaller models don't get distracted by output-format instructions
+    before they know what they're doing."""
+    head = SYSTEM_PROMPT[:400].lower()
+    assert "forensic" in head
+    assert "examiner" in head
+
+
+def test_system_prompt_lists_recognisable_tool_names() -> None:
+    """If the model doesn't know "Magnet AXIOM" is a forensic tool, it
+    won't render window titles like "Magnet AXIOM Process" with the
+    right vocabulary. Pin a representative subset so a future tidy-up
+    can't quietly drop them."""
+    text = SYSTEM_PROMPT.lower()
+    assert "magnet axiom" in text or "axiom" in text
+    assert "x-ways" in text
+    assert "cellebrite" in text
+
+
+def test_system_prompt_warns_against_fabricated_button_paths() -> None:
+    """Smaller models love to invent menu paths that "sound right"
+    (Tools → Verify Hashes, Files → Add Evidence). The prompt has
+    a hard rule against that; keep it."""
+    text = SYSTEM_PROMPT.lower()
+    assert "do not invent" in text
+    # The "button path / feature name" framing is what trips small
+    # models up most -- keep the specific phrasing pinned.
+    assert "button path" in text or "menu path" in text or "feature name" in text
+
+
 def test_parse_response_accepts_plain_json() -> None:
     body = json.dumps(
         {
