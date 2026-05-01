@@ -4,18 +4,49 @@
 
 .DESCRIPTION
     Lives at the root of the InscriptionSuite-Airgapped folder. It:
-        1. Points Ollama at the bundled models directory.
-        2. Starts the bundled Ollama server on 127.0.0.1:11434.
-        3. Waits until /api/tags answers 200.
-        4. If more than one model is bundled, asks which one the apps
+        1. Re-launches itself elevated if the operator started it from a
+           non-admin shell, so the spawned Ollama and the apps inherit
+           the higher integrity level.
+        2. Points Ollama at the bundled models directory.
+        3. Starts the bundled Ollama server on 127.0.0.1:11434.
+        4. Waits until /api/tags answers 200.
+        5. If more than one model is bundled, asks which one the apps
            should use this session and exports SUITE_LLM_MODEL.
-        5. Opens a small picker so the operator can launch
+        6. Opens a small picker so the operator can launch
            Inscription, CaseForge, or CaseGuide.
 
     Quitting the picker stops the Ollama server. Re-run this script to
     bring everything back up -- the model question is asked once per run
     so the operator can switch without a reboot.
+
+    Why elevate? Inscription's UIA resolver can't read the accessibility
+    tree of a more-privileged process (Windows blocks lower-IL inspection
+    of higher-IL processes by design). Many forensic tools -- AXIOM
+    Examine in particular -- run elevated, so an unelevated Inscription
+    sees only "Click in <window>" placeholders for every click inside
+    them. Re-launching as admin keeps the resolver effective.
 #>
+
+# ------------------------------------------------- self-elevate
+# UAC prompt fires once at session start; the spawned copy runs the
+# rest of this file with administrator rights. Skip the re-launch when
+# we're already elevated, otherwise we'd loop forever.
+
+$currentIdentity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "Re-launching as administrator (so UIA can see elevated apps)..." -ForegroundColor Yellow
+    try {
+        Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"" `
+            -WorkingDirectory $PSScriptRoot `
+            -Verb RunAs
+    } catch {
+        Write-Error "Elevation declined or unavailable. Re-run start-suite.ps1 from an admin shell, or right-click -> Run as administrator."
+        exit 1
+    }
+    exit 0
+}
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot

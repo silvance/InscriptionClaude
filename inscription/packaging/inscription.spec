@@ -85,6 +85,13 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Embed a Windows requireAdministrator manifest so a direct
+    # double-click on Inscription.exe (skipping start-suite.ps1) still
+    # gets the UAC prompt. The UIA resolver depends on running at the
+    # same or higher integrity level as the app it's inspecting -- an
+    # unelevated Inscription is blind to AXIOM Examine and any other
+    # forensic tool the operator launched as administrator.
+    uac_admin=True,
 )
 
 coll = COLLECT(
