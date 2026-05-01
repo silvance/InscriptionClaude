@@ -91,6 +91,52 @@ def test_round_trip_preserves_every_field(tmp_path: Path) -> None:
     assert loaded.scope.primary_tool == "axiom"
 
 
+def test_use_caseguide_round_trips(tmp_path: Path) -> None:
+    """The opt-in flag for CaseGuide-required validation persists to
+    case.json so the dialog re-checks the box on next open."""
+    case = _make_case()
+    case = dataclasses.replace(case, scope=dataclasses.replace(case.scope, use_caseguide=True))
+    target = create_case(workspace_root=tmp_path, case=case)
+    loaded = read_case(target)
+    assert loaded.scope.use_caseguide is True
+
+
+def test_use_caseguide_defaults_false_for_legacy_cases(tmp_path: Path) -> None:
+    """Older case.json files that predate the opt-in flag load with
+    use_caseguide=False so existing behaviour is preserved."""
+    case_dir = tmp_path / "no-flag"
+    case_dir.mkdir()
+    payload = {
+        "schema_version": 3,
+        "name": "Legacy no-flag",
+        "case_reference": "LNF-1",
+        "created_at": "2026-04-01T00:00:00+00:00",
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "examiner": {"name": "Alex", "organisation": "", "badge_id": ""},
+        "scope": {
+            "exam_type": "fraud",
+            "primary_tool": "axiom",
+            "device_classes": [],
+            "evidence_items": [],
+            "agencies": [],
+            "summary": "",
+            "notes": "",
+            # Note: no use_caseguide key.
+        },
+        "custody": {
+            "received_at": None,
+            "received_from": "",
+            "delivery_method": "",
+            "evidence_bag_ids": [],
+            "seal_intact": None,
+            "notes": "",
+        },
+    }
+    (case_dir / CASE_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+    loaded = read_case(case_dir)
+    assert loaded.scope.use_caseguide is False
+
+
 def test_v2_case_json_loads_with_default_primary_tool(tmp_path: Path) -> None:
     """A v2 case.json (no scope.primary_tool) opens with primary_tool='' and
     upgrades to v3 on next save."""

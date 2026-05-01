@@ -36,6 +36,29 @@ PRIMARY_TOOL_CHOICES: tuple[tuple[str, str], ...] = (
     ("other", "Other (specify in notes)"),
 )
 
+#: Investigation types CaseGuide's playbook matcher knows about. The
+#: id (left) is the value playbook ``applies_to.exam_types`` lists fire
+#: against; the label (right) is what the picker shows. Free-text is
+#: still allowed (the combo is editable) so an examiner can type a
+#: case-specific descriptor, but values not in this list won't activate
+#: any tool-tagged playbook -- so the picker also serves as the
+#: "supported vocabulary" hint.
+EXAM_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
+    ("", "(none / unspecified)"),
+    ("CI", "Criminal investigation (CI)"),
+    ("CSAM", "CSAM / child exploitation"),
+    ("ICAC", "ICAC (Internet Crimes Against Children)"),
+    ("child exploitation", "Child exploitation (other)"),
+    ("credential", "Credential theft / abuse"),
+    ("fraud", "Fraud"),
+    ("IP theft", "IP theft"),
+    ("exfiltration", "Data exfiltration"),
+    ("incident response", "Incident response"),
+    ("anti-forensics", "Anti-forensics"),
+    ("homicide", "Homicide"),
+    ("narcotics", "Narcotics / drug investigation"),
+)
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -56,6 +79,21 @@ def coerce_int(value: object, *, default: int) -> int:
             return int(value)
         except ValueError:
             return default
+    return default
+
+
+def coerce_bool(value: object, *, default: bool) -> bool:
+    """Tolerate JSON's quirks: bool / int / string forms all map sensibly.
+
+    Older case.json files written without a key get the ``default``;
+    string values like ``"true"`` / ``"True"`` / ``"1"`` count as True.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
     return default
 
 
@@ -126,13 +164,21 @@ class ExamScope:
     — examiners type whatever fits — but the data shape is reserved.
     """
 
-    exam_type: str = ""  # e.g. "CSAM possession", "fraud", "IP theft"
+    exam_type: str = ""  # one of EXAM_TYPE_CHOICES ids, or free text
     device_classes: list[str] = field(default_factory=list)
     evidence_items: list[str] = field(default_factory=list)
     agencies: list[str] = field(default_factory=list)
     primary_tool: str = ""  # one of PRIMARY_TOOL_CHOICES ids; "" = unspecified
     summary: str = ""
     notes: str = ""
+    #: When True, the case-edit dialog enforces that the fields
+    #: CaseGuide's playbook matcher uses (``primary_tool``,
+    #: ``exam_type``) are filled in before save. The flag is the
+    #: examiner's explicit signal: "I plan to use CaseGuide on this
+    #: case, please error out if the matcher would silently filter
+    #: every playbook." Cases written by older builds default to
+    #: False on load, preserving existing behaviour.
+    use_caseguide: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
