@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Pull models, build the InscriptionSuite air-gapped bundle, and (optionally)
@@ -68,6 +69,16 @@ $ErrorActionPreference = "Stop"
 $RepoRoot  = Split-Path -Parent $PSScriptRoot
 $BundleSrc = Join-Path $RepoRoot "dist\InscriptionSuite-Airgapped"
 
+# Force TLS 1.2 unconditionally. Windows Server 2012 R2 / 8.1 default
+# their .NET ServicePointManager to TLS 1.0, which github.com no
+# longer accepts -- any subsequent Invoke-RestMethod / Invoke-WebRequest
+# in this script (PowerShell 7 download, future GitHub fetches) would
+# fail with a cryptic "Could not create SSL/TLS secure channel" error.
+# Setting it once at the top is a no-op on modern Windows where 1.2 is
+# already the default, and a transparent fix on older boxes.
+[Net.ServicePointManager]::SecurityProtocol =
+    [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
 if ($Include70B -and ($Models -notcontains "llama3.3:70b-instruct-q4_K_M")) {
     $Models += "llama3.3:70b-instruct-q4_K_M"
 }
@@ -118,21 +129,22 @@ if (-not (Test-Path $BundleSrc)) {
 
 if ($IncludePowerShell7) {
     Write-Step "Fetching the latest PowerShell 7 MSI"
-    # Some Windows 10 boxes still default to TLS 1.0 -- GitHub's API
-    # rejects that. Forcing 1.2 makes the download work everywhere.
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     # Invoke-WebRequest's progress bar is so slow on PS 5.1 it dominates
     # the download time; suppress it for the duration of the fetch.
     $previousProgress = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
+        # -UseBasicParsing avoids the legacy IE rendering engine, which
+        # may not be initialised on Server Core or locked-down workstations
+        # and would otherwise throw "The response content cannot be parsed
+        # because the Internet Explorer engine is not available".
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest" -UseBasicParsing
         $asset = $release.assets | Where-Object { $_.name -like "PowerShell-*-win-x64.msi" } | Select-Object -First 1
         if (-not $asset) {
             throw "Could not locate a win-x64 MSI in the GitHub release manifest."
         }
         $dest = Join-Path $BundleSrc $asset.name
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dest
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dest -UseBasicParsing
         $sizeMB = [math]::Round($asset.size / 1MB, 1)
         Write-Host "  Saved $($asset.name) ($sizeMB MB)"
     } finally {

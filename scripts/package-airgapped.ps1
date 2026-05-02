@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Produce a self-contained InscriptionSuite folder for air-gapped deployment.

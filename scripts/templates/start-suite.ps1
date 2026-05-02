@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     First-run launcher for the air-gapped Inscription suite bundle.
