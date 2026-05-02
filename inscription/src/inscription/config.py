@@ -18,6 +18,11 @@ from inscription.paths import CONFIG_FILE, WORKSPACE_DIR
 #: the suite. Empty string is treated as "not set" so a stale unset
 #: shell variable doesn't accidentally override the bundled default.
 _ENV_SUITE_LLM_MODEL: Final = "SUITE_LLM_MODEL"
+#: Env var the air-gapped launcher sets to point apps at the bundled
+#: Ollama instance (which lives on a non-default port -- 11435 -- so
+#: it never collides with a system-wide Ollama). Same empty-string
+#: semantics as SUITE_LLM_MODEL.
+_ENV_SUITE_LLM_BASE_URL: Final = "SUITE_LLM_BASE_URL"
 
 _K_WINDOW_GEOMETRY: Final = "window/geometry"
 _K_WINDOW_STATE: Final = "window/state"
@@ -52,6 +57,20 @@ def _bundled_default_model() -> str:
     yielding to an explicit per-user override saved via Settings.
     """
     return os.environ.get(_ENV_SUITE_LLM_MODEL, "").strip() or DEFAULT_LLM_MODEL
+
+
+def _bundled_default_base_url() -> str:
+    """Resolve the LLM endpoint URL the apps fall back to.
+
+    The air-gapped launcher sets ``SUITE_LLM_BASE_URL`` to point at the
+    bundled Ollama on its dedicated non-default port (so the apps don't
+    accidentally talk to a system-wide Ollama listening on 11434).
+    Same precedence as ``_bundled_default_model``: env var beats the
+    hard-coded default but the user's QSettings choice still wins.
+    """
+    return os.environ.get(_ENV_SUITE_LLM_BASE_URL, "").strip() or DEFAULT_LLM_BASE_URL
+
+
 DEFAULT_LLM_TIMEOUT_S: Final = 600.0
 
 
@@ -139,7 +158,7 @@ class Config:
 
     @property
     def llm_base_url(self) -> str:
-        return str(self._qs.value(_K_LLM_BASE_URL, DEFAULT_LLM_BASE_URL))
+        return str(self._qs.value(_K_LLM_BASE_URL, _bundled_default_base_url()))
 
     @llm_base_url.setter
     def llm_base_url(self, value: str) -> None:
