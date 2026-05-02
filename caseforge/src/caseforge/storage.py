@@ -26,6 +26,7 @@ from caseforge.model import (
     CustodyRecord,
     ExaminerIdentity,
     ExamScope,
+    coerce_bool,
     coerce_int,
     parse_iso,
     parse_optional_iso,
@@ -273,6 +274,7 @@ def _to_json(case: Case) -> dict[str, object]:
             "primary_tool": case.scope.primary_tool,
             "summary": case.scope.summary,
             "notes": case.scope.notes,
+            "use_caseguide": case.scope.use_caseguide,
         },
         "custody": {
             "received_at": (
@@ -314,6 +316,7 @@ def _from_json(raw: dict[str, object]) -> Case:
             primary_tool=str(scope_raw.get("primary_tool", "")),
             summary=str(scope_raw.get("summary", "")),
             notes=str(scope_raw.get("notes", "")),
+            use_caseguide=coerce_bool(scope_raw.get("use_caseguide"), default=False),
         ),
         custody=CustodyRecord(
             received_at=parse_optional_iso(custody_raw.get("received_at")),

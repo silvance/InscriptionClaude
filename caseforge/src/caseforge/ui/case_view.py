@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTabWidget,
@@ -29,9 +31,12 @@ from caseforge.model import Case, ExaminerIdentity, ExamScope
 from caseforge.ui.custody_tab import CustodyTab
 from caseforge.ui.sessions_view import SessionsView
 from caseforge.ui.widgets import (
+    build_exam_type_combo,
     build_primary_tool_combo,
     display_label,
+    exam_type_value,
     primary_tool_value,
+    select_exam_type,
     select_primary_tool,
 )
 
@@ -142,13 +147,14 @@ class CaseView(QWidget):
             (self._examiner_name_edit, case.examiner.name),
             (self._examiner_org_edit, case.examiner.organisation),
             (self._examiner_badge_edit, case.examiner.badge_id),
-            (self._exam_type_edit, case.scope.exam_type),
             (self._device_classes_edit, _join_csv(case.scope.device_classes)),
             (self._evidence_items_edit, _join_csv(case.scope.evidence_items)),
             (self._agencies_edit, _join_csv(case.scope.agencies)),
         ):
             edit.setText(value)
+        select_exam_type(self._exam_type_combo, case.scope.exam_type)
         select_primary_tool(self._primary_tool_combo, case.scope.primary_tool)
+        self._use_caseguide_check.setChecked(case.scope.use_caseguide)
         self._summary_edit.setPlainText(case.scope.summary)
         self._notes_edit.setPlainText(case.scope.notes)
         self._custody_tab.set_record(case.custody)
@@ -209,7 +215,7 @@ class CaseView(QWidget):
 
     def _build_scope_tab(self) -> QWidget:
         page = QWidget(self)
-        self._exam_type_edit = QLineEdit(page)
+        self._exam_type_combo = build_exam_type_combo(page)
         self._primary_tool_combo = build_primary_tool_combo(page)
         self._device_classes_edit = QLineEdit(page)
         self._evidence_items_edit = QLineEdit(page)
@@ -218,14 +224,26 @@ class CaseView(QWidget):
         self._summary_edit.setMaximumHeight(80)
         self._notes_edit = QPlainTextEdit(page)
         self._notes_edit.setMaximumHeight(140)
+        self._use_caseguide_check = QCheckBox(
+            "This case will use CaseGuide for procedural guidance",
+            page,
+        )
+        self._use_caseguide_check.setToolTip(
+            "Enables CaseGuide playbook matching for this case. "
+            "Saving the case requires Exam type and Primary tool to be "
+            "set when this is checked, since the matcher silently filters "
+            "playbooks out when those fields are blank or off-vocabulary."
+        )
+
         form = QFormLayout()
-        form.addRow("Exam type", self._exam_type_edit)
+        form.addRow("Exam type", self._exam_type_combo)
         form.addRow("Primary tool", self._primary_tool_combo)
         form.addRow("Device classes", self._device_classes_edit)
         form.addRow("Evidence items", self._evidence_items_edit)
         form.addRow("Agencies", self._agencies_edit)
         form.addRow("Summary", self._summary_edit)
         form.addRow("Notes", self._notes_edit)
+        form.addRow("", self._use_caseguide_check)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addLayout(form)
@@ -236,6 +254,27 @@ class CaseView(QWidget):
     def _on_save(self) -> None:
         if self._case is None:
             return
+        exam_type = exam_type_value(self._exam_type_combo)
+        primary_tool = primary_tool_value(self._primary_tool_combo)
+        use_caseguide = self._use_caseguide_check.isChecked()
+        if use_caseguide:
+            missing: list[str] = []
+            if not exam_type:
+                missing.append("Exam type")
+            if not primary_tool:
+                missing.append("Primary tool")
+            if missing:
+                QMessageBox.warning(
+                    self,
+                    "CaseGuide fields incomplete",
+                    "These fields are required while "
+                    "'This case will use CaseGuide for procedural guidance' "
+                    "is checked, because the playbook matcher would silently "
+                    "filter every suggestion out otherwise:\n\n  - "
+                    + "\n  - ".join(missing)
+                    + "\n\nFill them in or uncheck the option.",
+                )
+                return
         updated = dataclasses.replace(
             self._case,
             name=self._name_edit.text().strip() or self._case.name,
@@ -246,13 +285,14 @@ class CaseView(QWidget):
                 badge_id=self._examiner_badge_edit.text().strip(),
             ),
             scope=ExamScope(
-                exam_type=self._exam_type_edit.text().strip(),
-                primary_tool=primary_tool_value(self._primary_tool_combo),
+                exam_type=exam_type,
+                primary_tool=primary_tool,
                 device_classes=_split_csv(self._device_classes_edit.text()),
                 evidence_items=_split_csv(self._evidence_items_edit.text()),
                 agencies=_split_csv(self._agencies_edit.text()),
                 summary=self._summary_edit.toPlainText().strip(),
                 notes=self._notes_edit.toPlainText().strip(),
+                use_caseguide=use_caseguide,
             ),
             custody=self._custody_tab.to_record(),
         )

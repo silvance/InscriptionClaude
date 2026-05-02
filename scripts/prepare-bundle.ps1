@@ -169,4 +169,7 @@ Write-Host "  Path: $finalPath" -ForegroundColor Green
 Write-Host "  Size: $totalGB GB" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next: take the folder to the air-gapped workstation and"
-Write-Host "right-click start-suite.ps1 -> Run with PowerShell."
+Write-Host "right-click install.ps1 -> Run with PowerShell. The installer"
+Write-Host "copies the bundle to %LOCALAPPDATA%\Programs\InscriptionSuite,"
+Write-Host "creates a Start Menu shortcut, and from then on the operator"
+Write-Host "launches the suite via Start Menu -> Inscription Suite."

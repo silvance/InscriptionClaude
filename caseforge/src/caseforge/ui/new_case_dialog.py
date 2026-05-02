@@ -9,12 +9,14 @@ can hit Save after typing the name.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QTabWidget,
     QVBoxLayout,
@@ -24,7 +26,14 @@ from PySide6.QtWidgets import (
 from caseforge.model import Case, CustodyRecord, ExaminerIdentity, ExamScope, utcnow
 from caseforge.templates import is_no_template, list_templates
 from caseforge.ui.custody_tab import CustodyTab
-from caseforge.ui.widgets import build_primary_tool_combo, primary_tool_value, select_primary_tool
+from caseforge.ui.widgets import (
+    build_exam_type_combo,
+    build_primary_tool_combo,
+    exam_type_value,
+    primary_tool_value,
+    select_exam_type,
+    select_primary_tool,
+)
 
 
 def _split_csv(text: str) -> list[str]:
@@ -60,7 +69,7 @@ class NewCaseDialog(QDialog):
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._build_case_tab(), "Case")
         self._tabs.addTab(self._build_examiner_tab(), "Examiner")
-        self._tabs.addTab(self._build_scope_tab(), "Scope")
+        self._scope_tab_index = self._tabs.addTab(self._build_scope_tab(), "Scope")
         self._tabs.addTab(self._custody_tab, "Custody")
 
         buttons = QDialogButtonBox(
@@ -143,8 +152,8 @@ class NewCaseDialog(QDialog):
 
     def _build_scope_tab(self) -> QWidget:
         page = QWidget(self)
-        self._exam_type_edit = QLineEdit(self._scope_defaults.exam_type, page)
-        self._exam_type_edit.setPlaceholderText("e.g. CSAM possession")
+        self._exam_type_combo = build_exam_type_combo(page)
+        select_exam_type(self._exam_type_combo, self._scope_defaults.exam_type)
 
         self._device_classes_edit = QLineEdit(_join_csv(self._scope_defaults.device_classes), page)
         self._device_classes_edit.setPlaceholderText(
@@ -172,6 +181,18 @@ class NewCaseDialog(QDialog):
         self._notes_edit.setPlaceholderText("Free-form intake notes for the examiner.")
         self._notes_edit.setMaximumHeight(120)
 
+        self._use_caseguide_check = QCheckBox(
+            "This case will use CaseGuide for procedural guidance",
+            page,
+        )
+        self._use_caseguide_check.setChecked(self._scope_defaults.use_caseguide)
+        self._use_caseguide_check.setToolTip(
+            "Enables CaseGuide playbook matching for this case. "
+            "Saving requires Exam type and Primary tool to be set when "
+            "this is checked, since the matcher silently filters playbooks "
+            "out otherwise."
+        )
+
         # Template picker drives all six fields below; selecting one
         # overwrites whatever the user has typed so far.
         self._templates = list_templates()
@@ -181,7 +202,7 @@ class NewCaseDialog(QDialog):
         self._template_combo.currentIndexChanged.connect(self._on_template_changed)
 
         template_hint = QLabel(
-            "Picking a template fills the fields below — edit freely after.",
+            "Picking a template fills the fields below -- edit freely after.",
             page,
         )
         template_hint.setProperty("muted", "true")
@@ -190,13 +211,14 @@ class NewCaseDialog(QDialog):
         form = QFormLayout()
         form.addRow("Apply template", self._template_combo)
         form.addRow("", template_hint)
-        form.addRow("Exam type", self._exam_type_edit)
+        form.addRow("Exam type", self._exam_type_combo)
         form.addRow("Primary tool", self._primary_tool_combo)
         form.addRow("Device classes", self._device_classes_edit)
         form.addRow("Evidence items", self._evidence_items_edit)
         form.addRow("Agencies", self._agencies_edit)
         form.addRow("Summary", self._summary_edit)
         form.addRow("Notes", self._notes_edit)
+        form.addRow("", self._use_caseguide_check)
 
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -212,13 +234,14 @@ class NewCaseDialog(QDialog):
         self._apply_scope(template.scope)
 
     def _apply_scope(self, scope: ExamScope) -> None:
-        self._exam_type_edit.setText(scope.exam_type)
+        select_exam_type(self._exam_type_combo, scope.exam_type)
         select_primary_tool(self._primary_tool_combo, scope.primary_tool)
         self._device_classes_edit.setText(_join_csv(scope.device_classes))
         self._evidence_items_edit.setText(_join_csv(scope.evidence_items))
         self._agencies_edit.setText(_join_csv(scope.agencies))
         self._summary_edit.setPlainText(scope.summary)
         self._notes_edit.setPlainText(scope.notes)
+        self._use_caseguide_check.setChecked(scope.use_caseguide)
 
     # ------------------------------------------------------------- accept
 
@@ -228,6 +251,31 @@ class NewCaseDialog(QDialog):
             self._tabs.setCurrentIndex(0)
             self._name_edit.setFocus()
             return
+        exam_type = exam_type_value(self._exam_type_combo)
+        primary_tool = primary_tool_value(self._primary_tool_combo)
+        use_caseguide = self._use_caseguide_check.isChecked()
+        if use_caseguide:
+            missing: list[str] = []
+            if not exam_type:
+                missing.append("Exam type")
+            if not primary_tool:
+                missing.append("Primary tool")
+            if missing:
+                # Jump the user to the Scope tab so the field that needs
+                # filling is right there, rather than a vague modal alert
+                # followed by them hunting for the tab.
+                self._tabs.setCurrentIndex(self._scope_tab_index)
+                QMessageBox.warning(
+                    self,
+                    "CaseGuide fields incomplete",
+                    "These fields are required while "
+                    "'This case will use CaseGuide for procedural guidance' "
+                    "is checked, because the playbook matcher would silently "
+                    "filter every suggestion out otherwise:\n\n  - "
+                    + "\n  - ".join(missing)
+                    + "\n\nFill them in or uncheck the option.",
+                )
+                return
         now = utcnow()
         self._draft = Case(
             name=name,
@@ -240,13 +288,14 @@ class NewCaseDialog(QDialog):
                 badge_id=self._examiner_badge_edit.text().strip(),
             ),
             scope=ExamScope(
-                exam_type=self._exam_type_edit.text().strip(),
-                primary_tool=primary_tool_value(self._primary_tool_combo),
+                exam_type=exam_type,
+                primary_tool=primary_tool,
                 device_classes=_split_csv(self._device_classes_edit.text()),
                 evidence_items=_split_csv(self._evidence_items_edit.text()),
                 agencies=_split_csv(self._agencies_edit.text()),
                 summary=self._summary_edit.toPlainText().strip(),
                 notes=self._notes_edit.toPlainText().strip(),
+                use_caseguide=use_caseguide,
             ),
             custody=self._custody_tab.to_record(),
         )

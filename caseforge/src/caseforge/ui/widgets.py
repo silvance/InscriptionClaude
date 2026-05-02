@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from caseforge.model import PRIMARY_TOOL_CHOICES
+from caseforge.model import EXAM_TYPE_CHOICES, PRIMARY_TOOL_CHOICES
 
 
 def build_primary_tool_combo(parent: QWidget | None = None) -> QComboBox:
@@ -53,6 +53,49 @@ def primary_tool_value(combo: QComboBox) -> str:
     """Return the stable id of the currently-selected primary tool."""
     data = combo.currentData()
     return str(data) if data is not None else ""
+
+
+def build_exam_type_combo(parent: QWidget | None = None) -> QComboBox:
+    """Editable combo box pre-populated with the supported exam-type tags.
+
+    Editable so an examiner can still type a case-specific descriptor
+    that isn't in the controlled vocabulary, but the dropdown surfaces
+    the values that actually fire CaseGuide playbooks -- a free-text
+    field tempted operators to type "PC Image" or similar that the
+    matcher silently filtered everything out on.
+    """
+    combo = QComboBox(parent)
+    combo.setEditable(True)
+    combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+    for value, label in EXAM_TYPE_CHOICES:
+        combo.addItem(label, value)
+    return combo
+
+
+def select_exam_type(combo: QComboBox, value: str) -> None:
+    """Set the combo to the entry whose stable id matches ``value``,
+    or fall back to displaying ``value`` verbatim when it isn't in
+    the controlled vocabulary (preserves cases written by older
+    builds where ``exam_type`` was a free-text field).
+    """
+    for index in range(combo.count()):
+        if combo.itemData(index) == value:
+            combo.setCurrentIndex(index)
+            return
+    combo.setEditText(value)
+
+
+def exam_type_value(combo: QComboBox) -> str:
+    """Return the canonical id of the selected entry, or the typed
+    text when the user has entered a free-text value not in the
+    vocabulary.
+    """
+    data = combo.currentData()
+    text = combo.currentText().strip()
+    if data is not None and combo.itemText(combo.currentIndex()) == combo.currentText():
+        # Selected an entry from the dropdown -- return its stable id.
+        return str(data) if data else ""
+    return text
 
 
 # -------------------------------------------------------- typography
