@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Install the air-gapped Inscription suite bundle to a permanent location
