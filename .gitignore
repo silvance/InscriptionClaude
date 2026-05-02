@@ -50,3 +50,12 @@ suite_common/src/*.egg-info/
 !.vscode/settings.json
 !.vscode/extensions.json
 
+
+# Local-only agent / MCP configuration files. They commonly carry
+# bearer tokens, so even if you don't use them today, ignoring them
+# defensively means a future `git add .` can't slip a credential in.
+.mcp.json
+.claude/
+CLAUDE.md
+.aider*
+.cursor/
