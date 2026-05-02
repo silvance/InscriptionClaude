@@ -11,6 +11,7 @@ from inscription.storage import (
     SessionNotFoundError,
     SessionRepository,
     list_sessions,
+    locking,
 )
 from inscription.storage.errors import StorageError
 
@@ -63,6 +64,25 @@ def test_lockfile_prevents_second_open(tmp_path) -> None:
             SessionRepository.open_existing(workspace_root=tmp_path, slug=slug)
     finally:
         repo.close()
+
+
+def test_lockfile_acquire_is_atomic(tmp_path) -> None:
+    """Direct test of locking.acquire's O_CREAT|O_EXCL semantics.
+
+    The previous implementation did exists() + later write_text(),
+    so two parallel acquire() calls with the same path could both
+    pass the existence check and both believe they hold the lock.
+    With O_EXCL the second create fails immediately.
+    """
+    lock_path = tmp_path / "session.lock"
+    locking.acquire(lock_path)
+    try:
+        # Second acquire on the same live lock must refuse rather than
+        # silently overwrite the holder's PID.
+        with pytest.raises(SessionLockedError):
+            locking.acquire(lock_path)
+    finally:
+        locking.release(lock_path)
 
 
 def test_list_sessions_returns_manifests(tmp_path) -> None:
