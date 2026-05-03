@@ -294,7 +294,9 @@ class SessionRepository:
             )
             self._commit(what="transaction")
             screenshot_id = cursor.lastrowid
-        assert screenshot_id is not None
+        if screenshot_id is None:
+            msg = "INSERT into screenshots did not return a row id"
+            raise StorageError(msg)
         return ScreenshotArtifact(
             id=screenshot_id,
             relative_path=relative_path,
@@ -328,7 +330,9 @@ class SessionRepository:
             )
             self._commit(what="transaction")
             element_id = cursor.lastrowid
-        assert element_id is not None
+        if element_id is None:
+            msg = "INSERT into resolved_elements did not return a row id"
+            raise StorageError(msg)
         return dataclasses.replace(element, id=element_id)
 
     def append_event(
@@ -377,7 +381,9 @@ class SessionRepository:
             )
             self._commit(what="transaction")
             event_id = cursor.lastrowid
-        assert event_id is not None
+        if event_id is None:
+            msg = "INSERT into raw_events did not return a row id"
+            raise StorageError(msg)
         return RawEvent(
             id=event_id,
             sequence=next_seq,
@@ -422,7 +428,9 @@ class SessionRepository:
                     ),
                 )
                 step_id = cursor.lastrowid
-                assert step_id is not None
+                if step_id is None:
+                    msg = "INSERT into draft_steps did not return a row id"
+                    raise StorageError(msg)
                 saved.append(dataclasses.replace(step, id=step_id, sequence=i))
             self._commit(what="transaction")
         return saved
@@ -458,7 +466,9 @@ class SessionRepository:
                 ),
             )
             new_id = cursor.lastrowid
-            assert new_id is not None
+            if new_id is None:
+                msg = "INSERT into draft_steps did not return a row id"
+                raise StorageError(msg)
             self._commit(what="transaction")
         return dataclasses.replace(step, id=new_id, sequence=next_sequence)
 
@@ -664,7 +674,9 @@ class SessionRepository:
                 ),
             )
             new_id = cursor.lastrowid
-            assert new_id is not None
+            if new_id is None:
+                msg = "INSERT into draft_steps (split tail) did not return a row id"
+                raise StorageError(msg)
 
             # Trim the original to just the first event; keep its text so
             # the user can edit each half independently.

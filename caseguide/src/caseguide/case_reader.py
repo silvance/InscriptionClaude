@@ -78,10 +78,16 @@ def read_case(case_dir: Path) -> CaseHandle:
         msg = f"{target}: top-level JSON must be an object"
         raise CaseReadError(msg)
 
-    examiner_raw = raw.get("examiner") if isinstance(raw.get("examiner"), dict) else {}
-    scope_raw = raw.get("scope") if isinstance(raw.get("scope"), dict) else {}
-    assert isinstance(examiner_raw, dict)
-    assert isinstance(scope_raw, dict)
+    # Narrow with explicit if-statements rather than `assert isinstance(...)`:
+    # `assert` is stripped under `python -O` (and similar build modes), and
+    # the explicit form gives the same static narrowing without relying on
+    # assert semantics at runtime.
+    examiner_raw = raw.get("examiner")
+    if not isinstance(examiner_raw, dict):
+        examiner_raw = {}
+    scope_raw = raw.get("scope")
+    if not isinstance(scope_raw, dict):
+        scope_raw = {}
 
     return CaseHandle(
         name=str(raw.get("name", "")),
