@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 import pytest
@@ -245,8 +246,9 @@ def test_parse_response_error_message_points_at_settings_for_pure_prose() -> Non
 def test_user_prompt_wraps_session_data_in_delimiters() -> None:
     """User-controlled content (window titles, typed text, manual-edit
     text) could include directive-like phrasing. The prompt builder
-    wraps the payload in <session_data> and tells the model explicitly
-    to treat the wrapped content as data, not instructions."""
+    wraps the payload in <session_data:NONCE> with a per-call random
+    nonce so an attacker can't forge the close tag, and tells the
+    model explicitly to treat the wrapped content as data."""
     prompt = build_user_prompt(
         session_name="Demo",
         events=[_event(event_id=1, resolved_id=10)],
@@ -258,9 +260,32 @@ def test_user_prompt_wraps_session_data_in_delimiters() -> None:
         },
         existing_steps=[],
     )
-    assert "<session_data>" in prompt
-    assert "</session_data>" in prompt
+    open_match = re.search(r"<session_data:([0-9a-f]{24})>", prompt)
+    assert open_match is not None, "open tag with nonce missing"
+    nonce = open_match.group(1)
+    assert f"</session_data:{nonce}>" in prompt
     assert "never as instructions" in prompt.lower()
+
+
+def test_user_prompt_uses_fresh_nonce_per_call() -> None:
+    """A fresh random nonce per call -- two prompts with identical
+    inputs should still differ in their delimiter tokens."""
+    kwargs = {
+        "session_name": "Demo",
+        "events": [_event(event_id=1, resolved_id=10)],
+        "resolved_by_id": {
+            10: ResolvedElement(
+                id=10, name="Save", control_type="Button",
+                confidence=0.9, method="uia", owner_process_name="notepad.exe",
+            ),
+        },
+        "existing_steps": [],
+    }
+    p1 = build_user_prompt(**kwargs)
+    p2 = build_user_prompt(**kwargs)
+    n1 = re.search(r"<session_data:([0-9a-f]{24})>", p1).group(1)
+    n2 = re.search(r"<session_data:([0-9a-f]{24})>", p2).group(1)
+    assert n1 != n2, "nonces must differ across calls"
 
 
 def test_user_prompt_neutralises_injection_in_window_title() -> None:
@@ -288,11 +313,14 @@ def test_user_prompt_neutralises_injection_in_window_title() -> None:
         resolved_by_id={},
         existing_steps=[],
     )
-    # Use rindex so we match the *actual* delimiters at the end of the
-    # prompt -- the preamble mentions the tags by name to teach the
-    # model what they are, so plain index() would land on those
-    # mentions instead.
-    open_idx = prompt.rindex("<session_data>")
-    close_idx = prompt.rindex("</session_data>")
+    # Pull the per-call nonce out of the open tag, then use rindex to
+    # find the *actual* data-wrapping delimiters at the end of the
+    # prompt -- the preamble names both tags (with the nonce) when
+    # explaining them, so plain index() lands on those mentions.
+    nonce_match = re.search(r"<session_data:([0-9a-f]{24})>", prompt)
+    assert nonce_match is not None
+    nonce = nonce_match.group(1)
+    open_idx = prompt.rindex(f"<session_data:{nonce}>")
+    close_idx = prompt.rindex(f"</session_data:{nonce}>")
     inj_idx = prompt.index(marker)
     assert open_idx < inj_idx < close_idx

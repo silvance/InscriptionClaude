@@ -182,14 +182,23 @@ Re-running `install.ps1` only replaces the binaries. User configuration
 The launcher sets two environment variables before starting Ollama:
 
 ```powershell
-$env:OLLAMA_MODELS = "<bundle>\models"
-$env:OLLAMA_HOST   = "127.0.0.1:11434"
+$env:OLLAMA_MODELS      = "<bundle>\models"
+$env:OLLAMA_HOST        = "127.0.0.1:11435"
+$env:SUITE_LLM_BASE_URL = "http://127.0.0.1:11435/v1"
 ```
 
+The launcher uses port **11435** rather than the Ollama default of
+11434 so the bundled instance never collides with or silently reuses
+a system-wide Ollama install on the same workstation -- in a forensic
+context, "did this rewrite come from our bundled model store?" needs
+to be unambiguous.
+
 Then it spawns `<bundle>\ollama\ollama.exe serve` in the background and
-polls `http://127.0.0.1:11434/api/tags` until it answers 200. After
-that, the apps reach Ollama via their normal default base URL
-(`http://localhost:11434/v1`) — no change to app config needed.
+polls `http://127.0.0.1:11435/api/tags` until it answers 200. The apps
+read `SUITE_LLM_BASE_URL` from the launcher's environment, so they
+target the bundled instance without any per-user config change. A
+user who's pointed Settings at a different endpoint keeps that choice
+(env var only fills the unset default).
 
 When more than one model is bundled, the launcher walks
 `models\manifests\registry.ollama.ai\library\` to enumerate them, asks

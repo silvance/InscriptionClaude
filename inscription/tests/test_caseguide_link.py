@@ -167,3 +167,18 @@ def test_non_dict_suggestions_are_skipped(tmp_path: Path) -> None:
     doc = read_suggestions(case_dir)
     assert doc is not None
     assert [s.id for s in doc.suggestions] == ["good"]
+
+
+def test_oversized_file_refuses_to_load(tmp_path: Path) -> None:
+    """Hard cap on the suggestions.json size we'll load. Mirrors the
+    pattern in caseforge/storage.py and report/suggestions_reader.py
+    so a corrupt or hostile file can't OOM the recorder."""
+    case_dir = tmp_path / "case"
+    target = suggestions_path(case_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Exceed the 10 MiB cap by a hair -- enough to trip the stat check
+    # but not enough to actually allocate that much in pytest.
+    big = b' ' * (10 * 1024 * 1024 + 1)
+    target.write_bytes(big)
+    with pytest.raises(SuggestionsReadError, match="refusing to load"):
+        read_suggestions(case_dir)
