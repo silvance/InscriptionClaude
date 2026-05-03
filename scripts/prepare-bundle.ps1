@@ -89,10 +89,16 @@ function Write-Step([string]$msg) {
 }
 
 # 1. Sanity ------------------------------------------------------------------
+# Only require Ollama if we're actually going to invoke it. The
+# -SkipPull -SkipBuild combo is the "stage an already-built bundle to
+# a different drive" path; it doesn't touch Ollama at all and shouldn't
+# block on a machine that doesn't have it.
 
-Write-Step "Verifying Ollama is on PATH"
-if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
-    throw "Ollama not found. Install from https://ollama.com/download/windows first, then rerun."
+if (-not $SkipPull) {
+    Write-Step "Verifying Ollama is on PATH"
+    if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+        throw "Ollama not found. Install from https://ollama.com/download/windows first, then rerun. (Use -SkipPull if your models are already pulled.)"
+    }
 }
 
 # 2. Pull models -------------------------------------------------------------

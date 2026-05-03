@@ -123,10 +123,14 @@ if ($SkipVerify) {
         throw "manifest.json is present but unreadable: $_"
     }
     $entries = $manifest.files.PSObject.Properties
+    $expectedPaths = New-Object System.Collections.Generic.HashSet[string]
     $count = 0
     $bad = @()
+
+    # Pass 1: every file the manifest claims is present and correctly hashed.
     foreach ($entry in $entries) {
         $relPath = $entry.Name
+        [void]$expectedPaths.Add($relPath.ToLower())
         $expected = $entry.Value -replace '^sha256:', ''
         $absPath = Join-Path $BundleSrc ($relPath -replace '/', '\')
         if (-not (Test-Path -LiteralPath $absPath)) {
@@ -139,13 +143,28 @@ if ($SkipVerify) {
         }
         $count++
     }
+
+    # Pass 2: every file actually present is in the manifest. Without
+    # this, an attacker (or a sloppy hand-edit) could drop an extra
+    # file into the bundle and the integrity check would never notice
+    # because we only walk the manifest, not the bundle. manifest.json
+    # itself isn't in the manifest by design -- exclude it explicitly.
+    $bundleRootLength = $BundleSrc.TrimEnd('\').Length + 1
+    foreach ($file in Get-ChildItem -LiteralPath $BundleSrc -Recurse -File) {
+        $rel = $file.FullName.Substring($bundleRootLength).Replace('\', '/')
+        if ($rel -ieq "manifest.json") { continue }
+        if (-not $expectedPaths.Contains($rel.ToLower())) {
+            $bad += "  unexpected file (not in manifest): $rel"
+        }
+    }
+
     if ($bad.Count -gt 0) {
         Write-Host ""
         Write-Host "Bundle integrity check failed:" -ForegroundColor Red
         $bad | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-        throw "Bundle is corrupt -- $($bad.Count) file(s) failed verification. Rebuild and re-copy onto the USB."
+        throw "Bundle is corrupt or tampered -- $($bad.Count) file(s) failed verification. Rebuild and re-copy onto the USB."
     }
-    Write-Host "  OK ($count files verified)"
+    Write-Host "  OK ($count files verified, no unexpected files)"
 }
 
 # 1c. Surface bundle version -------------------------------------------------
@@ -172,21 +191,67 @@ if (Test-Path $InstallRoot) {
             exit 0
         }
     }
-    Write-Step "Removing existing install at $InstallRoot"
-    Remove-Item -Recurse -Force $InstallRoot
+    # NOTE: don't Remove-Item $InstallRoot here -- that's a destroy-before-
+    # copy ordering, and a copy failure mid-stream loses the working
+    # install. The atomic stage-then-swap below runs the new copy to a
+    # sibling directory, verifies it, then renames the old aside and the
+    # new in. Worst case if the rename fails, the previous install is
+    # still intact.
 }
 
-# 3. Copy the bundle ---------------------------------------------------------
+# 3. Stage the new copy to a sibling directory, then atomic swap ------------
+# install.ps1 used to wipe $InstallRoot before copying, which lost the
+# working install if the copy failed halfway (USB unplugged, disk full,
+# AV interference). The two-phase pattern below keeps the previous
+# install intact until the new one is fully landed.
 
-Write-Step "Installing to $InstallRoot"
+$stagingRoot = "$InstallRoot.new"
+$rollbackRoot = "$InstallRoot.old"
+if (Test-Path $stagingRoot) {
+    Write-Step "Removing leftover staging dir from a prior aborted install"
+    Remove-Item -Recurse -Force $stagingRoot
+}
+if (Test-Path $rollbackRoot) {
+    Write-Step "Removing leftover rollback dir from a prior aborted install"
+    Remove-Item -Recurse -Force $rollbackRoot
+}
+
+Write-Step "Staging new install to $stagingRoot"
 $parent = Split-Path -Parent $InstallRoot
 if ($parent -and -not (Test-Path $parent)) {
     New-Item -ItemType Directory -Path $parent | Out-Null
 }
-Copy-Item -Recurse -Force -Path $BundleSrc -Destination $InstallRoot
-$totalBytes = (Get-ChildItem -Recurse -File $InstallRoot | Measure-Object -Property Length -Sum).Sum
+try {
+    Copy-Item -Recurse -Force -Path $BundleSrc -Destination $stagingRoot
+} catch {
+    if (Test-Path $stagingRoot) {
+        Remove-Item -Recurse -Force $stagingRoot -ErrorAction SilentlyContinue
+    }
+    throw "Copy to staging dir failed: $_. The previous install at $InstallRoot is untouched."
+}
+$totalBytes = (Get-ChildItem -Recurse -File $stagingRoot | Measure-Object -Property Length -Sum).Sum
 $totalGB = [math]::Round($totalBytes / 1GB, 2)
-Write-Host "  Copied $totalGB GB."
+Write-Host "  Staged $totalGB GB."
+
+Write-Step "Swapping new install in"
+try {
+    if (Test-Path $InstallRoot) {
+        # Move-aside the old install rather than delete, so we can roll
+        # back if the rename of the new one fails (race with AV scanner,
+        # file handles still open, etc.).
+        Rename-Item -LiteralPath $InstallRoot -NewName (Split-Path -Leaf $rollbackRoot) -ErrorAction Stop
+    }
+    Rename-Item -LiteralPath $stagingRoot -NewName (Split-Path -Leaf $InstallRoot) -ErrorAction Stop
+} catch {
+    # Best-effort rollback: put the old install back.
+    if (-not (Test-Path $InstallRoot) -and (Test-Path $rollbackRoot)) {
+        Rename-Item -LiteralPath $rollbackRoot -NewName (Split-Path -Leaf $InstallRoot) -ErrorAction SilentlyContinue
+    }
+    throw "Atomic swap failed: $_. The previous install should still be intact at $InstallRoot."
+}
+if (Test-Path $rollbackRoot) {
+    Remove-Item -Recurse -Force $rollbackRoot -ErrorAction SilentlyContinue
+}
 
 # 4. Create Start Menu shortcut ----------------------------------------------
 
