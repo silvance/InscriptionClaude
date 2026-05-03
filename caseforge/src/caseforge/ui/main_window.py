@@ -34,7 +34,12 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """Top-level CaseForge window."""
 
-    def __init__(self, *, auto_show: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        auto_show: bool = True,
+        case_dir: Path | None = None,
+    ) -> None:
         super().__init__()
         self._config = Config()
         self.setWindowTitle(f"CaseForge {__version__}")
@@ -71,6 +76,14 @@ class MainWindow(QMainWindow):
 
         if auto_show:
             self.show()
+
+        # --case-dir support: when a case directory is passed (typically
+        # from start-suite.ps1's app picker, or manually via the CLI),
+        # open it straight away rather than landing on the welcome list.
+        # The controller routes invalid paths through the existing
+        # error-handling that already surfaces a friendly message.
+        if case_dir is not None:
+            self._controller.open_existing(case_dir)
 
     # ------------------------------------------------------------ menus
 
