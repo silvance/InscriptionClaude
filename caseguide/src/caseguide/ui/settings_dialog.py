@@ -294,3 +294,21 @@ class SettingsDialog(QDialog):
             self._model_edit.clear()
             self._model_edit.addItems(ids)
             self._model_edit.setEditText(current)
+
+    def done(self, result: int) -> None:
+        """Wait for in-flight worker threads before closing.
+
+        Without this, dialog closure can race a still-running test or
+        model-list worker -- the dialog's deleteLater fires while the
+        QThread is mid-HTTP, producing
+            QThread: Destroyed while thread is still running
+        on stderr and (occasionally on Windows) a crash. 5s is enough
+        for the workers' own 3s HTTP timeouts to elapse; if a thread
+        is still alive after that, we let Qt's parent-child cleanup
+        try to handle it rather than blocking the UI indefinitely.
+        """
+        for thread in (self._test_thread, self._models_thread):
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(5000)
+        super().done(result)
