@@ -9,11 +9,16 @@
            non-admin shell, so the spawned Ollama and the apps inherit
            the higher integrity level.
         2. Points Ollama at the bundled models directory.
-        3. Starts the bundled Ollama server on 127.0.0.1:11434.
-        4. Waits until /api/tags answers 200.
-        5. If more than one model is bundled, asks which one the apps
+        3. Starts the bundled Ollama server on a DEDICATED port
+           (127.0.0.1:11435 -- not the Ollama default 11434) so it
+           never collides with or silently reuses a system-wide Ollama
+           install on this machine.
+        4. Exports SUITE_LLM_BASE_URL so Inscription / CaseGuide
+           connect to our bundled instance, not the default.
+        5. Waits until /api/tags answers 200 on the dedicated port.
+        6. If more than one model is bundled, asks which one the apps
            should use this session and exports SUITE_LLM_MODEL.
-        6. Opens a small picker so the operator can launch
+        7. Opens a small picker so the operator can launch
            Inscription, CaseForge, or CaseGuide.
 
     Quitting the picker stops the Ollama server. Re-run this script to
@@ -54,11 +59,25 @@ $Root = $PSScriptRoot
 
 # --------------------------------------------------------------- environment
 
+# Bundled Ollama runs on a dedicated, non-default port so we never
+# accidentally reuse a system-wide Ollama install (which has its own
+# model store and could silently produce different output -- bad for
+# reproducibility in a forensic context). 11435 is one above the
+# Ollama default; pick something else with -BundledOllamaPort if you
+# need to.
+$BundledOllamaPort = 11435
+$BundledOllamaHost = "127.0.0.1:$BundledOllamaPort"
+
 $env:OLLAMA_MODELS = Join-Path $Root "models"
-$env:OLLAMA_HOST   = "127.0.0.1:11434"
-# Pin the data directory too so a previous Ollama install on this machine
-# doesn't have us writing into its blobs folder by accident.
+$env:OLLAMA_HOST   = $BundledOllamaHost
+# OLLAMA_KEEP_ALIVE keeps the loaded weights resident in RAM between
+# requests so the first AI Rewrite click pays the model-load cost only
+# once per session.
 $env:OLLAMA_KEEP_ALIVE = "10m"
+# Tell the suite apps where our Ollama lives. Inscription and CaseGuide
+# both read SUITE_LLM_BASE_URL when their per-user QSettings hasn't
+# overridden it (same pattern as SUITE_LLM_MODEL).
+$env:SUITE_LLM_BASE_URL = "http://${BundledOllamaHost}/v1"
 
 $ollamaExe = Join-Path $Root "ollama\ollama.exe"
 if (-not (Test-Path $ollamaExe)) {
@@ -66,10 +85,14 @@ if (-not (Test-Path $ollamaExe)) {
     exit 1
 }
 
-# Already serving? Reuse it. Otherwise start fresh in a hidden window.
+# Already serving on OUR dedicated port? That should only happen if a
+# previous start-suite.ps1 in this session is still running, in which
+# case reusing it is fine. Probe the dedicated port (11435), not the
+# Ollama default (11434), so a system-wide Ollama install on the same
+# box doesn't get confused with ours.
 function Test-OllamaUp {
     try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 1 -UseBasicParsing
+        $r = Invoke-WebRequest -Uri "http://${BundledOllamaHost}/api/tags" -TimeoutSec 1 -UseBasicParsing
         return $r.StatusCode -eq 200
     } catch {
         return $false
@@ -78,7 +101,7 @@ function Test-OllamaUp {
 
 $ourProcess = $null
 if (Test-OllamaUp) {
-    Write-Host "Ollama is already responding on 127.0.0.1:11434 -- reusing it." -ForegroundColor Yellow
+    Write-Host "Ollama already responding on $BundledOllamaHost (our dedicated port) -- reusing." -ForegroundColor Yellow
 } else {
     Write-Host "Starting bundled Ollama server..." -ForegroundColor Cyan
     $ourProcess = Start-Process -FilePath $ollamaExe `
@@ -92,11 +115,11 @@ if (Test-OllamaUp) {
         if (Test-OllamaUp) { break }
     }
     if (-not (Test-OllamaUp)) {
-        Write-Error "Ollama did not become ready within 60s. Check that ollama.exe runs on this machine."
+        Write-Error "Bundled Ollama did not become ready on $BundledOllamaHost within 60s. Check that ollama.exe runs on this machine, and that nothing else is bound to port $BundledOllamaPort."
         if ($ourProcess) { Stop-Process -Id $ourProcess.Id -Force -ErrorAction SilentlyContinue }
         exit 1
     }
-    Write-Host "Ollama ready." -ForegroundColor Green
+    Write-Host "Bundled Ollama ready on $BundledOllamaHost." -ForegroundColor Green
 }
 
 # ------------------------------------------------------- pick a model
