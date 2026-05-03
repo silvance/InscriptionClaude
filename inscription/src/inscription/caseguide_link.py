@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 CASEGUIDE_DIRNAME = ".caseguide"
 SUGGESTIONS_FILENAME = "suggestions.json"
 
+#: Hard cap on the suggestions.json size we'll load. Real-world files
+#: sit comfortably under 100 KB; matching the 10 MiB ceiling that
+#: caseforge/report/suggestions_reader.py uses for the same artifact
+#: bounds memory + parse-time exposure for corrupt or hostile files.
+_MAX_SUGGESTIONS_BYTES = 10 * 1024 * 1024
+
 PRIORITY_REQUIRED = "required"
 PRIORITY_RECOMMENDED = "recommended"
 PRIORITY_OPTIONAL = "optional"
@@ -91,6 +97,18 @@ def read_suggestions(case_dir: Path) -> CaseguideDocument | None:
     target = suggestions_path(case_dir)
     if not target.exists():
         return None
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        msg = f"Could not stat {target}: {exc}"
+        raise SuggestionsReadError(msg) from exc
+    if size > _MAX_SUGGESTIONS_BYTES:
+        msg = (
+            f"{target} is {size} bytes; refusing to load (cap is "
+            f"{_MAX_SUGGESTIONS_BYTES}). A genuine suggestions.json "
+            f"sits well under 100 KB."
+        )
+        raise SuggestionsReadError(msg)
     try:
         raw_text = target.read_text(encoding="utf-8")
     except OSError as exc:
