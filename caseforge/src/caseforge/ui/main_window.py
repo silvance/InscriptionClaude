@@ -191,8 +191,12 @@ class MainWindow(QMainWindow):
         self._controller.open_existing(Path(path))
 
     def _on_archive_case(self, path: str) -> None:
-        confirm = QMessageBox.question(
-            self,
+        # Use a custom-button QMessageBox so the action button reads
+        # "Archive case" instead of the generic "Yes" -- destructive
+        # confirmations should name the action so the title-bar context
+        # isn't the only thing distinguishing them.
+        mb = QMessageBox(
+            QMessageBox.Icon.Question,
             "Archive case",
             (
                 f"Move this case into <code>_archive/</code> inside the workspace?\n\n"
@@ -200,15 +204,18 @@ class MainWindow(QMainWindow):
                 "Archived cases stop appearing in the browser but stay on "
                 "disk so you can recover them by moving them back."
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+            parent=self,
         )
-        if confirm == QMessageBox.StandardButton.Yes:
+        archive_btn = mb.addButton("Archive case", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = mb.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        mb.setDefaultButton(cancel_btn)
+        mb.exec()
+        if mb.clickedButton() is archive_btn:
             self._controller.archive(Path(path))
 
     def _on_delete_case(self, path: str) -> None:
-        confirm = QMessageBox.warning(
-            self,
+        mb = QMessageBox(
+            QMessageBox.Icon.Warning,
             "Delete case permanently",
             (
                 f"Permanently delete this case directory and everything in it?\n\n"
@@ -216,10 +223,16 @@ class MainWindow(QMainWindow):
                 "This cannot be undone. Recordings, screenshots, and exports "
                 "in the case folder will all be removed."
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+            parent=self,
         )
-        if confirm == QMessageBox.StandardButton.Yes:
+        # Named explicitly so a hurried Yes-click can't be misread as
+        # "yes I want to keep it" -- the verb is right there on the
+        # button. Cancel stays default so Enter is the safe choice.
+        delete_btn = mb.addButton("Delete permanently", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = mb.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        mb.setDefaultButton(cancel_btn)
+        mb.exec()
+        if mb.clickedButton() is delete_btn:
             self._controller.delete(Path(path))
 
     def _open_settings(self) -> None:

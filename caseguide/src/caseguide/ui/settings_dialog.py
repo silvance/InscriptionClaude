@@ -93,11 +93,14 @@ class _ConnectionTest(QObject):
 class _ModelListFetch(QObject):
     """Fetch the endpoint's model catalogue on a worker thread.
 
-    Failures emit an empty list — the combobox stays editable so users can
-    still type any tag they want.
+    Emits ``finished(ids, error)``. On success ``error`` is empty.
+    On failure (Ollama not running, network down, endpoint doesn't
+    speak OpenAI's ``/models``) ``ids`` is empty and ``error`` carries
+    a one-liner the dialog renders inline so the user knows *why* the
+    dropdown is empty.
     """
 
-    finished = Signal(list)  # list[str]
+    finished = Signal(list, str)  # ids, error_message
 
     def __init__(self, *, base_url: str, api_key: str | None) -> None:
         super().__init__()
@@ -109,9 +112,10 @@ class _ModelListFetch(QObject):
             ids = list_available_models(
                 base_url=self._base_url, api_key=self._api_key, timeout_s=3.0,
             )
-        except Exception:  # noqa: BLE001 - silent fallback to free-text entry
-            ids = []
-        self.finished.emit(ids)
+        except Exception as exc:  # noqa: BLE001 - worker normalises any failure
+            self.finished.emit([], str(exc) or type(exc).__name__)
+            return
+        self.finished.emit(ids, "")
 
 
 class SettingsDialog(QDialog):
@@ -145,6 +149,9 @@ class SettingsDialog(QDialog):
         )
         save_btn = buttons.button(QDialogButtonBox.StandardButton.Save)
         save_btn.setProperty("role", "primary")
+        # Enter saves; explicit setDefault rather than relying on
+        # creation-order heuristics inside QDialogButtonBox.
+        save_btn.setDefault(True)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -163,6 +170,12 @@ class SettingsDialog(QDialog):
         line_edit = self._model_edit.lineEdit()
         if line_edit is not None:
             line_edit.setPlaceholderText(DEFAULT_LLM_MODEL)
+        # One-liner status under the Model field. Populated by the
+        # background model-list fetch when the endpoint is unreachable.
+        self._model_status = QLabel("", box)
+        self._model_status.setProperty("muted", "true")
+        self._model_status.setWordWrap(True)
+        self._model_status.setVisible(False)
         self._timeout_spin = QDoubleSpinBox(box)
         self._timeout_spin.setRange(5.0, 1800.0)
         self._timeout_spin.setSingleStep(10.0)
@@ -189,6 +202,8 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("Base URL", self._base_url_edit)
         form.addRow("Model", self._model_edit)
+        # Empty-label row so the status text aligns with the field column.
+        form.addRow("", self._model_status)
         form.addRow("Timeout", self._timeout_spin)
         form.addRow("API key", self._api_key_edit)
 
@@ -284,11 +299,26 @@ class SettingsDialog(QDialog):
         self._models_thread = thread
         thread.start()
 
-    def _on_models_fetched(self, ids: list[str]) -> None:
+    def _on_models_fetched(self, ids: list[str], error: str) -> None:
         self._models_thread = None
         self._models_worker = None
-        if not ids:
+        base_url = self._base_url_edit.text().strip() or DEFAULT_LLM_BASE_URL
+        if error:
+            self._model_status.setText(
+                f"Couldn't list models from {base_url} -- {error}. "
+                f"Type the model tag manually, or fix the Base URL "
+                f"above and click Test connection."
+            )
+            self._model_status.setVisible(True)
             return
+        if not ids:
+            self._model_status.setText(
+                f"{base_url} reached, but advertises no models. "
+                f"Type the model tag manually."
+            )
+            self._model_status.setVisible(True)
+            return
+        self._model_status.setVisible(False)
         current = self._model_edit.currentText()
         with QSignalBlocker(self._model_edit):
             self._model_edit.clear()
