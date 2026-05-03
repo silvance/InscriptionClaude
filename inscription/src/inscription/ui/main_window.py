@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
@@ -19,9 +20,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from suite_common import read_version_info
 
 from inscription import __version__
 from inscription.config import Config
+from inscription.paths import LOG_DIR, ensure_dirs
 from inscription.ui.app_icon import build_app_icon
 from inscription.ui.controller import SessionController
 from inscription.ui.mini_dock import MiniDock
@@ -200,6 +203,11 @@ class MainWindow(QMainWindow):
 
     def _build_help_menu(self, menubar: QMenuBar) -> None:
         help_menu = menubar.addMenu("&Help")
+        self._add_action(
+            help_menu, "Show &logs folder", self._open_logs_folder,
+            tip="Open the Inscription log directory in the file manager",
+        )
+        help_menu.addSeparator()
         self._add_action(help_menu, "&About Inscription", self._show_about)
         self._add_action(
             help_menu, "About &Qt", lambda: QMessageBox.aboutQt(self, "About Qt"),
@@ -244,14 +252,41 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- Actions
 
     def _show_about(self) -> None:
+        # The bundle build stamp lives next to start-suite.ps1; surface
+        # it here so an operator can answer "which build did we deploy?"
+        # without going to the file system. None when running from a
+        # source checkout, in which case we just show the package version.
+        bundle_info = read_version_info()
+        bundle_html = ""
+        if bundle_info is not None:
+            sha = str(bundle_info.get("git_sha", ""))[:8] or "unknown"
+            built = str(bundle_info.get("build_timestamp", "")) or "unknown"
+            models = bundle_info.get("models") or []
+            model_str = ", ".join(str(m) for m in models) or "(none)"
+            bundle_html = (
+                "<hr>"
+                "<p><b>Bundle build</b><br>"
+                f"git: <code>{sha}</code><br>"
+                f"built: <code>{built}</code><br>"
+                f"models: <code>{model_str}</code></p>"
+            )
         QMessageBox.about(
             self,
             "About Inscription",
             (
                 f"<h3>Inscription {__version__}</h3>"
                 "<p>Record a workflow, review the draft, export a polished guide.</p>"
+                f"{bundle_html}"
             ),
         )
+
+    def _open_logs_folder(self) -> None:
+        # ensure_dirs() is idempotent; create LOG_DIR on demand so the
+        # first-ever click doesn't open into a missing directory if
+        # nothing has logged yet (clean dev install before the logger
+        # has touched disk).
+        ensure_dirs()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
     # ------------------------------------------------------------- Slots
 
