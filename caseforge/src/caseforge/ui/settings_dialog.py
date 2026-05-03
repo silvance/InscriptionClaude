@@ -51,6 +51,9 @@ class SettingsDialog(QDialog):
         )
         save_btn = buttons.button(QDialogButtonBox.StandardButton.Save)
         save_btn.setProperty("role", "primary")
+        # Enter saves; explicit setDefault rather than relying on
+        # creation-order heuristics inside QDialogButtonBox.
+        save_btn.setDefault(True)
         buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
