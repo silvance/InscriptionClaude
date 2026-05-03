@@ -1,13 +1,17 @@
 """Shared bits for the Inscription / CaseForge / CaseGuide suite.
 
-Two halves:
+Three halves now:
 
 - :mod:`suite_common.llm` — OpenAI-compatible chat-completions client used
   by Inscription's step rewriter and CaseGuide's suggestions refiner.
 - :mod:`suite_common.coerce` — JSON-tolerant coercion helpers used by every
   app that reads case.json / suggestions.json / manifest.json.
+- :mod:`suite_common.bundle` — read the air-gapped bundle's version.json
+  stamp at runtime so each app's About dialog can show the build
+  provenance the operator actually has on their machine.
 """
 
+from suite_common.bundle import bundle_root, read_version_info
 from suite_common.coerce import (
     coerce_bool,
     coerce_int,
@@ -34,10 +38,12 @@ __all__ = [
     "LLMError",
     "LLMRequestError",
     "LLMResponseError",
+    "bundle_root",
     "coerce_bool",
     "coerce_int",
     "list_available_models",
     "parse_iso",
     "parse_optional_iso",
+    "read_version_info",
     "string_list",
 ]

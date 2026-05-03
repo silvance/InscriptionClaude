@@ -13,8 +13,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -27,10 +27,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from suite_common import read_version_info
 
 from caseguide import __version__
 from caseguide.config import Config
 from caseguide.model import Suggestion, SuggestionsDocument, utcnow
+from caseguide.paths import LOG_DIR, ensure_dirs
 from caseguide.ui.controller import CaseGuideController
 from caseguide.ui.refine_dialog import RefineProgressDialog, RefineWorker
 from caseguide.ui.scope_panel import ScopePanel
@@ -226,6 +228,13 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(settings_action)
 
         help_menu = menubar.addMenu("&Help")
+        logs_action = QAction("Show &logs folder", self)
+        logs_action.setStatusTip(
+            "Open the CaseGuide log directory in the file manager"
+        )
+        logs_action.triggered.connect(self._open_logs_folder)
+        help_menu.addAction(logs_action)
+        help_menu.addSeparator()
         about_action = QAction("&About CaseGuide", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -399,6 +408,23 @@ class MainWindow(QMainWindow):
         return " · ".join(bits) if bits else (scope.summary[:200] if scope.summary else "")
 
     def _show_about(self) -> None:
+        # Surface the air-gapped bundle's version.json stamp when we're
+        # running from a bundled .exe; None when running from a source
+        # checkout, in which case we just show the package version.
+        bundle_info = read_version_info()
+        bundle_html = ""
+        if bundle_info is not None:
+            sha = str(bundle_info.get("git_sha", ""))[:8] or "unknown"
+            built = str(bundle_info.get("build_timestamp", "")) or "unknown"
+            models = bundle_info.get("models") or []
+            model_str = ", ".join(str(m) for m in models) or "(none)"
+            bundle_html = (
+                "<hr>"
+                "<p><b>Bundle build</b><br>"
+                f"git: <code>{sha}</code><br>"
+                f"built: <code>{built}</code><br>"
+                f"models: <code>{model_str}</code></p>"
+            )
         QMessageBox.about(
             self,
             "About CaseGuide",
@@ -406,8 +432,13 @@ class MainWindow(QMainWindow):
                 f"<h3>CaseGuide {__version__}</h3>"
                 "<p>LLM-assisted exam coach for the Inscription "
                 "forensic-exam suite.</p>"
+                f"{bundle_html}"
             ),
         )
+
+    def _open_logs_folder(self) -> None:
+        ensure_dirs()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
     def _open_settings(self) -> None:
         SettingsDialog(self._config, parent=self).exec()

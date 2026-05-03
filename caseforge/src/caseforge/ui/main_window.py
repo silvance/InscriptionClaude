@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
     QMainWindow,
@@ -18,10 +19,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QStackedWidget,
 )
+from suite_common import read_version_info
 
 from caseforge import __version__
 from caseforge.config import Config
 from caseforge.model import Case
+from caseforge.paths import LOG_DIR, ensure_dirs
 from caseforge.ui.case_view import CaseView
 from caseforge.ui.controller import CaseController
 from caseforge.ui.new_case_dialog import NewCaseDialog
@@ -125,6 +128,11 @@ class MainWindow(QMainWindow):
 
     def _build_help_menu(self, menubar: QMenuBar) -> None:
         menu = menubar.addMenu("&Help")
+        self._add_action(
+            menu, "Show &logs folder", self._open_logs_folder,
+            tip="Open the CaseForge log directory in the file manager",
+        )
+        menu.addSeparator()
         self._add_action(menu, "&About CaseForge", self._show_about)
         self._add_action(menu, "About &Qt", lambda: QMessageBox.aboutQt(self, "About Qt"))
 
@@ -220,14 +228,36 @@ class MainWindow(QMainWindow):
         self._refresh_welcome()
 
     def _show_about(self) -> None:
+        # Surface the air-gapped bundle's version.json stamp when we're
+        # running from a bundled .exe; None when running from a source
+        # checkout, in which case we just show the package version.
+        bundle_info = read_version_info()
+        bundle_html = ""
+        if bundle_info is not None:
+            sha = str(bundle_info.get("git_sha", ""))[:8] or "unknown"
+            built = str(bundle_info.get("build_timestamp", "")) or "unknown"
+            models = bundle_info.get("models") or []
+            model_str = ", ".join(str(m) for m in models) or "(none)"
+            bundle_html = (
+                "<hr>"
+                "<p><b>Bundle build</b><br>"
+                f"git: <code>{sha}</code><br>"
+                f"built: <code>{built}</code><br>"
+                f"models: <code>{model_str}</code></p>"
+            )
         QMessageBox.about(
             self,
             "About CaseForge",
             (
                 f"<h3>CaseForge {__version__}</h3>"
                 "<p>Case intake and scope tool for the Inscription forensic-exam suite.</p>"
+                f"{bundle_html}"
             ),
         )
+
+    def _open_logs_folder(self) -> None:
+        ensure_dirs()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_DIR)))
 
     # ------------------------------------------------------- slots
 
