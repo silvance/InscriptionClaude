@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
@@ -24,9 +25,25 @@ def _is_frozen() -> bool:
 
 
 def _parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
+    """Parse CaseForge's own flags; pass everything else through to Qt.
+
+    Mirrors the Inscription / CaseGuide pattern -- ``parse_known_args``
+    so Qt's own argv flags (``-platform``, ``-style``, ...) survive.
+    """
     parser = argparse.ArgumentParser(
         prog="caseforge",
         description="Case intake and scope tool for the Inscription forensic-exam suite.",
+    )
+    parser.add_argument(
+        "--case-dir",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Open the case at PATH on launch instead of the welcome browser. "
+            "Used by the air-gapped launcher's app picker to drop the "
+            "operator straight into a specific case, and useful for scripting."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"CaseForge {__version__}")
     return parser.parse_known_args(argv[1:])
@@ -34,11 +51,13 @@ def _parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
-    _, remaining = _parse_args(argv)
+    args, remaining = _parse_args(argv)
 
     ensure_dirs()
     configure_logging(console=not _is_frozen())
     logger.info("Starting CaseForge %s", __version__)
+    if args.case_dir is not None:
+        logger.info("Opening case directory: %s", args.case_dir)
 
     QCoreApplication.setOrganizationName("Silvance")
     QCoreApplication.setApplicationName("CaseForge")
@@ -50,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     palette = apply_global_style(app)
     app.setWindowIcon(build_app_icon(palette))
 
-    MainWindow()
+    MainWindow(case_dir=args.case_dir)
     rc = app.exec()
     logger.info("CaseForge exited with code %d", rc)
     return rc
