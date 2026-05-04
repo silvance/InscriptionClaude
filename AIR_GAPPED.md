@@ -220,6 +220,68 @@ re-run `start-suite.ps1`.
 
 ---
 
+## Linux air-gapped deployment
+
+The same bundle layout, model-blob deduplication, integrity manifest, and atomic-swap install pattern are available for Linux workstations. Two caveats up front:
+
+- **Inscription on Linux ships in degraded form.** Case management, step rewriting, and exports work; **automated UIA capture does not** (`pywinauto` is Windows-only and there's no Linux equivalent for the Windows UI Automation API). CaseForge and CaseGuide are fully functional.
+- **Glibc x86_64 only.** Tested on Ubuntu 22.04+ / Debian 12+ / Fedora / RHEL 8+. Skip musl distros (Alpine).
+
+### Build-machine prerequisites
+
+- Linux x86_64 with internet access during the build only.
+- Clone this repo and follow `SETUP.md` to get the venv working with all four packages installed editable.
+- Ollama installed locally with the desired models pulled (`ollama pull gemma4:latest` etc.). The Linux install script puts Ollama at `/usr/local/bin/ollama` with models at `~/.ollama/models/`.
+- Download `ollama-linux-amd64.tgz` from <https://github.com/ollama/ollama/releases> and extract it to a directory; pass that directory as `--ollama-bundle` to the build script. The bundle layout requires the standard `bin/ollama` + `lib/ollama/` tree, which is what the tarball provides.
+
+### Building the bundle
+
+```bash
+source .venv/bin/activate
+
+# One-shot: pull models, build apps, assemble bundle, write manifest,
+# stage to USB.
+./scripts/prepare-bundle.sh \
+    --ollama-bundle ~/Downloads/ollama-linux-amd64 \
+    --destination /media/usb/
+
+# Useful flags:
+./scripts/prepare-bundle.sh --ollama-bundle <path> --include-70b
+./scripts/prepare-bundle.sh --ollama-bundle <path> \
+    --models gemma4:latest,granite4:tiny-h --destination /media/usb/
+./scripts/prepare-bundle.sh --ollama-bundle <path> --skip-pull --destination /media/usb/
+```
+
+`--destination` with a fresh build stages directly at the USB (no intermediate copy), same disk-space win as the Windows pipeline. Output lands at `<destination>/InscriptionSuite-Airgapped-Linux/`.
+
+### Transferring to the air-gapped Linux workstation
+
+```bash
+# From inside <USB>/InscriptionSuite-Airgapped-Linux/
+./install.sh                              # default per-user
+./install.sh --desktop-shortcut           # also drop a desktop file
+./install.sh --install-root /opt/InscriptionSuite  # system-wide (run with sudo)
+```
+
+`install.sh` verifies the SHA-256 manifest before copying, atomic-swaps the new install in (so a copy failure mid-stream doesn't lose the working install), and writes a `.desktop` entry to `~/.local/share/applications/inscription-suite.desktop`. From then on, launch via the desktop environment's app menu.
+
+User configuration / saved cases live under `~/.local/share/Inscription/`, `~/.local/share/CaseForge/`, `~/.local/share/CaseGuide/` (or wherever the operator chose to keep case folders); re-running `install.sh` only replaces the binaries.
+
+### Runtime stitching (Linux)
+
+The launcher sets the same env vars as the Windows version, plus `LD_LIBRARY_PATH` so the bundled Ollama runner libraries are found:
+
+```bash
+export OLLAMA_MODELS="<bundle>/models"
+export OLLAMA_HOST="127.0.0.1:11435"
+export SUITE_LLM_BASE_URL="http://127.0.0.1:11435/v1"
+export LD_LIBRARY_PATH="<bundle>/ollama/lib/ollama:$LD_LIBRARY_PATH"
+```
+
+Port 11435 (not the Ollama default 11434) keeps the bundled instance from colliding with a system-wide Ollama install. The launcher spawns `<bundle>/ollama/bin/ollama serve`, polls `/api/tags` until 200, and presents the same model picker as the Windows version. Closing the picker (`Q` then Enter) terminates the spawned Ollama process via a bash `trap`.
+
+---
+
 ## What we don't ship
 
 - **Antivirus exemption.** Some AV products quarantine PyInstaller
