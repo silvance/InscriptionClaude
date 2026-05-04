@@ -40,23 +40,39 @@
     Where the user's pulled model blobs live on this machine. Default is
     the standard Ollama models directory.
 
+.PARAMETER OutputRoot
+    Parent directory for the staged bundle. The script writes to
+    "<OutputRoot>\InscriptionSuite-Airgapped\". Defaults to
+    "<repo>\dist\". Set this to a roomy drive (or directly to the
+    USB drive) to avoid the doubled disk requirement of staging
+    locally and then copying.
+
 .PARAMETER SkipBuild
     Skip running build.ps1; assume dist\ folders are already present.
 
 .EXAMPLE
     .\scripts\package-airgapped.ps1
     .\scripts\package-airgapped.ps1 -Models gemma4:latest -SkipBuild
+    .\scripts\package-airgapped.ps1 -OutputRoot E:\
 #>
 param(
     [string[]]$Models = @("gemma4:latest", "granite4:tiny-h"),
     [string]$OllamaRoot = "$env:LOCALAPPDATA\Programs\Ollama",
     [string]$OllamaModelsRoot = "$env:USERPROFILE\.ollama\models",
+    [string]$OutputRoot = "",
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$BundleRoot = Join-Path $RepoRoot "dist\InscriptionSuite-Airgapped"
+if ($OutputRoot) {
+    if (-not (Test-Path $OutputRoot)) {
+        New-Item -ItemType Directory -Path $OutputRoot | Out-Null
+    }
+    $BundleRoot = Join-Path $OutputRoot "InscriptionSuite-Airgapped"
+} else {
+    $BundleRoot = Join-Path $RepoRoot "dist\InscriptionSuite-Airgapped"
+}
 
 function Write-Step([string]$msg) {
     Write-Host ""
