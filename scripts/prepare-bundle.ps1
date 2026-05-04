@@ -17,9 +17,15 @@
     the right size for their immediate task at first launch.
 
 .PARAMETER Destination
-    Optional path to copy the finished bundle into. Typical use:
+    Optional path to stage the finished bundle into. Typical use:
     -Destination E:\ or -Destination "F:\Forensic\". Leave empty to
     leave the bundle in the repo's dist\ directory.
+
+    When set together with a fresh build, the inner package script
+    stages directly at the destination so we don't need ~30 GB free
+    on the build drive (15 GB to stage + 15 GB to copy). Used with
+    -SkipBuild, the bundle is assumed to already exist in dist\ and
+    is copied to the destination as before.
 
 .PARAMETER Models
     Override the default model set. Each entry must be a tag pullable
@@ -67,7 +73,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot  = Split-Path -Parent $PSScriptRoot
-$BundleSrc = Join-Path $RepoRoot "dist\InscriptionSuite-Airgapped"
+
+# When the operator both wants a fresh build AND a destination, stage
+# directly at the destination. -SkipBuild keeps the original semantics
+# (bundle already exists in dist\, copy it to -Destination) so we don't
+# break the "rebuild a USB from an existing local bundle" flow.
+$inPlaceBuild = ([bool]$Destination) -and (-not $SkipBuild)
+if ($inPlaceBuild) {
+    $BundleSrc = Join-Path $Destination "InscriptionSuite-Airgapped"
+} else {
+    $BundleSrc = Join-Path $RepoRoot "dist\InscriptionSuite-Airgapped"
+}
 
 # Force TLS 1.2 unconditionally. Windows Server 2012 R2 / 8.1 default
 # their .NET ServicePointManager to TLS 1.0, which github.com no
@@ -119,7 +135,11 @@ if (-not $SkipPull) {
 
 if (-not $SkipBuild) {
     Write-Step "Building air-gapped bundle ($($Models.Count) model(s))"
-    & (Join-Path $PSScriptRoot "package-airgapped.ps1") -Models $Models
+    if ($inPlaceBuild) {
+        & (Join-Path $PSScriptRoot "package-airgapped.ps1") -Models $Models -OutputRoot $Destination
+    } else {
+        & (Join-Path $PSScriptRoot "package-airgapped.ps1") -Models $Models
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "package-airgapped.ps1 failed (exit $LASTEXITCODE)."
     }
@@ -229,12 +249,18 @@ if ($Destination) {
         New-Item -ItemType Directory -Path $Destination | Out-Null
     }
     $destPath = Join-Path $Destination "InscriptionSuite-Airgapped"
-    if (Test-Path $destPath) {
-        Write-Step "Replacing existing $destPath"
-        Remove-Item -Recurse -Force $destPath
+    if ($BundleSrc -eq $destPath) {
+        # In-place build path: package-airgapped.ps1 already wrote
+        # straight to the destination, so there's nothing to copy.
+        Write-Host "  Bundle was staged in place at $destPath; skipping copy." -ForegroundColor Yellow
+    } else {
+        if (Test-Path $destPath) {
+            Write-Step "Replacing existing $destPath"
+            Remove-Item -Recurse -Force $destPath
+        }
+        Write-Step "Copying bundle to $destPath"
+        Copy-Item -Recurse -Force $BundleSrc $destPath
     }
-    Write-Step "Copying bundle to $destPath"
-    Copy-Item -Recurse -Force $BundleSrc $destPath
     $finalPath = $destPath
 } else {
     $finalPath = $BundleSrc

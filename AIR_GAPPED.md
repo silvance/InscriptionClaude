@@ -88,6 +88,8 @@ That stages everything into `E:\InscriptionSuite-Airgapped\` ready to carry. Use
 
 Defaults target an RTX 3070 (8 GB VRAM) plus a Xeon / 128 GB RAM workstation: a fully GPU-resident `qwen2.5:7b-instruct-q5_K_M` paired with a partial-offload `qwen2.5:14b-instruct-q4_K_M`. Total bundle is ~15 GB; with `-Include70B` it grows to ~57 GB (plan for a 64 GB+ drive).
 
+When `-Destination` is set with a fresh build (no `-SkipBuild`), the bundle is staged directly at the destination — no second copy. That keeps the build-drive disk requirement to roughly the size of the repo + venv + PyInstaller intermediates (~2 GB) rather than ~30 GB. Used with `-SkipBuild`, the script keeps the original semantics: assume the bundle is already in `dist\` and copy it to the destination.
+
 ### Manual flow
 
 If you want finer control, the underlying script is `scripts\package-airgapped.ps1`:
@@ -121,6 +123,10 @@ dist\InscriptionSuite-Airgapped\
 
 # Different model set (only when you've changed the apps' DEFAULT_LLM_MODEL).
 .\scripts\package-airgapped.ps1 -Models gemma4:latest,granite4:tiny-h
+
+# Stage straight to the USB drive instead of dist\ -- avoids needing
+# ~15 GB free on the build drive.
+.\scripts\package-airgapped.ps1 -OutputRoot E:\
 
 # Non-standard Ollama install.
 .\scripts\package-airgapped.ps1 `
