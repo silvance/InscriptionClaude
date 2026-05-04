@@ -28,6 +28,7 @@ from caseforge.paths import LOG_DIR, ensure_dirs
 from caseforge.ui.case_view import CaseView
 from caseforge.ui.controller import CaseController
 from caseforge.ui.new_case_dialog import NewCaseDialog
+from caseforge.ui.onboarding_dialog import OnboardingDialog
 from caseforge.ui.settings_dialog import SettingsDialog
 from caseforge.ui.welcome import WelcomePage
 
@@ -42,9 +43,10 @@ class MainWindow(QMainWindow):
         *,
         auto_show: bool = True,
         case_dir: Path | None = None,
+        config: Config | None = None,
     ) -> None:
         super().__init__()
-        self._config = Config()
+        self._config = config if config is not None else Config()
         self.setWindowTitle(f"CaseForge {__version__}")
         self.resize(1000, 720)
 
@@ -78,6 +80,7 @@ class MainWindow(QMainWindow):
         self._refresh_welcome()
 
         if auto_show:
+            self._maybe_show_onboarding()
             self.show()
 
         # --case-dir support: when a case directory is passed (typically
@@ -238,6 +241,21 @@ class MainWindow(QMainWindow):
     def _open_settings(self) -> None:
         SettingsDialog(self._config, parent=self).exec()
         # Workspace path may have changed; refresh the welcome list.
+        self._refresh_welcome()
+
+    def _maybe_show_onboarding(self) -> None:
+        """Pop the first-run dialog when the operator hasn't been through it.
+
+        Called from the ``auto_show`` block in ``__init__`` so it never
+        fires under tests (which pass ``auto_show=False``). The dialog
+        sets ``onboarding_completed`` whether the operator saves or skips,
+        so this is a one-shot per profile.
+        """
+        if self._config.onboarding_completed:
+            return
+        OnboardingDialog(self._config, parent=self).exec()
+        # Workspace path may have changed; refresh the welcome list so the
+        # operator sees the right cases (or empty state) on first paint.
         self._refresh_welcome()
 
     def _show_about(self) -> None:

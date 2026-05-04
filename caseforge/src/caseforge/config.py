@@ -24,6 +24,7 @@ _K_EXAMINER_BADGE: Final = "examiner/badge_id"
 _K_INSCRIPTION_PATH: Final = "launcher/inscription_path"
 _K_CASEGUIDE_PATH: Final = "launcher/caseguide_path"
 _K_RECENT_CASE_PATHS: Final = "browser/recent_case_paths"
+_K_ONBOARDING_COMPLETED: Final = "onboarding/completed"
 
 
 class Config:
@@ -67,6 +68,17 @@ class Config:
     @workspace_root.setter
     def workspace_root(self, value: Path) -> None:
         self._qs.setValue(_K_WORKSPACE_ROOT, str(value))
+
+    @property
+    def has_explicit_workspace(self) -> bool:
+        """True if the operator has explicitly set a workspace path.
+
+        ``workspace_root`` falls back to the LOCALAPPDATA default when
+        unset, so it can't be used as the "is it configured?" signal —
+        the onboarding dialog needs to know whether to suggest a more
+        visible default like ``~/Documents/CaseForge``.
+        """
+        return bool(str(self._qs.value(_K_WORKSPACE_ROOT, "")))
 
     # ---------------------------------------------------------- examiner
 
@@ -145,6 +157,23 @@ class Config:
         """Push ``case_path`` to the head of the recents list."""
         existing = [p for p in self.recent_case_paths if p != case_path]
         self.recent_case_paths = [case_path, *existing][:limit]
+
+    # -------------------------------------------------------- onboarding
+
+    @property
+    def onboarding_completed(self) -> bool:
+        """True once the operator has finished or skipped the first-run dialog.
+
+        Stored as a string ("true"/"false") because QSettings round-trips
+        booleans as strings through INI files. We treat the unset case as
+        False so a fresh install always sees the welcome dialog once.
+        """
+        raw = str(self._qs.value(_K_ONBOARDING_COMPLETED, "")).strip().lower()
+        return raw == "true"
+
+    @onboarding_completed.setter
+    def onboarding_completed(self, value: bool) -> None:
+        self._qs.setValue(_K_ONBOARDING_COMPLETED, "true" if value else "false")
 
     # ------------------------------------------------------- persistence
 
