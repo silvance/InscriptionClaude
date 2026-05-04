@@ -59,6 +59,12 @@ class SystemTrayController(QObject):
         self._add_action(menu, "Quit Inscription", self.quit_requested)
         self._tray.setContextMenu(menu)
 
+        # Capture is Windows-only. Off-platform we leave this False so
+        # the tray menu doesn't dangle a "Toggle recording" entry that
+        # would, if clicked, kick off a session producing useless
+        # zero-confidence steps.
+        self._recording_toggle_supported = True
+
     # ------------------------------------------------------------- API
 
     def is_supported(self) -> bool:
@@ -73,11 +79,21 @@ class SystemTrayController(QObject):
     def hide(self) -> None:
         self._tray.hide()
 
+    def set_recording_toggle_enabled(self, enabled: bool) -> None:
+        """Gate the tray's "Toggle recording" entry by platform support.
+
+        Independent of session state -- ``set_session`` still controls
+        the per-session enablement on top of this.
+        """
+        self._recording_toggle_supported = enabled
+        if not enabled:
+            self._toggle_action.setEnabled(False)
+
     def set_session(self, name: str | None) -> None:
         """Update tooltip + recording-toggle menu enablement."""
         if name:
             self._tray.setToolTip(f"Inscription — {name}")
-            self._toggle_action.setEnabled(True)
+            self._toggle_action.setEnabled(self._recording_toggle_supported)
         else:
             self._tray.setToolTip("Inscription — no session open")
             self._toggle_action.setEnabled(False)

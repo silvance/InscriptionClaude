@@ -25,6 +25,7 @@ from suite_common import read_version_info
 from inscription import __version__
 from inscription.config import Config
 from inscription.paths import LOG_DIR, ensure_dirs
+from inscription.platform import CAPTURE_FULLY_SUPPORTED, CAPTURE_UNAVAILABLE_REASON
 from inscription.ui.app_icon import build_app_icon
 from inscription.ui.controller import SessionController
 from inscription.ui.mini_dock import MiniDock
@@ -104,6 +105,19 @@ class MainWindow(QMainWindow):
         self._build_statusbar()
         self._restore_geometry()
         self._welcome.refresh(self._controller.workspace_root())
+
+        # On non-Windows hosts the UIA resolver isn't available and the
+        # foreground inspector is a stub, so a Record session would
+        # produce all-generic placeholder steps. Hard-disable the
+        # capture controls (Record + Mark) so the operator doesn't end
+        # up with a forensic-grade-looking session full of meaningless
+        # data. Case management, step rewriting, and exports are
+        # untouched.
+        if not CAPTURE_FULLY_SUPPORTED:
+            self._recorder_bar.set_capture_supported(
+                False, reason=CAPTURE_UNAVAILABLE_REASON
+            )
+            self._tray.set_recording_toggle_enabled(False)
 
         if auto_start_controller:
             self.show()
@@ -232,7 +246,16 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_statusbar(self) -> None:
-        self.statusBar().showMessage("Ready")
+        if CAPTURE_FULLY_SUPPORTED:
+            self.statusBar().showMessage("Ready")
+        else:
+            # Persistent (timeout=0) so the operator sees the message
+            # for the duration of the session, not just for a moment.
+            self.statusBar().showMessage(
+                "Capture is Windows-only on this build. "
+                "Case management, step rewriting, and exports work normally.",
+                0,
+            )
 
     # --------------------------------------------------------------- State
 

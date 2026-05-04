@@ -46,6 +46,7 @@ from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import DraftStep, EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
 from inscription.platform import (
+    CAPTURE_FULLY_SUPPORTED,
     HotkeyBinding,
     HotkeyManager,
     create_foreground_inspector,
@@ -269,6 +270,13 @@ class SessionController(QObject):
         self.session_opened.emit(repo.session.info.name)
 
     def _register_toggle_hotkey(self) -> None:
+        # On non-Windows hosts capture would produce zero-confidence
+        # placeholders (no UIA, no foreground inspector). MainWindow
+        # already greys out the Record button + tray entry; mirror
+        # that for the global hotkey so Ctrl+Shift+R doesn't kick off
+        # a useless session from outside the app.
+        if not CAPTURE_FULLY_SUPPORTED:
+            return
         self._hotkeys.register(
             HotkeyBinding(sequence=TOGGLE_RECORD_HOTKEY, name="toggle-record"),
             self._toggle_requested.emit,
