@@ -12,6 +12,10 @@ right one automatically.
   element lookup sits in :mod:`inscription.resolve`, not here.
 """
 
+from inscription.platform.capabilities import (
+    CAPTURE_FULLY_SUPPORTED,
+    CAPTURE_UNAVAILABLE_REASON,
+)
 from inscription.platform.foreground import (
     ForegroundInfo,
     ForegroundInspector,
@@ -32,6 +36,8 @@ from inscription.platform.screen import (
 )
 
 __all__ = [
+    "CAPTURE_FULLY_SUPPORTED",
+    "CAPTURE_UNAVAILABLE_REASON",
     "CapturedImage",
     "ForegroundInfo",
     "ForegroundInspector",

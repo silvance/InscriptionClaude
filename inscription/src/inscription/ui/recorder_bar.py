@@ -126,11 +126,36 @@ class RecorderBar(QWidget):
         self._duration_timer.timeout.connect(self._tick_duration)
         self._record_started_at: float | None = None
 
+        # Capture is Windows-only; on other OSes we hard-disable the
+        # buttons via set_capture_supported(). Default True so tests
+        # and the Windows code path don't need to opt in explicitly.
+        self._capture_supported = True
+
     # ----------------------------------------------------------- API
+
+    def set_capture_supported(self, supported: bool, *, reason: str = "") -> None:
+        """Toggle whether the Record / Mark buttons are usable.
+
+        Called from MainWindow at startup with ``supported=False`` on
+        non-Windows hosts to keep the operator from kicking off a
+        capture session that would produce zero-confidence
+        ResolvedElements (the Linux foreground inspector returns
+        empty title/process strings, so steps would all be generic
+        "click in unknown" placeholders -- worse than no capture in a
+        forensic context).
+        """
+        self._capture_supported = supported
+        self._record_btn.setEnabled(supported)
+        # Mark also requires an open session; we honour that on top of
+        # the capture-supported flag.
+        self._marker_btn.setEnabled(supported and self._marker_btn.isEnabled())
+        tip = "" if supported else (reason or "Capture is not available on this platform.")
+        self._record_btn.setToolTip(tip)
+        self._marker_btn.setToolTip(tip)
 
     def set_session_name(self, name: str | None) -> None:
         self._name_label.setText(name or "No session open")
-        self._marker_btn.setEnabled(name is not None)
+        self._marker_btn.setEnabled(name is not None and self._capture_supported)
 
     def set_recording(self, recording: bool) -> None:
         """Force the record button state without emitting ``record_toggled``."""
