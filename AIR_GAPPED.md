@@ -36,7 +36,7 @@ InscriptionSuite-Airgapped\
 └── README.txt                       operator notes
 ```
 
-Total: **~15 GB**. Use a 32 GB USB drive or larger.
+Total: **~15 GB**. Use a 32 GB USB drive or larger, formatted **exFAT or NTFS** (Linux: exFAT or ext4). FAT32 is the default Windows format on smaller USB drives but its 4 GB single-file limit blocks the model blobs (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB); the build script detects this up front and refuses with a reformat hint.
 
 ---
 

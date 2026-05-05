@@ -104,11 +104,64 @@ function Write-Step([string]$msg) {
     Write-Host "==> $msg" -ForegroundColor Cyan
 }
 
+function Test-DestinationFilesystem {
+    <#
+    .SYNOPSIS
+        Refuse to stage onto a FAT32 destination.
+
+    .DESCRIPTION
+        FAT32 caps individual files at 4 GB. The bundled model blobs
+        are larger than that (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB),
+        so a FAT32 destination produces a confusing
+        "There is not enough space on the disk" error mid-blob-copy
+        even when the volume has tens of GB free. Detect it up front
+        and surface the actual problem.
+    #>
+    param([string]$Path)
+    if (-not $Path) { return }
+    # Resolve the path so Get-Volume can map it to a volume even when
+    # the destination directory doesn't exist yet (we just need the
+    # parent's mount point).
+    $probe = $Path
+    while ($probe -and -not (Test-Path -LiteralPath $probe)) {
+        $probe = Split-Path -Parent $probe
+    }
+    if (-not $probe) { return }
+    $vol = $null
+    try {
+        $vol = Get-Volume -FilePath $probe -ErrorAction Stop
+    } catch {
+        # Network share, removable media without a volume entry, etc.
+        # Don't block -- the actual copy will surface a real error if
+        # there is one.
+        return
+    }
+    if ($vol.FileSystemType -in @("FAT32", "FAT")) {
+        $letter = if ($vol.DriveLetter) { "$($vol.DriveLetter):" } else { $Path }
+        throw @"
+Destination '$Path' is on a $($vol.FileSystemType) volume.
+FAT32 caps individual files at 4 GB; the bundled model blobs are
+larger (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB), so the copy fails
+mid-blob with a misleading "not enough space" error.
+
+Reformat as exFAT or NTFS, then re-run. WARNING: wipes the volume.
+    Format-Volume -DriveLetter $($vol.DriveLetter) -FileSystem exFAT
+"@
+    }
+}
+
 # 1. Sanity ------------------------------------------------------------------
+# Filesystem check first so we fail BEFORE pulling 14 GB of models.
 # Only require Ollama if we're actually going to invoke it. The
 # -SkipPull -SkipBuild combo is the "stage an already-built bundle to
 # a different drive" path; it doesn't touch Ollama at all and shouldn't
 # block on a machine that doesn't have it.
+
+if ($Destination) {
+    Write-Step "Checking destination filesystem"
+    Test-DestinationFilesystem -Path $Destination
+    Write-Host "  OK"
+}
 
 if (-not $SkipPull) {
     Write-Step "Verifying Ollama is on PATH"

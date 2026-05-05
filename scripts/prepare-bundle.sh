@@ -116,9 +116,46 @@ write_step() {
     echo "==> $1"
 }
 
+# Refuse to stage onto a FAT32 destination. FAT32 caps individual
+# files at 4 GB; the bundled model blobs are larger (qwen 7B is
+# ~5.4 GB, qwen 14B is ~9 GB), so a FAT32 destination fails
+# mid-blob-copy with a misleading "no space left on device" error
+# even when the volume has tens of GB free. findmnt is in util-linux
+# on every distro we target, but be defensive in case it's missing.
+check_destination_filesystem() {
+    local path="$1"
+    [[ -n "$path" ]] || return 0
+    command -v findmnt >/dev/null 2>&1 || return 0
+    # findmnt -T walks up to find the mountpoint covering $path,
+    # which works even when the destination directory doesn't exist
+    # yet (we just need the parent mount).
+    local probe="$path"
+    while [[ -n "$probe" && ! -e "$probe" ]]; do
+        probe=$(dirname "$probe")
+    done
+    [[ -n "$probe" ]] || return 0
+    local fstype
+    fstype=$(findmnt -no FSTYPE -T "$probe" 2>/dev/null || true)
+    case "$fstype" in
+        vfat|msdos|fat|fat16|fat32)
+            echo "ERROR: destination $path is on a $fstype (FAT32-family) volume." >&2
+            echo "       FAT32 caps individual files at 4 GB; the bundled model blobs" >&2
+            echo "       are larger (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB)." >&2
+            echo "       Reformat as exFAT or ext4 (warning: wipes the volume) then re-run." >&2
+            exit 1
+            ;;
+    esac
+}
+
 # 1. Sanity: Ollama on PATH (only if we're going to call it). -------------
 # --skip-pull skips this; lets the operator run on an offline build
 # machine when they've already pulled models in advance.
+
+if [[ -n "$DESTINATION" ]]; then
+    write_step "Checking destination filesystem"
+    check_destination_filesystem "$DESTINATION"
+    echo "  OK"
+fi
 
 if (( SKIP_PULL == 0 )); then
     write_step "Verifying Ollama is on PATH"
