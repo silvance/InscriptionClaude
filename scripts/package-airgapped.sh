@@ -50,6 +50,31 @@ write_step() {
     echo "==> $1"
 }
 
+# Refuse to stage onto a FAT32 destination -- 4 GB single-file
+# limit blocks the model blobs (qwen 7B is ~5.4 GB, qwen 14B is
+# ~9 GB) and surfaces as a misleading "no space left" mid-copy.
+check_destination_filesystem() {
+    local path="$1"
+    [[ -n "$path" ]] || return 0
+    command -v findmnt >/dev/null 2>&1 || return 0
+    local probe="$path"
+    while [[ -n "$probe" && ! -e "$probe" ]]; do
+        probe=$(dirname "$probe")
+    done
+    [[ -n "$probe" ]] || return 0
+    local fstype
+    fstype=$(findmnt -no FSTYPE -T "$probe" 2>/dev/null || true)
+    case "$fstype" in
+        vfat|msdos|fat|fat16|fat32)
+            echo "ERROR: destination $path is on a $fstype (FAT32-family) volume." >&2
+            echo "       FAT32 caps individual files at 4 GB; the bundled model blobs" >&2
+            echo "       are larger (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB)." >&2
+            echo "       Reformat as exFAT or ext4 (warning: wipes the volume) then re-run." >&2
+            exit 1
+            ;;
+    esac
+}
+
 # Parse args. --models takes a comma-separated value; everything else
 # is a single token.
 while [[ $# -gt 0 ]]; do
@@ -104,6 +129,10 @@ fi
 # 1. Sanity checks ----------------------------------------------------------
 
 write_step "Verifying prerequisites"
+
+# FAT32 staging would fail mid-blob-copy with a misleading
+# "no space left" error; refuse up front instead.
+check_destination_filesystem "$BUNDLE_ROOT"
 
 if [[ ! -d "$OLLAMA_BUNDLE_SRC" ]]; then
     echo "ERROR: --ollama-bundle path does not exist: $OLLAMA_BUNDLE_SRC" >&2

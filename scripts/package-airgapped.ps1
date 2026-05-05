@@ -79,9 +79,50 @@ function Write-Step([string]$msg) {
     Write-Host "==> $msg" -ForegroundColor Cyan
 }
 
+function Test-DestinationFilesystem {
+    <#
+    .SYNOPSIS
+        Refuse to stage onto a FAT32 destination.
+
+    .DESCRIPTION
+        FAT32 caps individual files at 4 GB. The bundled model blobs
+        are larger (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB), so a
+        FAT32 destination fails mid-blob-copy with a misleading
+        "not enough space" error even when the volume has tens of
+        GB free. Surface the real problem up front.
+    #>
+    param([string]$Path)
+    if (-not $Path) { return }
+    $probe = $Path
+    while ($probe -and -not (Test-Path -LiteralPath $probe)) {
+        $probe = Split-Path -Parent $probe
+    }
+    if (-not $probe) { return }
+    $vol = $null
+    try {
+        $vol = Get-Volume -FilePath $probe -ErrorAction Stop
+    } catch {
+        return
+    }
+    if ($vol.FileSystemType -in @("FAT32", "FAT")) {
+        throw @"
+Destination '$Path' is on a $($vol.FileSystemType) volume.
+FAT32 caps individual files at 4 GB; the bundled model blobs are
+larger (qwen 7B is ~5.4 GB, qwen 14B is ~9 GB).
+
+Reformat as exFAT or NTFS, then re-run. WARNING: wipes the volume.
+    Format-Volume -DriveLetter $($vol.DriveLetter) -FileSystem exFAT
+"@
+    }
+}
+
 # 1. Sanity checks ----------------------------------------------------------
 
 Write-Step "Verifying prerequisites"
+
+# Refuse FAT32 staging targets up front rather than after a blob copy
+# fails with "not enough space".
+Test-DestinationFilesystem -Path $BundleRoot
 
 if (-not (Test-Path $OllamaRoot)) {
     throw "Ollama not found at $OllamaRoot. Install Ollama from https://ollama.com/download/windows on this machine first, or pass -OllamaRoot."
