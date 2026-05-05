@@ -19,7 +19,11 @@ from typing import TYPE_CHECKING
 
 from suite_common.llm import LLMResponseError
 
-from inscription.llm.prompt import SYSTEM_PROMPT, build_user_prompt, parse_response
+from inscription.llm.prompt import (
+    SYSTEM_PROMPT,
+    build_user_prompt,
+    parse_response,
+)
 from inscription.model import DraftStep
 
 if TYPE_CHECKING:
@@ -30,6 +34,11 @@ if TYPE_CHECKING:
     from inscription.storage import SessionRepository
 
 logger = logging.getLogger(__name__)
+
+#: Cap on how much of the model's bad reply we feed back into the
+#: corrective retry. Long enough for the model to see the shape it
+#: produced, short enough to keep the retry prompt small.
+_RETRY_REPLY_PREVIEW_LIMIT = 1500
 
 
 class StepRewriter:
@@ -66,9 +75,10 @@ class StepRewriter:
             existing_steps=existing_steps,
         )
 
-        raw = self._client.chat(system=SYSTEM_PROMPT, user=user_prompt)
         valid_ids = {e.id for e in events if e.id is not None}
-        rewritten = parse_response(raw, valid_event_ids=valid_ids)
+        rewritten = self._chat_and_parse(
+            user_prompt=user_prompt, valid_ids=valid_ids
+        )
 
         new_steps = self._materialise(
             rewritten=rewritten,
@@ -90,6 +100,56 @@ class StepRewriter:
         return saved
 
     # ---------------------------------------------------------- internals
+
+    def _chat_and_parse(
+        self, *, user_prompt: str, valid_ids: set[int]
+    ) -> list[RewrittenStep]:
+        """Call the LLM and parse the reply, with one corrective retry.
+
+        Smaller / less instruction-tuned local models occasionally
+        return JSON in the wrong shape (e.g. echoing back a synthetic
+        session record instead of wrapping the events in
+        ``{"steps": [...]}``). When that happens we feed the bad reply
+        back to the same model with a brief correction and try once
+        more before surfacing the error -- one retry is cheap relative
+        to a 30-90s rewrite, and it resolves the typical drift case.
+        Connection / timeout errors propagate directly: they're not
+        improved by retrying through the same client without a delay.
+        """
+        raw = self._client.chat(system=SYSTEM_PROMPT, user=user_prompt)
+        try:
+            return parse_response(raw, valid_event_ids=valid_ids)
+        except LLMResponseError as first_error:
+            logger.warning(
+                "rewrite: first reply failed schema check (%s); retrying once",
+                first_error,
+            )
+            preview = raw.strip()
+            if len(preview) > _RETRY_REPLY_PREVIEW_LIMIT:
+                preview = preview[:_RETRY_REPLY_PREVIEW_LIMIT] + "…[truncated]"
+            retry_prompt = (
+                f"{user_prompt}\n\n"
+                "Your previous reply did not match the required schema. "
+                "It must be a JSON object with a top-level 'steps' array; "
+                "each entry has 'action' (string), 'result' (string), and "
+                "'source_event_ids' (array of integer event ids from the "
+                "input). Do not include any other top-level keys. Do not "
+                "invent ids that aren't in the input timeline.\n\n"
+                "Your previous reply:\n"
+                "<previous_reply>\n"
+                f"{preview}\n"
+                "</previous_reply>\n\n"
+                "Reply now with the corrected JSON object only. "
+                "Start with { and end with }."
+            )
+            raw_retry = self._client.chat(system=SYSTEM_PROMPT, user=retry_prompt)
+            try:
+                return parse_response(raw_retry, valid_event_ids=valid_ids)
+            except LLMResponseError as retry_error:
+                logger.warning(
+                    "rewrite: retry also failed schema check (%s)", retry_error
+                )
+                raise
 
     def _load_resolved_elements(self, events: list[RawEvent]) -> dict[int, ResolvedElement]:
         ids = {e.resolved_element_id for e in events if e.resolved_element_id is not None}
