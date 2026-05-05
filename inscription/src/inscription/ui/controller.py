@@ -811,4 +811,22 @@ def _friendly_llm_error(raw_message: str, *, base_url: str) -> str:
             "name in Edit → Settings → LLM.\n\n"
             f"Original error: {raw_message}"
         )
+    if (
+        "missing top-level 'steps' key" in lower
+        or "did not return json" in lower
+        or "'steps' must be an array" in lower
+        or "zero usable steps" in lower
+    ):
+        # Schema-mismatch case: the model replied but in the wrong shape.
+        # The full payload is already in the log via logger.exception in
+        # the worker -- the dialog just needs to tell the operator what
+        # to try next, not paste 500 chars of dict repr at them.
+        return (
+            "The model returned JSON in an unexpected shape, even after "
+            "an automatic retry.\n\n"
+            "Smaller / less instruction-tuned local models sometimes "
+            "drift on the output schema. Try the same Rewrite again, or "
+            "switch to a stronger model in Edit → Settings → LLM. The "
+            "full payload is in the log file (Help → Show logs folder)."
+        )
     return raw_message

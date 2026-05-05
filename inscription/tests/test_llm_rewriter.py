@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from suite_common.llm import LLMRequestError
+from suite_common.llm import LLMRequestError, LLMResponseError
 
 from inscription.llm.rewriter import StepRewriter
 from inscription.model import EventKind, ResolvedElement, utcnow
@@ -23,6 +23,25 @@ class _FakeClient:
     def chat(self, *, system: str, user: str, **_kwargs: object) -> str:
         self.calls.append((system, user))
         return self.content
+
+
+class _SequenceClient:
+    """Returns ``responses[i]`` on the i-th call, then raises if out of items.
+
+    Used to test the rewriter's one-shot retry-on-schema-mismatch path:
+    first call returns garbage, second call returns valid JSON.
+    """
+
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.calls: list[tuple[str, str]] = []
+
+    def chat(self, *, system: str, user: str, **_kwargs: object) -> str:
+        self.calls.append((system, user))
+        if not self._responses:
+            msg = "_SequenceClient ran out of canned responses"
+            raise AssertionError(msg)
+        return self._responses.pop(0)
 
 
 class _ExplodingClient:
@@ -175,5 +194,64 @@ def test_rewriter_picks_last_screenshot_for_merged_step(tmp_path) -> None:
 
         # Last-event-with-a-screenshot wins.
         assert steps[0].screenshot_id == shot_b.id
+    finally:
+        repo.close()
+
+
+# ----------------------------------------------------- schema-retry path
+
+def _bad_shape_reply() -> str:
+    """The exact failure mode the operator reported in the field:
+
+    The model returned a JSON object, but with the WRONG top-level keys
+    (it echoed a synthetic session record back to us instead of wrapping
+    the events in ``{"steps": [...]}``). parse_response raises
+    ``LLMResponseError`` on this; the rewriter retries once.
+    """
+    return json.dumps({
+        "session_id": "deadbeef",
+        "user_info": {"username": "test_user_123"},
+        "events": [{"id": 1, "kind": "click"}],
+    })
+
+
+def test_rewriter_retries_once_on_bad_schema(tmp_path) -> None:
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Retry")
+    try:
+        eid = _seed_one_click(repo)
+        good = json.dumps({
+            "steps": [
+                {
+                    "action": "Click Save.",
+                    "result": "",
+                    "source_event_ids": [eid],
+                }
+            ]
+        })
+        client = _SequenceClient([_bad_shape_reply(), good])
+        steps = StepRewriter(repository=repo, client=client).rewrite()
+        assert len(steps) == 1
+        assert steps[0].action == "Click Save."
+        # Two LLM calls: original + corrective retry.
+        assert len(client.calls) == 2
+        # The retry user prompt embeds the bad reply for the model to see.
+        retry_user = client.calls[1][1]
+        assert "previous_reply" in retry_user
+        assert "deadbeef" in retry_user
+    finally:
+        repo.close()
+
+
+def test_rewriter_surfaces_retry_failure(tmp_path) -> None:
+    """If the retry also returns the wrong shape, the rewriter raises
+    -- it doesn't loop forever."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="RetryBad")
+    try:
+        _seed_one_click(repo)
+        client = _SequenceClient([_bad_shape_reply(), _bad_shape_reply()])
+        rewriter = StepRewriter(repository=repo, client=client)
+        with pytest.raises(LLMResponseError):
+            rewriter.rewrite()
+        assert len(client.calls) == 2  # original + one retry, no third
     finally:
         repo.close()
