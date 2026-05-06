@@ -102,3 +102,47 @@ def test_verify_flags_unhashed_rows_as_warnings(tmp_path: Path) -> None:
     # Unhashed rows are warnings, not failures.
     assert result.is_clean is True
     assert result.has_warnings is True
+
+
+def test_verify_progress_callback_fires_for_every_row(tmp_path: Path) -> None:
+    """The progress callback gets (0, total) before the loop and
+    (i+1, total) after each row -- the verify_progress_dialog uses
+    that to drive the progress bar."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Progress")
+    try:
+        for n in range(3):
+            png = repo.session.root / "screenshots" / f"shot{n}.png"
+            png.parent.mkdir(parents=True, exist_ok=True)
+            png.write_bytes(b"fake-png-bytes")
+            sha = hashlib.sha256(b"fake-png-bytes").hexdigest()
+            repo.add_screenshot(
+                relative_path=f"screenshots/shot{n}.png",
+                captured_at=utcnow(),
+                width=1,
+                height=1,
+                sha256=sha,
+            )
+
+        progress: list[tuple[int, int]] = []
+        result = verify_session_integrity(
+            repo, progress_callback=lambda d, t: progress.append((d, t))
+        )
+
+        # Initial 0/total + one tick per row.
+        assert progress[0] == (0, 3)
+        assert progress[-1] == (3, 3)
+        assert len(progress) == 4
+        assert result.ok == 3
+    finally:
+        repo.close()
+
+
+def test_verify_no_progress_callback_when_omitted(tmp_path: Path) -> None:
+    """CLI / test paths can leave progress_callback at the default."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="NoCb")
+    try:
+        # No screenshots, no callback -- must not raise.
+        result = verify_session_integrity(repo)
+        assert result.total_checked == 0
+    finally:
+        repo.close()

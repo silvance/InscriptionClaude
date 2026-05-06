@@ -13,6 +13,7 @@ import logging
 import re
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -109,6 +110,49 @@ class SessionRepository:
         except sqlite3.Error as exc:
             msg = f"Failed to persist {what}: {exc}"
             raise StorageError(msg) from exc
+
+    @contextmanager
+    def _transaction(self, *, what: str):  # type: ignore[no-untyped-def]
+        """Group a write into one atomic transaction.
+
+        Acquires ``self._lock`` for the duration so other threads can't
+        interleave queries. Commits on clean exit; rolls back on any
+        exception before re-raising. Without the rollback, a partial
+        write that raised mid-statement would leave SQLite's implicit
+        transaction open, and the *next* write method's commit would
+        accidentally persist that partial state along with its own --
+        the failure mode the field-quality reviews flagged.
+
+        Always yield from the same lock-held scope so callers can
+        write::
+
+            with self._transaction(what="replace_steps"):
+                self._conn.execute("DELETE ...")
+                for ...:
+                    self._conn.execute("INSERT ...")
+
+        Read-only methods don't need this -- they just acquire
+        ``self._lock`` directly. Writes that consist of a single
+        ``execute()`` could in principle skip it (a failed statement
+        doesn't open a transaction), but routing every writer through
+        ``_transaction`` keeps the contract uniform and protects
+        against a later refactor turning a single-statement writer
+        into a multi-statement one without remembering to add
+        rollback handling.
+        """
+        with self._lock:
+            try:
+                yield
+            except BaseException:
+                try:
+                    self._conn.rollback()
+                except sqlite3.Error:
+                    # Rollback itself failing is rare but possible
+                    # (disk full, db locked); log and continue
+                    # propagating the original exception.
+                    logger.exception("rollback after failed %s also failed", what)
+                raise
+            self._commit(what=what)
 
     # ---------------------------------------------------------- lifecycle
 
@@ -259,12 +303,11 @@ class SessionRepository:
     # --------------------------------------------------------- mutations
 
     def end_session(self) -> None:
-        with self._lock:
+        with self._transaction(what="end_session"):
             self._conn.execute(
                 "UPDATE session_info SET ended_at = ? WHERE id = 1 AND ended_at IS NULL",
                 (_iso(utcnow()),),
             )
-            self._commit(what="transaction")
 
     def add_screenshot(
         self,
@@ -276,7 +319,7 @@ class SessionRepository:
         sha256: str = "",
         highlight_rect: tuple[int, int, int, int] | None = None,
     ) -> ScreenshotArtifact:
-        with self._lock:
+        with self._transaction(what="add_screenshot"):
             cursor = self._conn.execute(
                 """
                 INSERT INTO screenshot_artifacts
@@ -292,11 +335,10 @@ class SessionRepository:
                     _dumps_rect(highlight_rect),
                 ),
             )
-            self._commit(what="transaction")
             screenshot_id = cursor.lastrowid
-        if screenshot_id is None:
-            msg = "INSERT into screenshots did not return a row id"
-            raise StorageError(msg)
+            if screenshot_id is None:
+                msg = "INSERT into screenshots did not return a row id"
+                raise StorageError(msg)
         return ScreenshotArtifact(
             id=screenshot_id,
             relative_path=relative_path,
@@ -308,7 +350,7 @@ class SessionRepository:
         )
 
     def add_resolved_element(self, element: ResolvedElement) -> ResolvedElement:
-        with self._lock:
+        with self._transaction(what="add_resolved_element"):
             cursor = self._conn.execute(
                 """
                 INSERT INTO resolved_elements
@@ -328,11 +370,10 @@ class SessionRepository:
                     element.owner_process_name,
                 ),
             )
-            self._commit(what="transaction")
             element_id = cursor.lastrowid
-        if element_id is None:
-            msg = "INSERT into resolved_elements did not return a row id"
-            raise StorageError(msg)
+            if element_id is None:
+                msg = "INSERT into resolved_elements did not return a row id"
+                raise StorageError(msg)
         return dataclasses.replace(element, id=element_id)
 
     def append_event(
@@ -351,7 +392,7 @@ class SessionRepository:
         resolved_element_id: int | None = None,
     ) -> RawEvent:
         occurred_at = occurred_at or utcnow()
-        with self._lock:
+        with self._transaction(what="append_event"):
             row = self._conn.execute(
                 "SELECT COALESCE(MAX(sequence), 0) + 1 FROM raw_events"
             ).fetchone()
@@ -379,11 +420,10 @@ class SessionRepository:
                     resolved_element_id,
                 ),
             )
-            self._commit(what="transaction")
             event_id = cursor.lastrowid
-        if event_id is None:
-            msg = "INSERT into raw_events did not return a row id"
-            raise StorageError(msg)
+            if event_id is None:
+                msg = "INSERT into raw_events did not return a row id"
+                raise StorageError(msg)
         return RawEvent(
             id=event_id,
             sequence=next_seq,
@@ -406,7 +446,7 @@ class SessionRepository:
         Used by the step generator after grouping raw events.
         """
         saved: list[DraftStep] = []
-        with self._lock:
+        with self._transaction(what="replace_steps"):
             self._conn.execute("DELETE FROM draft_steps")
             for i, step in enumerate(steps, start=1):
                 cursor = self._conn.execute(
@@ -432,7 +472,6 @@ class SessionRepository:
                     msg = "INSERT into draft_steps did not return a row id"
                     raise StorageError(msg)
                 saved.append(dataclasses.replace(step, id=step_id, sequence=i))
-            self._commit(what="transaction")
         return saved
 
     def append_step(self, step: DraftStep) -> DraftStep:
@@ -442,7 +481,7 @@ class SessionRepository:
         each new event either extends the previous step or starts a new
         one via this method. Sequence is auto-assigned to ``MAX(sequence) + 1``.
         """
-        with self._lock:
+        with self._transaction(what="append_step"):
             row = self._conn.execute(
                 "SELECT COALESCE(MAX(sequence), 0) FROM draft_steps"
             ).fetchone()
@@ -469,7 +508,6 @@ class SessionRepository:
             if new_id is None:
                 msg = "INSERT into draft_steps did not return a row id"
                 raise StorageError(msg)
-            self._commit(what="transaction")
         return dataclasses.replace(step, id=new_id, sequence=next_sequence)
 
     def extend_step_sources(
@@ -493,7 +531,7 @@ class SessionRepository:
         """
         if not extra_event_ids:
             return
-        with self._lock:
+        with self._transaction(what="extend_step_sources"):
             row = self._conn.execute(
                 "SELECT source_event_ids, screenshot_id FROM draft_steps WHERE id = ?",
                 (step_id,),
@@ -516,7 +554,6 @@ class SessionRepository:
                     "WHERE id = ?",
                     (json.dumps(list(combined)), shot, step_id),
                 )
-            self._commit(what="transaction")
 
     def update_step_fields(
         self,
@@ -541,20 +578,18 @@ class SessionRepository:
             params.append(result)
         sets.append("manual_edit = 1")
         params.append(step_id)
-        with self._lock:
+        with self._transaction(what="update_step_fields"):
             self._conn.execute(
                 f"UPDATE draft_steps SET {', '.join(sets)} WHERE id = ?",
                 params,
             )
-            self._commit(what="transaction")
 
     def set_step_suppressed(self, step_id: int, *, suppressed: bool) -> None:
-        with self._lock:
+        with self._transaction(what="set_step_suppressed"):
             self._conn.execute(
                 "UPDATE draft_steps SET suppressed = ? WHERE id = ?",
                 (1 if suppressed else 0, step_id),
             )
-            self._commit(what="transaction")
 
     def set_step_evidentiary(self, step_id: int, *, evidentiary: bool) -> None:
         """Mark or unmark a step as evidentiary.
@@ -562,22 +597,20 @@ class SessionRepository:
         Downstream report-builder tools query this flag to pull the
         examiner-curated subset of steps into the final forensic report.
         """
-        with self._lock:
+        with self._transaction(what="set_step_evidentiary"):
             self._conn.execute(
                 "UPDATE draft_steps SET evidentiary = ? WHERE id = ?",
                 (1 if evidentiary else 0, step_id),
             )
-            self._commit(what="transaction")
 
     def reorder_steps(self, ordered_step_ids: list[int]) -> None:
         """Rewrite sequence numbers to match ``ordered_step_ids``."""
-        with self._lock:
+        with self._transaction(what="reorder_steps"):
             for i, step_id in enumerate(ordered_step_ids, start=1):
                 self._conn.execute(
                     "UPDATE draft_steps SET sequence = ? WHERE id = ?",
                     (i, step_id),
                 )
-            self._commit(what="transaction")
 
     def merge_steps(self, *, primary_id: int, other_id: int) -> DraftStep:
         """Merge ``other_id`` into ``primary_id``; delete the other row.
@@ -588,7 +621,7 @@ class SessionRepository:
         either side are dropped. Marks the result as ``manual_edit``
         because the user has clearly intervened.
         """
-        with self._lock:
+        with self._transaction(what="merge_steps"):
             primary_row = self._conn.execute(
                 "SELECT * FROM draft_steps WHERE id = ?", (primary_id,)
             ).fetchone()
@@ -615,7 +648,6 @@ class SessionRepository:
                 (merged_action, merged_result, json.dumps(list(combined_ids)), primary_id),
             )
             self._conn.execute("DELETE FROM draft_steps WHERE id = ?", (other_id,))
-            self._commit(what="transaction")
         return dataclasses.replace(
             primary,
             action=merged_action,
@@ -635,7 +667,7 @@ class SessionRepository:
         Raises :class:`StorageError` if the step has fewer than two
         source events (nothing to split).
         """
-        with self._lock:
+        with self._transaction(what="split_step"):
             row = self._conn.execute(
                 "SELECT * FROM draft_steps WHERE id = ?", (step_id,)
             ).fetchone()
@@ -688,7 +720,6 @@ class SessionRepository:
                 """,
                 (json.dumps(list(head)), step_id),
             )
-            self._commit(what="transaction")
 
         first = dataclasses.replace(step, source_event_ids=head, manual_edit=True)
         second = dataclasses.replace(
@@ -701,12 +732,11 @@ class SessionRepository:
         return first, second
 
     def set_step_screenshot(self, step_id: int, screenshot_id: int | None) -> None:
-        with self._lock:
+        with self._transaction(what="set_step_screenshot"):
             self._conn.execute(
                 "UPDATE draft_steps SET screenshot_id = ? WHERE id = ?",
                 (screenshot_id, step_id),
             )
-            self._commit(what="transaction")
 
     # ----------------------------------------------------------- manifest
 
