@@ -19,9 +19,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import (
-    QApplication,
     QDialog,
     QFileDialog,
     QInputDialog,
@@ -67,7 +66,7 @@ from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
 from inscription.ui.settings_dialog import SettingsDialog
 from inscription.ui.verify_dialog import IntegrityResultDialog
-from inscription.verify import verify_session_integrity
+from inscription.ui.verify_progress_dialog import VerifyProgressDialog, VerifyWorker
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -76,6 +75,7 @@ if TYPE_CHECKING:
     from inscription.model import ExportDocument
     from inscription.ui.recorder_bar import RecorderBar
     from inscription.ui.workspace import SessionWorkspaceWidget
+    from inscription.verify import IntegrityResult
 
 logger = logging.getLogger(__name__)
 
@@ -180,20 +180,26 @@ class SessionController(QObject):
                 "Open a session before running an integrity check.",
             )
             return
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            result = verify_session_integrity(self._repository)
-        except Exception:
-            logger.exception("Integrity check failed")
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(
-                self._parent_widget,
-                "Integrity check failed",
-                "Could not run the check. See logs for details.",
-            )
-            return
-        QApplication.restoreOverrideCursor()
+        # The hash pass is CPU-bound and can take seconds on a large
+        # case; previously this ran synchronously with a wait cursor
+        # and froze the event loop. Lift onto a QThread with a
+        # progress dialog (mirrors the rewrite-with-AI flow).
+        worker = VerifyWorker(self._repository)
+        dialog = VerifyProgressDialog(worker, parent=self._parent_widget)
+        dialog.succeeded.connect(self._show_integrity_result)
+        dialog.failed.connect(self._show_integrity_failure)
+        dialog.start()
+        dialog.exec()
+
+    def _show_integrity_result(self, result: IntegrityResult) -> None:
         IntegrityResultDialog(result, parent=self._parent_widget).exec()
+
+    def _show_integrity_failure(self, message: str) -> None:
+        QMessageBox.critical(
+            self._parent_widget,
+            "Integrity check failed",
+            f"Could not run the check.\n\n{message}\n\nSee logs for details.",
+        )
 
     def shutdown(self) -> None:
         self._workspace.flush_pending()

@@ -184,7 +184,21 @@ class CaptureEngine:
             if item is _STOP_SENTINEL:
                 self._queue.task_done()
                 break
-            assert isinstance(item, RawCaptureEvent)
+            if not isinstance(item, RawCaptureEvent):
+                # Defensive: only _STOP_SENTINEL or RawCaptureEvent
+                # objects are ever submitted to this queue, so reaching
+                # here means a programmer error in submit_event. We
+                # previously used `assert isinstance(...)`, which gets
+                # stripped under `python -O`. Logging + skipping is
+                # safer: the rest of the queue keeps draining instead
+                # of having the worker crash.
+                logger.error(
+                    "engine: discarded unexpected queue item %r (type %s)",
+                    item,
+                    type(item).__name__,
+                )
+                self._queue.task_done()
+                continue
             try:
                 self._process(item, foreground=foreground, resolver=resolver)
             except Exception:

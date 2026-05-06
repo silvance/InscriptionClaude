@@ -285,3 +285,64 @@ def test_reorder_steps_updates_sequence(tmp_path) -> None:
         assert [s.action for s in listed] == ["C", "A", "B"]
     finally:
         repo.close()
+
+
+# ----------------------------------------------------- transaction rollback
+
+def test_transaction_rolls_back_on_exception(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Mid-write failure must NOT leak partial state into the next write.
+
+    Regression guard for the field-quality-review finding: the old
+    pattern was ``with self._lock: ...self._commit(what=...)`` with no
+    rollback on exception. If a write inside the block raised, SQLite's
+    implicit transaction was left open with the partial work pending;
+    the next call to a write method's _commit() would commit that
+    leftover state alongside its own work. The new ``_transaction``
+    context manager rolls back on exception so the DB is unchanged
+    after a failed partial write.
+    """
+    repo = SessionRepository.create(workspace_root=tmp_path, name="Rollback")
+    try:
+        repo.replace_steps([
+            DraftStep(
+                id=None, sequence=0, action="A", result="",
+                source_event_ids=(), screenshot_id=None,
+            ),
+            DraftStep(
+                id=None, sequence=0, action="B", result="",
+                source_event_ids=(), screenshot_id=None,
+            ),
+        ])
+        baseline = [(s.action, s.result) for s in repo.list_steps()]
+        assert baseline == [("A", ""), ("B", "")]
+
+        # Drive _transaction directly: do a destructive DELETE inside
+        # the block and then raise. Without rollback, the DELETE would
+        # be committed by the *next* successful write method's commit.
+        # With rollback, the rows survive.
+        # PT012 wants a single statement inside pytest.raises, but
+        # this regression test genuinely needs to run multiple lines
+        # inside the _transaction block (DELETE then raise) to show
+        # the rollback semantics.
+        def provoke_rollback() -> None:
+            with repo._transaction(what="synthetic-failure"):
+                repo._conn.execute("DELETE FROM draft_steps")
+                msg = "synthetic mid-write failure"
+                raise RuntimeError(msg)
+
+        with pytest.raises(RuntimeError, match="synthetic"):
+            provoke_rollback()
+
+        # Subsequent unrelated successful write must NOT carry the
+        # rolled-back DELETE forward.
+        repo.set_step_evidentiary(
+            repo.list_steps()[0].id or 0, evidentiary=True
+        )
+
+        after = [(s.action, s.result) for s in repo.list_steps()]
+        assert after == baseline, (
+            "Failed _transaction leaked partial state into the DB; "
+            "rollback regression."
+        )
+    finally:
+        repo.close()

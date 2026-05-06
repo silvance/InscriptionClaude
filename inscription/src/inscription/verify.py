@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from inscription.storage import SessionRepository
 
 logger = logging.getLogger(__name__)
@@ -67,16 +69,23 @@ class IntegrityResult:
         return bool(self.unhashed)
 
 
-def verify_session_integrity(repository: SessionRepository) -> IntegrityResult:
+def verify_session_integrity(
+    repository: SessionRepository,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> IntegrityResult:
     """Re-hash every recorded screenshot and compare to its stored SHA-256.
 
-    Synchronous; typical sessions hold dozens to a few hundred PNGs and
-    SHA-256 over a few MB each is fast enough that a wait cursor is
-    enough UI. Worker-thread the call from the UI if you ever see a
-    session big enough to feel sluggish.
+    The hashing loop is CPU-bound and can take seconds on a forensic-
+    case-sized session (hundreds of multi-MB PNGs). The UI lifts this
+    onto a QThread via :class:`VerifyWorker`; pass ``progress_callback``
+    so the worker can emit ``(done, total)`` signals between rows
+    and keep the progress dialog responsive. Tests / CLI callers can
+    leave it at ``None``.
     """
     session_root = repository.session.root
     rows = repository.list_screenshots()
+    total = len(rows)
 
     mismatched: list[MismatchedScreenshot] = []
     missing: list[str] = []
@@ -88,7 +97,10 @@ def verify_session_integrity(repository: SessionRepository) -> IntegrityResult:
     # ``..`` segments or symlinks.
     session_root_resolved = session_root.resolve()
 
-    for shot in rows:
+    if progress_callback is not None:
+        progress_callback(0, total)
+
+    for i, shot in enumerate(rows):
         if not _is_inside(session_root_resolved, shot.relative_path):
             # Path-traversal guard: a row whose ``relative_path``
             # escapes the session directory (``../../etc/passwd``,
@@ -99,25 +111,27 @@ def verify_session_integrity(repository: SessionRepository) -> IntegrityResult:
                 shot.relative_path,
             )
             missing.append(shot.relative_path)
-            continue
-        path = session_root / shot.relative_path
-        if not path.exists():
-            missing.append(shot.relative_path)
-            continue
-        if not shot.sha256:
-            unhashed.append(shot.relative_path)
-            continue
-        actual = _hash_file(path)
-        if actual.lower() == shot.sha256.lower():
-            ok += 1
         else:
-            mismatched.append(
-                MismatchedScreenshot(
-                    relative_path=shot.relative_path,
-                    expected_sha256=shot.sha256,
-                    actual_sha256=actual,
-                )
-            )
+            path = session_root / shot.relative_path
+            if not path.exists():
+                missing.append(shot.relative_path)
+            elif not shot.sha256:
+                unhashed.append(shot.relative_path)
+            else:
+                actual = _hash_file(path)
+                if actual.lower() == shot.sha256.lower():
+                    ok += 1
+                else:
+                    mismatched.append(
+                        MismatchedScreenshot(
+                            relative_path=shot.relative_path,
+                            expected_sha256=shot.sha256,
+                            actual_sha256=actual,
+                        )
+                    )
+
+        if progress_callback is not None:
+            progress_callback(i + 1, total)
 
     result = IntegrityResult(
         total_checked=len(rows),
