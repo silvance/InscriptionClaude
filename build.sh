@@ -63,10 +63,17 @@ esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Bail early when the user invoked us outside the configured venv,
-# with a wrong Python, or without the [dev] extras (which include
-# PyInstaller). The bare `No module named PyInstaller` from invoking
-# `python -m PyInstaller` later is too cryptic to act on.
+# Bail early when the env can't run PyInstaller, printing the exact
+# commands to fix it. The bare `No module named PyInstaller` from
+# invoking `python -m PyInstaller` later is too cryptic to act on.
+#
+# Order matters: PyInstaller importing is the only thing the build
+# actually requires. Venv-active and Python-version checks are
+# *guidance* for the dominant local-checkout failure mode, but they
+# must NOT reject a working setup -- CI installs Python via
+# actions/setup-python without a venv, and any contributor who sets
+# things up unconventionally (pyenv-managed system Python, conda,
+# nix shell, etc.) has likely got PyInstaller importable already.
 preflight() {
     local py_major py_minor
     if ! command -v python >/dev/null 2>&1; then
@@ -81,6 +88,16 @@ preflight() {
         echo "        -e inscription[dev] -e caseforge[dev] -e caseguide[dev]" >&2
         exit 1
     fi
+
+    # Fast accept: PyInstaller already importable -> we're set up.
+    # Skips the venv check so unconventional setups (CI, conda,
+    # system-Python pip --user) work without complaint.
+    if python -c "import PyInstaller" >/dev/null 2>&1; then
+        return
+    fi
+
+    # PyInstaller missing -- now graduate the guidance based on
+    # how the environment looks.
     py_major=$(python -c 'import sys; print(sys.version_info[0])' 2>/dev/null || echo 0)
     py_minor=$(python -c 'import sys; print(sys.version_info[1])' 2>/dev/null || echo 0)
     if (( py_major < 3 || (py_major == 3 && py_minor < 12) )); then
@@ -97,7 +114,7 @@ preflight() {
     fi
 
     if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-        echo "ERROR: no virtual environment is active." >&2
+        echo "ERROR: PyInstaller is not installed and no virtual environment is active." >&2
         echo >&2
         if [[ -f "${REPO_ROOT}/.venv/bin/activate" ]]; then
             echo "Activate the existing venv first:" >&2
@@ -118,16 +135,14 @@ preflight() {
         exit 1
     fi
 
-    if ! python -c "import PyInstaller" >/dev/null 2>&1; then
-        echo "ERROR: PyInstaller is not installed in the active venv." >&2
-        echo "       (\$VIRTUAL_ENV = ${VIRTUAL_ENV})" >&2
-        echo >&2
-        echo "Install the [dev] extras (which include PyInstaller):" >&2
-        echo "    cd $REPO_ROOT" >&2
-        echo "    python -m pip install -e suite_common \\" >&2
-        echo "        -e inscription[dev] -e caseforge[dev] -e caseguide[dev]" >&2
-        exit 1
-    fi
+    echo "ERROR: PyInstaller is not installed in the active venv." >&2
+    echo "       (\$VIRTUAL_ENV = ${VIRTUAL_ENV})" >&2
+    echo >&2
+    echo "Install the [dev] extras (which include PyInstaller):" >&2
+    echo "    cd $REPO_ROOT" >&2
+    echo "    python -m pip install -e suite_common \\" >&2
+    echo "        -e inscription[dev] -e caseforge[dev] -e caseguide[dev]" >&2
+    exit 1
 }
 
 preflight
