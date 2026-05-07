@@ -12,11 +12,18 @@ authors = [{ name = "Silvance" }]
 dependencies = []
 
 [project.optional-dependencies]
+# Pulled by ``suite_common[ui]``; only the GUI apps need PySide6.
+# Headless consumers (CLI tools, future server-side helpers) can keep
+# the bare suite_common install footprint small.
+ui = [
+    "pyside6>=6.8,<7",
+]
 dev = [
     "pytest>=8.2",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.10",
+    "pyside6>=6.8,<7",
 ]
 
 [tool.hatch.build.targets.wheel]
