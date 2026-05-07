@@ -1,83 +1,30 @@
 """Programmatic application icon for CaseForge.
 
-Drawn at runtime so palette tweaks flow into the icon without an
-asset roundtrip and the bundle size stays tiny.
-
-The mark is a rounded accent square with a stylised case-folder
+The shell (rounded accent square + gradient + top highlight) is
+shared across the suite via :func:`suite_common.ui.app_icon.build_app_icon`.
+This module supplies the per-app emblem: a stylised case-folder
 silhouette in white — a literal "case file" so the tool reads
 immediately as the case-intake tool of the suite. Beside Inscription
 (I + recording dot) and CaseGuide (checklist), the folder is the
 visually distinct emblem.
-
-Cohesion: same shell shape and accent colour as the sibling apps; same
-gradient + top highlight at sizes >= 32px so the suite reads as one
-family in a taskbar.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (
-    QBrush,
-    QColor,
-    QIcon,
-    QLinearGradient,
-    QPainter,
-    QPainterPath,
-    QPixmap,
-)
+from typing import TYPE_CHECKING
 
-from caseforge.ui.style import LIGHT, Palette
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath
+from suite_common.ui.app_icon import DETAIL_MIN_SIZE
+from suite_common.ui.app_icon import build_app_icon as _build
 
-_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
-_DETAIL_MIN_SIZE = 32
+if TYPE_CHECKING:
+    from suite_common.ui.style import Palette
 
 
 def build_app_icon(palette: Palette | None = None) -> QIcon:
-    """Return a multi-resolution :class:`QIcon` rendered from scratch."""
-    p = palette or LIGHT
-    icon = QIcon()
-    for size in _SIZES:
-        icon.addPixmap(_render(size, p))
-    return icon
-
-
-def _render(size: int, p: Palette) -> QPixmap:
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pm)
-    try:
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-        _draw_shell(painter, size, accent=p.accent, accent_hover=p.accent_hover)
-        _draw_folder(painter, size)
-    finally:
-        painter.end()
-    return pm
-
-
-def _draw_shell(painter: QPainter, size: int, *, accent: str, accent_hover: str) -> None:
-    """Rounded accent square with gradient + top highlight."""
-    radius = size * 0.22
-    body = QRectF(0.5, 0.5, size - 1, size - 1)
-    path = QPainterPath()
-    path.addRoundedRect(body, radius, radius)
-
-    if size >= _DETAIL_MIN_SIZE:
-        gradient = QLinearGradient(QPointF(0, 0), QPointF(0, size))
-        gradient.setColorAt(0.0, QColor(accent_hover))
-        gradient.setColorAt(1.0, QColor(accent))
-        painter.fillPath(path, QBrush(gradient))
-    else:
-        painter.fillPath(path, QBrush(QColor(accent)))
-
-    if size >= _DETAIL_MIN_SIZE:
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 38))
-        painter.drawRoundedRect(
-            QRectF(size * 0.06, size * 0.06, size * 0.88, size * 0.20),
-            radius * 0.5,
-            radius * 0.5,
-        )
+    """Return CaseForge's multi-resolution :class:`QIcon`."""
+    return _build(_draw_folder, palette=palette)
 
 
 def _draw_folder(painter: QPainter, size: int) -> None:
@@ -121,15 +68,14 @@ def _draw_folder(painter: QPainter, size: int) -> None:
     painter.setBrush(QColor("white"))
     painter.drawPath(path)
 
-    if size < _DETAIL_MIN_SIZE:
+    if size < DETAIL_MIN_SIZE:
         return
 
     # Two horizontal divider lines on the folder body — gestures at
     # case structure (name, reference, examiner, scope) without
     # cluttering the silhouette.
-    line_color = QColor(0, 0, 0, 38)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(line_color)
+    painter.setBrush(QColor(0, 0, 0, 38))
     line_height = max(1.0, size * 0.025)
     line_inset = size * 0.06
     line_x = body_left + line_inset

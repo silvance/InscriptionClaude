@@ -1,31 +1,28 @@
 """Filesystem paths used by Inscription.
 
-All path constants are resolved at import time. Call :func:`ensure_dirs` once
-at startup to create any missing directories.
+All path constants are resolved at import time. Call :func:`ensure_dirs`
+once at startup to create any missing directories.
 
-On Windows (the primary target), paths are rooted at ``%LOCALAPPDATA%``. On
-other platforms a sensible fallback under ``~/.local/share`` is used so the
-package remains importable for development and CI on Linux/macOS.
+The data-root convention (LOCALAPPDATA on Windows, ~/.local/share on
+other platforms) is shared with CaseForge / CaseGuide via
+:func:`suite_common.paths.default_data_root`. Each app pins its own
+sub-paths under that root.
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+from suite_common import default_data_root
+from suite_common.paths import ensure_dirs as _ensure_dirs
 
-def _local_appdata() -> Path:
-    """Return the Windows ``%LOCALAPPDATA%`` directory, or a dev fallback."""
-    env = os.environ.get("LOCALAPPDATA")
-    if env:
-        return Path(env)
-    return Path.home() / ".local" / "share"
-
+if TYPE_CHECKING:
+    from pathlib import Path
 
 APP_NAME = "Inscription"
 
 #: Root directory for all Inscription data on this machine.
-APP_DIR: Path = _local_appdata() / APP_NAME
+APP_DIR: Path = default_data_root(APP_NAME)
 
 #: Rotating log files.
 LOG_DIR: Path = APP_DIR / "logs"
@@ -43,5 +40,4 @@ CONFIG_FILE: Path = APP_DIR / "config.ini"
 
 def ensure_dirs() -> None:
     """Create all application directories if they do not already exist."""
-    for d in (APP_DIR, LOG_DIR, WORKSPACE_DIR, CACHE_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+    _ensure_dirs(APP_DIR, LOG_DIR, WORKSPACE_DIR, CACHE_DIR)

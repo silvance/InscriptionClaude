@@ -1,37 +1,24 @@
 """Programmatic application icon for CaseGuide.
 
-Drawn at runtime so palette tweaks flow into the icon without an
-asset roundtrip and the bundle size stays tiny.
-
-The mark is a rounded accent square with a small white checklist —
-three rows whose top row carries a leading checkmark. CaseGuide is
-the suggestions / coach tool of the suite, so a checklist reads
-immediately while staying visually distinct from Inscription's "I"
-plus recording dot and CaseForge's case-folder silhouette.
-
-Cohesion: same shell shape and accent colour as the sibling apps; same
-gradient + top highlight at sizes >= 32px so the suite reads as one
-family in a taskbar.
+The shell (rounded accent square + gradient + top highlight) is
+shared across the suite via :func:`suite_common.ui.app_icon.build_app_icon`.
+This module supplies the per-app emblem: three checklist rows in
+white with a leading checkmark on row one. Beside Inscription
+(I + recording dot) and CaseForge (case folder), the checklist
+reads immediately as the suggestion-coach tool of the suite.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (
-    QBrush,
-    QColor,
-    QIcon,
-    QLinearGradient,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QPixmap,
-)
+from typing import TYPE_CHECKING
 
-from caseguide.ui.style import LIGHT, Palette
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen
+from suite_common.ui.app_icon import DETAIL_MIN_SIZE
+from suite_common.ui.app_icon import build_app_icon as _build
 
-_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
-_DETAIL_MIN_SIZE = 32
+if TYPE_CHECKING:
+    from suite_common.ui.style import Palette
 
 #: A neutral darker tone for the checkmark stroke. Reads as "marked"
 #: against the white box without needing access to the live palette
@@ -41,50 +28,8 @@ _CHECK_STROKE = QColor(20, 60, 110)
 
 
 def build_app_icon(palette: Palette | None = None) -> QIcon:
-    """Return a multi-resolution :class:`QIcon` rendered from scratch."""
-    p = palette or LIGHT
-    icon = QIcon()
-    for size in _SIZES:
-        icon.addPixmap(_render(size, p))
-    return icon
-
-
-def _render(size: int, p: Palette) -> QPixmap:
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pm)
-    try:
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-        _draw_shell(painter, size, accent=p.accent, accent_hover=p.accent_hover)
-        _draw_checklist(painter, size)
-    finally:
-        painter.end()
-    return pm
-
-
-def _draw_shell(painter: QPainter, size: int, *, accent: str, accent_hover: str) -> None:
-    """Rounded accent square with gradient + top highlight."""
-    radius = size * 0.22
-    body = QRectF(0.5, 0.5, size - 1, size - 1)
-    path = QPainterPath()
-    path.addRoundedRect(body, radius, radius)
-
-    if size >= _DETAIL_MIN_SIZE:
-        gradient = QLinearGradient(QPointF(0, 0), QPointF(0, size))
-        gradient.setColorAt(0.0, QColor(accent_hover))
-        gradient.setColorAt(1.0, QColor(accent))
-        painter.fillPath(path, QBrush(gradient))
-    else:
-        painter.fillPath(path, QBrush(QColor(accent)))
-
-    if size >= _DETAIL_MIN_SIZE:
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 38))
-        painter.drawRoundedRect(
-            QRectF(size * 0.06, size * 0.06, size * 0.88, size * 0.20),
-            radius * 0.5,
-            radius * 0.5,
-        )
+    """Return CaseGuide's multi-resolution :class:`QIcon`."""
+    return _build(_draw_checklist, palette=palette)
 
 
 def _draw_checklist(painter: QPainter, size: int) -> None:
@@ -112,8 +57,7 @@ def _draw_checklist(painter: QPainter, size: int) -> None:
             QRectF(inset_x, row_y, box_size, box_size), radius, radius
         )
         # Label brightness drops on lower rows so the eye lands on the
-        # checked top row first — the implicit reading order of the
-        # mark.
+        # checked top row first — the implicit reading order of the mark.
         opacity = (1.0, 0.78, 0.62)[i]
         painter.setBrush(QColor(255, 255, 255, int(255 * opacity)))
         painter.drawRoundedRect(
@@ -127,7 +71,7 @@ def _draw_checklist(painter: QPainter, size: int) -> None:
             label_height / 2,
         )
 
-    if size < _DETAIL_MIN_SIZE:
+    if size < DETAIL_MIN_SIZE:
         # Below 32px the check stroke fights the box edge and the row
         # spacing collapses; the bare three rows still read as
         # "checklist" without it.
@@ -142,8 +86,8 @@ def _draw_checklist(painter: QPainter, size: int) -> None:
     painter.setBrush(Qt.BrushStyle.NoBrush)
 
     # Tick: from lower-left of the box, down to the elbow, up to
-    # upper-right. Coordinates expressed as a fraction of box_size
-    # so the tick scales with the row height.
+    # upper-right. Coordinates expressed as a fraction of box_size so
+    # the tick scales with the row height.
     tick = QPainterPath()
     tick.moveTo(inset_x + box_size * 0.18, box_y + box_size * 0.55)
     tick.lineTo(inset_x + box_size * 0.42, box_y + box_size * 0.78)

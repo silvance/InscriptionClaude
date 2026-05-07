@@ -1,6 +1,6 @@
 """Shared bits for the Inscription / CaseForge / CaseGuide suite.
 
-Three halves now:
+Four halves now:
 
 - :mod:`suite_common.llm` — OpenAI-compatible chat-completions client used
   by Inscription's step rewriter and CaseGuide's suggestions refiner.
@@ -9,6 +9,9 @@ Three halves now:
 - :mod:`suite_common.bundle` — read the air-gapped bundle's version.json
   stamp at runtime so each app's About dialog can show the build
   provenance the operator actually has on their machine.
+- :mod:`suite_common.paths` — per-user data-root helper so each app's
+  ``paths.py`` doesn't have to duplicate the LOCALAPPDATA-vs-
+  ~/.local/share decision.
 """
 
 from suite_common.bundle import bundle_root, read_version_info
@@ -29,6 +32,7 @@ from suite_common.llm import (
     LLMResponseError,
     list_available_models,
 )
+from suite_common.paths import default_data_root, ensure_dirs
 
 __all__ = [
     "DEFAULT_TEMPERATURE",
@@ -41,6 +45,8 @@ __all__ = [
     "bundle_root",
     "coerce_bool",
     "coerce_int",
+    "default_data_root",
+    "ensure_dirs",
     "list_available_models",
     "parse_iso",
     "parse_optional_iso",
