@@ -32,6 +32,26 @@ logger = logging.getLogger(__name__)
 #: deep-nested layouts.
 _MAX_WALK_UP_STEPS = 8
 
+#: How many sibling labels to harvest into ``nearby_text`` for an
+#: icon-only or generically-named click. Enough to disambiguate
+#: typical "Save | Cancel" dialogs and tab-strip groupings; small
+#: enough to keep the per-event prompt payload tight.
+_MAX_NEARBY_LABELS = 4
+_MAX_NEARBY_LABEL_LEN = 40
+
+#: Control types that count as "labels" for the nearby-text pass --
+#: passive text decorations, headers, and read-only fields. Buttons
+#: and other interactive siblings are skipped: a click on a "Save"
+#: button shouldn't pull in adjacent "Cancel" / "Help" buttons as
+#: context, only the labels and section headers around them.
+_LABEL_CONTROL_TYPES: frozenset[str] = frozenset({
+    "Text",
+    "Header",
+    "GroupBox",
+    "Group",
+    "StatusBar",
+})
+
 #: UIA control types that represent something the user can actually click
 #: on with intent (vs containers, panes, and static decorations). When the
 #: resolver walks up the tree it stops at the first ancestor in this set
@@ -81,6 +101,7 @@ class UiaElementResolver(ElementResolver):
         class_name = _safe_get(info, "class_name")
         bounding_rect = _safe_rect(info)
         owner_process_name = _safe_process_name(info)
+        nearby_text = _collect_nearby_text(info)
 
         if not any([name, control_type, automation_id, class_name]):
             return self._fallback.resolve_at(x, y)
@@ -103,6 +124,7 @@ class UiaElementResolver(ElementResolver):
             method="uia" if walk_steps == 0 else "uia-walkup",
             bounding_rect=bounding_rect,
             owner_process_name=owner_process_name,
+            nearby_text=nearby_text,
         )
 
 
@@ -177,6 +199,69 @@ def _safe_process_name(info: Any) -> str | None:
     except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, TypeError):
         return None
     return str(name) if name else None
+
+
+def _collect_nearby_text(info: Any) -> str | None:
+    """Pull a short snapshot of sibling text labels for an icon-only
+    or generically-named click target.
+
+    Walks one parent up, iterates that parent's children, and collects
+    up to ``_MAX_NEARBY_LABELS`` text-typed siblings (skipping the
+    clicked element itself). Joined with " | " so the LLM rewriter
+    sees ``"Hash | Verify | Algorithm: SHA-256"`` as one short hint
+    next to the clicked element's own ``name`` -- enough to
+    disambiguate a custom-rendered Cellebrite/AXIOM/X-Ways pane
+    where UIA hands back ``"Pane"`` / ``"Custom"`` with an empty name.
+
+    Returns ``None`` (not the empty string) when nothing useful was
+    found, so the column stays NULL on workflow runs that don't need
+    the context. Defensive against pywinauto raising on any of the
+    parent / children walks -- those are best-effort, never fatal.
+    """
+    try:
+        parent = getattr(info, "parent", None)
+    except Exception:
+        return None
+    if parent is None:
+        return None
+    try:
+        children = list(parent.children() or [])
+    except Exception:
+        return None
+
+    own_name = _safe_get(info, "name")
+    own_runtime_id = _safe_get(info, "runtime_id")
+
+    labels: list[str] = []
+    for child in children:
+        if len(labels) >= _MAX_NEARBY_LABELS:
+            break
+        # Skip the clicked element itself. UIAElementInfo equality is
+        # unreliable across pywinauto versions, so compare on the
+        # cheap-and-stable handles that are likely to match.
+        try:
+            if child is info:
+                continue
+        except Exception:
+            pass
+        if own_runtime_id and _safe_get(child, "runtime_id") == own_runtime_id:
+            continue
+
+        ctrl = _safe_get(child, "control_type")
+        if ctrl not in _LABEL_CONTROL_TYPES:
+            continue
+        text = _safe_get(child, "name") or _safe_get(child, "rich_text")
+        if not text or text == own_name:
+            continue
+        # Trim runaway labels (e.g. a sibling Text that contains a
+        # whole paragraph) so the prompt payload stays tight.
+        if len(text) > _MAX_NEARBY_LABEL_LEN:
+            text = text[:_MAX_NEARBY_LABEL_LEN].rstrip() + "…"
+        labels.append(text)
+
+    if not labels:
+        return None
+    return " | ".join(labels)
 
 
 def _safe_rect(info: Any) -> tuple[int, int, int, int] | None:

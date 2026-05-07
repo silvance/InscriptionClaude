@@ -355,8 +355,9 @@ class SessionRepository:
                 """
                 INSERT INTO resolved_elements
                     (name, control_type, automation_id, class_name, role,
-                     confidence, method, bounding_rect, owner_process_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     confidence, method, bounding_rect, owner_process_name,
+                     nearby_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     element.name,
@@ -368,6 +369,7 @@ class SessionRepository:
                     element.method,
                     _dumps_rect(element.bounding_rect),
                     element.owner_process_name,
+                    element.nearby_text,
                 ),
             )
             element_id = cursor.lastrowid
@@ -808,6 +810,16 @@ class SessionRepository:
 
     @staticmethod
     def _row_to_element(row: sqlite3.Row) -> ResolvedElement:
+        # ``nearby_text`` was added in schema v6; older sessions opened
+        # by a newer build don't have the column populated, so fall
+        # through with None when keys() doesn't include it. (sqlite3.Row
+        # doesn't implement __contains__, so the `.keys()` is required;
+        # SIM118 suggests dropping it but that breaks here.)
+        nearby = (
+            row["nearby_text"]
+            if "nearby_text" in row.keys()  # noqa: SIM118
+            else None
+        )
         return ResolvedElement(
             id=row["id"],
             name=row["name"],
@@ -819,6 +831,7 @@ class SessionRepository:
             method=row["method"],
             bounding_rect=_loads_rect(row["bounding_rect"]),
             owner_process_name=row["owner_process_name"],
+            nearby_text=nearby,
         )
 
 

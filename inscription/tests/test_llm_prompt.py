@@ -324,3 +324,97 @@ def test_user_prompt_neutralises_injection_in_window_title() -> None:
     close_idx = prompt.rindex(f"</session_data:{nonce}>")
     inj_idx = prompt.index(marker)
     assert open_idx < inj_idx < close_idx
+
+
+# ----------------------------------------------------- few-shot examples
+
+def test_system_prompt_has_three_worked_examples() -> None:
+    """The system prompt's "Worked examples" section is what makes
+    smaller local models adhere to the schema. Pin the count so a
+    future refactor can't silently drop one and regress quality."""
+
+    # Three concrete INPUT/OUTPUT pairs.
+    assert SYSTEM_PROMPT.count("Example 1") == 1
+    assert SYSTEM_PROMPT.count("Example 2") == 1
+    assert SYSTEM_PROMPT.count("Example 3") == 1
+    # Each has its INPUT and OUTPUT pair.
+    assert SYSTEM_PROMPT.count("INPUT events:") == 3
+    assert SYSTEM_PROMPT.count("OUTPUT:") == 3
+
+
+def test_system_prompt_example_uses_nearby_text() -> None:
+    """At least one example must demonstrate the nearby_text field --
+    the resolver populates it for icon-only / generic-pane clicks
+    and the model needs to know what to do with it."""
+
+    assert "nearby_text" in SYSTEM_PROMPT
+
+
+# ------------------------------------------------ nearby_text in payload
+
+def test_event_payload_includes_nearby_text_when_resolver_set_it() -> None:
+    """Sibling labels harvested by the resolver have to make it into
+    the per-event payload the LLM sees -- otherwise the schema
+    migration is dead weight."""
+
+    resolved = ResolvedElement(
+        id=1,
+        control_type="Pane",
+        method="uia",
+        confidence=0.5,
+        nearby_text="Pictures | 2,341 hits | Filter",
+    )
+    event = RawEvent(
+        id=99,
+        sequence=1,
+        occurred_at=utcnow(),
+        kind=EventKind.CLICK,
+        button="left",
+        window_title="Magnet AXIOM Examine",
+        process_name="AXIOMExamine.exe",
+        resolved_element_id=1,
+    )
+    prompt = build_user_prompt(
+        session_name="x",
+        events=[event],
+        resolved_by_id={1: resolved},
+        existing_steps=[],
+    )
+    assert "nearby_text" in prompt
+    assert "Pictures | 2,341 hits | Filter" in prompt
+
+
+def test_event_payload_omits_nearby_text_when_none() -> None:
+    """Don't bloat every prompt with `\"nearby_text\": null` rows --
+    the field is optional and only useful when populated."""
+
+    resolved = ResolvedElement(
+        id=1,
+        name="Save",
+        control_type="Button",
+        method="uia",
+        confidence=0.9,
+        nearby_text=None,
+    )
+    event = RawEvent(
+        id=99,
+        sequence=1,
+        occurred_at=utcnow(),
+        kind=EventKind.CLICK,
+        button="left",
+        resolved_element_id=1,
+    )
+    prompt = build_user_prompt(
+        session_name="x",
+        events=[event],
+        resolved_by_id={1: resolved},
+        existing_steps=[],
+    )
+    # The payload section won't have a nearby_text field for THIS event;
+    # but the system prompt may mention it. Use a structural check.
+    # Find the events block and confirm "nearby_text" doesn't appear in it.
+    # The user prompt embeds the events as JSON inside session_data tags.
+    open_idx = prompt.rindex("<session_data:")
+    close_idx = prompt.rindex("</session_data:")
+    payload_section = prompt[open_idx:close_idx]
+    assert "nearby_text" not in payload_section

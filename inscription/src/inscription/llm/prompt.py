@@ -89,6 +89,37 @@ source_event_ids rules:
 manual_edit steps:
 - Reproduce them verbatim. Do not rewrite approved text — the examiner \
 has already vetted those entries for the report.
+
+Worked examples — three input/output pairs covering the merging, \
+result-from-window-title, and noise-dropping cases. Match this style \
+and the schema exactly.
+
+Example 1 (merge a Save-As sequence into one step):
+INPUT events:
+[{"id":1,"kind":"click","window_title":"Notepad","process_name":"notepad.exe","element":{"name":"File","control_type":"MenuItem"}},
+ {"id":2,"kind":"click","window_title":"Notepad","process_name":"notepad.exe","element":{"name":"Save As...","control_type":"MenuItem"}},
+ {"id":3,"kind":"key_press","text":"case-notes.txt","window_title":"Save As"},
+ {"id":4,"kind":"click","window_title":"Save As","element":{"name":"Save","control_type":"Button"}}]
+OUTPUT:
+{"steps":[{"action":"Save the file as 'case-notes.txt' via File → Save As.","result":"","source_event_ids":[1,2,3,4]}]}
+
+Example 2 (capture a SHA-256 verification result from a window title):
+INPUT events:
+[{"id":7,"kind":"click","window_title":"Magnet AXIOM Examine","process_name":"AXIOMExamine.exe","element":{"name":"Tools","control_type":"MenuItem"}},
+ {"id":8,"kind":"click","window_title":"Magnet AXIOM Examine","process_name":"AXIOMExamine.exe","element":{"name":"Verify Image Hash","control_type":"MenuItem"}},
+ {"id":9,"kind":"click","window_title":"Hash Verification","element":{"name":"Start","control_type":"Button"}},
+ {"id":10,"kind":"window_focus","window_title":"Hash Verification — Complete: SHA-256 matches"}]
+OUTPUT:
+{"steps":[{"action":"Verify the image hash via Tools → Verify Image Hash in Magnet AXIOM Examine.","result":"Hash verification completed: SHA-256 matches the acquisition value.","source_event_ids":[7,8,9,10]}]}
+
+Example 3 (drop a redundant window-focus event before a click; use \
+nearby_text to label an icon-only Cellebrite/AXIOM button whose own \
+name UIA can't read):
+INPUT events:
+[{"id":12,"kind":"window_focus","window_title":"Magnet AXIOM Examine"},
+ {"id":13,"kind":"click","window_title":"Magnet AXIOM Examine","process_name":"AXIOMExamine.exe","element":{"control_type":"Pane","nearby_text":"Pictures | 2,341 hits | Filter"}}]
+OUTPUT:
+{"steps":[{"action":"Open the Pictures artefact category in Magnet AXIOM Examine.","result":"","source_event_ids":[13]}]}
 """
 
 
@@ -236,6 +267,11 @@ def _event_to_dict(
             r["control_type"] = resolved.control_type
         if resolved.owner_process_name:
             r["owner_process"] = resolved.owner_process_name
+        if resolved.nearby_text:
+            # Sibling labels harvested by the UIA resolver. Useful
+            # when ``name`` is empty or generic ("Pane", "Custom") --
+            # icon-only buttons in custom-rendered forensic-tool UIs.
+            r["nearby_text"] = resolved.nearby_text
         if r:
             payload["element"] = r
     return payload
