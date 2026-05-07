@@ -28,11 +28,15 @@ To start
 --------
 
   First time on this workstation:
-    Right-click  install.ps1  and pick  "Run with PowerShell".
+    Double-click  Install-Suite.cmd  inside this folder.
     The installer copies the bundle to
         %LOCALAPPDATA%\Programs\InscriptionSuite\
     and creates a Start Menu shortcut under
         InscriptionSuite \ Inscription Suite.
+
+    (Install-Suite.cmd is just a one-line shim that runs install.ps1
+    with the right ExecutionPolicy bypass; if you'd rather drive the
+    installer manually, right-click install.ps1 -> Run with PowerShell.)
 
   Daily use after that:
     Start Menu -> InscriptionSuite -> "Inscription Suite".
