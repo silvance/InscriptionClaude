@@ -225,7 +225,7 @@ Write-Host "  Copied $blobCount unique blobs."
 
 # 7. Drop in the launcher script + installer + README ----------------------
 
-Write-Step "Writing start-suite.ps1, install.ps1, and README.txt"
+Write-Step "Writing start-suite.ps1, install.ps1, Install-Suite.cmd, and README.txt"
 
 $startScript = Join-Path $PSScriptRoot "templates\start-suite.ps1"
 if (-not (Test-Path $startScript)) {
@@ -238,6 +238,14 @@ if (-not (Test-Path $installScript)) {
     throw "Installer template missing at $installScript. The repository may be incomplete."
 }
 Copy-Item -Force $installScript (Join-Path $BundleRoot "install.ps1")
+
+# Double-clickable shim for the install step. Eliminates the
+# right-click -> "Run with PowerShell" + ExecutionPolicy dance on
+# a workstation that's never seen our scripts before.
+$installCmd = Join-Path $PSScriptRoot "templates\Install-Suite.cmd"
+if (Test-Path $installCmd) {
+    Copy-Item -Force $installCmd (Join-Path $BundleRoot "Install-Suite.cmd")
+}
 
 $readme = Join-Path $PSScriptRoot "templates\airgapped-README.txt"
 if (Test-Path $readme) {

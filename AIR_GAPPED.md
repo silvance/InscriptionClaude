@@ -20,6 +20,9 @@ InscriptionSuite-Airgapped\
 ├── models\               ~14 GB     two model snapshots
 │   ├── blobs\            (sha256-* weight files)
 │   └── manifests\        (one per model:tag pulled)
+├── Install-Suite.cmd                double-clickable shim around
+│                                    install.ps1 (no right-click, no
+│                                    Set-ExecutionPolicy needed)
 ├── install.ps1                      one-shot installer (run on first
 │                                    setup -- copies the bundle to a
 │                                    permanent location and creates a
@@ -61,9 +64,21 @@ A Windows 10/11 box with internet access during the build only.
 
 ## Building the bundle
 
-### One-shot wrapper (recommended)
+### Double-click (simplest)
 
-`scripts\prepare-bundle.ps1` pulls the chosen models, runs `package-airgapped.ps1`, optionally fetches the latest PowerShell 7 MSI alongside it, and (with `-Destination`) copies the finished bundle to an external drive in one go. Typical use from the repo root with the venv activated:
+`Build-Bundle.bat` (Windows) and `Build-Bundle.sh` (Linux) at the repo root are double-clickable wrappers around the bundle pipeline. They:
+
+1. Set up the Python venv on first run (creates `.venv`, installs the four packages editable with `[dev]` extras).
+2. Verify Ollama is installed; surface a download link if not.
+3. Pop a graphical folder picker for the USB drive (Windows Forms on Windows, `zenity` on Linux; falls back to a terminal prompt if `zenity` isn't installed).
+4. Pull the default models, build the apps, write the bundle straight onto the USB.
+5. Show a "bundle ready at <path>" dialog.
+
+If you don't want the picker, pass a destination directly: `Build-Bundle.bat -Destination E:\` (or `./Build-Bundle.sh --destination /media/usb`).
+
+### One-shot wrapper (the underlying script)
+
+`scripts\prepare-bundle.ps1` is the actual pipeline; the `.bat`/`.sh` above just calls it with sensible defaults. Use it directly when you need flag control. Pulls the chosen models, runs `package-airgapped.ps1`, optionally fetches the latest PowerShell 7 MSI alongside it, and (with `-Destination`) copies the finished bundle to an external drive in one go. Typical use from the repo root with the venv activated:
 
 ```powershell
 .venv\Scripts\Activate.ps1
@@ -139,17 +154,11 @@ dist\InscriptionSuite-Airgapped\
 ## Transferring to the air-gapped workstation
 
 1. Plug the USB drive into the offline workstation.
-2. From inside `<USB>\InscriptionSuite-Airgapped\`, right-click
-   `install.ps1` → **Run with PowerShell**.
-3. The installer copies the bundle to
-   `%LOCALAPPDATA%\Programs\InscriptionSuite\` and creates a Start
-   Menu shortcut under `InscriptionSuite \ Inscription Suite`.
-4. From here on, launch via Start Menu → **Inscription Suite**.
-   (The shortcut runs the installed copy of `start-suite.ps1`, which
-   self-elevates for UIA visibility into elevated forensic tools.)
+2. From inside `<USB>\InscriptionSuite-Airgapped\`, **double-click** `Install-Suite.cmd`. (One-line shim that runs `install.ps1` with the right `-ExecutionPolicy Bypass`, so no right-click and no `Set-ExecutionPolicy` needed on a fresh workstation.)
+3. The installer copies the bundle to `%LOCALAPPDATA%\Programs\InscriptionSuite\` and creates a Start Menu shortcut under `InscriptionSuite \ Inscription Suite`.
+4. From here on, launch via Start Menu → **Inscription Suite**. (The shortcut runs the installed copy of `start-suite.ps1`, which self-elevates for UIA visibility into elevated forensic tools.)
 
-If the workstation refuses to run the script with `UnauthorizedAccess`,
-run this once as the local user:
+If you'd rather drive `install.ps1` manually, right-click it → **Run with PowerShell**. If the workstation refuses to run the script with `UnauthorizedAccess`, run this once as the local user:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
