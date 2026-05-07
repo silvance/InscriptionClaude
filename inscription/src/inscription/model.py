@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class EventKind(StrEnum):
@@ -103,6 +103,13 @@ class ResolvedElement:
     #: suffix, which would otherwise glue the shell element onto whatever
     #: app the user was previously using.
     owner_process_name: str | None = None
+    #: Up to a few sibling text labels (e.g. neighboring TextBlocks /
+    #: Statics) collected from the clicked element's parent. Lets the
+    #: LLM reconstruct the meaning of an icon-only button or a generic
+    #: "Pane" / "Custom" element whose own ``name`` is empty or
+    #: meaningless. Joined with " | " so the model sees
+    #: ``"Hash | Verify | Algorithm: SHA-256"`` as one short hint.
+    nearby_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

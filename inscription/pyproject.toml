@@ -87,6 +87,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["PLR2004", "S101"]
 "packaging/*.spec" = ["F821"]  # PyInstaller spec files use magic globals
+"src/inscription/llm/prompt.py" = ["E501"]  # few-shot JSON examples are intentionally long
 
 [tool.ruff.format]
 quote-style = "double"

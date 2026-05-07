@@ -44,7 +44,8 @@ CREATE TABLE resolved_elements (
     confidence           REAL    NOT NULL DEFAULT 0,
     method               TEXT    NOT NULL DEFAULT 'none',
     bounding_rect        TEXT,   -- JSON [left, top, right, bottom] in screen px
-    owner_process_name   TEXT    -- process that owns the element, for taskbar/shell
+    owner_process_name   TEXT,   -- process that owns the element, for taskbar/shell
+    nearby_text          TEXT    -- pipe-joined sibling labels, for icon-only buttons
 );
 
 CREATE TABLE screenshot_artifacts (
@@ -121,11 +122,26 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE draft_steps DROP COLUMN text")
 
 
+def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
+    """Add ``resolved_elements.nearby_text`` for sibling-label context.
+
+    Many forensic tools (Cellebrite, AXIOM, X-Ways) render their UI in
+    custom WPF / WinUI canvases where UIA hands back generic
+    ``"Pane"`` / ``"Custom"`` elements with empty names. Capturing a
+    short snapshot of nearby text labels (siblings of the clicked
+    element) gives the LLM rewriter enough context to produce a
+    meaningful step description even when the element's own name
+    isn't useful. Existing rows stay NULL.
+    """
+    conn.execute("ALTER TABLE resolved_elements ADD COLUMN nearby_text TEXT")
+
+
 MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
     4: _migrate_v3_to_v4,
     5: _migrate_v4_to_v5,
+    6: _migrate_v5_to_v6,
 }
 
 

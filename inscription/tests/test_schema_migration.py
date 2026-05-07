@@ -124,6 +124,8 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
         assert legacy.name == "Legacy"
         assert legacy.bounding_rect is None
         assert legacy.owner_process_name is None
+        # v5 → v6 added nearby_text; legacy rows leave it None.
+        assert legacy.nearby_text is None
 
         # New inserts write and read every field end-to-end.
         fresh = repo.add_resolved_element(
@@ -135,6 +137,7 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
                 method="uia",
                 bounding_rect=(10, 20, 110, 50),
                 owner_process_name="explorer.exe",
+                nearby_text="Pictures | 2,341 hits",
             )
         )
         assert fresh.id is not None
@@ -142,6 +145,7 @@ def test_v1_session_migrates_all_the_way_forward(tmp_path: Path) -> None:
         assert reloaded is not None
         assert reloaded.bounding_rect == (10, 20, 110, 50)
         assert reloaded.owner_process_name == "explorer.exe"
+        assert reloaded.nearby_text == "Pictures | 2,341 hits"
 
         # v3 → v4 added draft_steps.evidentiary, v4 → v5 split text into
         # action + result. Existing rows / new rows respect every column.
