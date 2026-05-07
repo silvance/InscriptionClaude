@@ -14,7 +14,6 @@ import re
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from inscription.model import (
@@ -30,6 +29,13 @@ from inscription.model import (
     utcnow,
 )
 from inscription.storage import locking
+from inscription.storage._rowmap import (
+    parse_iso,
+    row_to_element,
+    row_to_event,
+    row_to_screenshot,
+    row_to_step,
+)
 from inscription.storage.errors import (
     SessionAlreadyExistsError,
     SessionNotFoundError,
@@ -39,6 +45,7 @@ from inscription.storage.manifest import read_manifest, write_manifest
 from inscription.storage.schema import initialise_schema, migrate_to_latest
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -65,21 +72,10 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-def _parse_iso(s: str) -> datetime:
-    return datetime.fromisoformat(s)
-
-
 def _dumps_rect(rect: tuple[int, int, int, int] | None) -> str | None:
     if rect is None:
         return None
     return json.dumps(list(rect))
-
-
-def _loads_rect(raw: str | None) -> tuple[int, int, int, int] | None:
-    if raw is None:
-        return None
-    parts = json.loads(raw)
-    return (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
 
 
 #: A step needs at least this many source events to be splittable in two.
@@ -260,8 +256,8 @@ class SessionRepository:
             raise StorageError(msg)
         return SessionInfo(
             name=row["name"],
-            started_at=_parse_iso(row["started_at"]),
-            ended_at=_parse_iso(row["ended_at"]) if row["ended_at"] else None,
+            started_at=parse_iso(row["started_at"]),
+            ended_at=parse_iso(row["ended_at"]) if row["ended_at"] else None,
             recorder_version=row["recorder_version"],
             schema_version=row["schema_version"],
         )
@@ -269,7 +265,7 @@ class SessionRepository:
     def list_events(self) -> list[RawEvent]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM raw_events ORDER BY sequence").fetchall()
-        return [self._row_to_event(r) for r in rows]
+        return [row_to_event(r) for r in rows]
 
     def list_steps(self, *, include_suppressed: bool = False) -> list[DraftStep]:
         with self._lock:
@@ -279,26 +275,26 @@ class SessionRepository:
                 rows = self._conn.execute(
                     "SELECT * FROM draft_steps WHERE suppressed = 0 ORDER BY sequence"
                 ).fetchall()
-        return [self._row_to_step(r) for r in rows]
+        return [row_to_step(r) for r in rows]
 
     def list_screenshots(self) -> list[ScreenshotArtifact]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM screenshot_artifacts ORDER BY id").fetchall()
-        return [self._row_to_screenshot(r) for r in rows]
+        return [row_to_screenshot(r) for r in rows]
 
     def get_screenshot(self, screenshot_id: int) -> ScreenshotArtifact | None:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM screenshot_artifacts WHERE id = ?", (screenshot_id,)
             ).fetchone()
-        return self._row_to_screenshot(row) if row else None
+        return row_to_screenshot(row) if row else None
 
     def get_resolved_element(self, element_id: int) -> ResolvedElement | None:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM resolved_elements WHERE id = ?", (element_id,)
             ).fetchone()
-        return self._row_to_element(row) if row else None
+        return row_to_element(row) if row else None
 
     # --------------------------------------------------------- mutations
 
@@ -634,8 +630,8 @@ class SessionRepository:
                 msg = f"merge_steps: missing step ({primary_id=}, {other_id=})"
                 raise StorageError(msg)
 
-            primary = self._row_to_step(primary_row)
-            other = self._row_to_step(other_row)
+            primary = row_to_step(primary_row)
+            other = row_to_step(other_row)
 
             combined_ids = (*primary.source_event_ids, *other.source_event_ids)
             merged_action = _join_text(primary.action, other.action)
@@ -676,7 +672,7 @@ class SessionRepository:
             if row is None:
                 msg = f"split_step: no step with id {step_id}"
                 raise StorageError(msg)
-            step = self._row_to_step(row)
+            step = row_to_step(row)
             if len(step.source_event_ids) < _MIN_SOURCE_IDS_TO_SPLIT:
                 count = len(step.source_event_ids)
                 msg = f"split_step: step {step_id} has only {count} source event(s); cannot split"
@@ -762,77 +758,8 @@ class SessionRepository:
         """Re-derive and write the manifest. Call after bulk mutations."""
         self._write_manifest()
 
-    # --------------------------------------------------------- row mapping
-
-    @staticmethod
-    def _row_to_event(row: sqlite3.Row) -> RawEvent:
-        return RawEvent(
-            id=row["id"],
-            sequence=row["sequence"],
-            occurred_at=_parse_iso(row["occurred_at"]),
-            kind=EventKind(row["kind"]),
-            button=row["button"],
-            x=row["x"],
-            y=row["y"],
-            key=row["key"],
-            text=row["text"],
-            window_title=row["window_title"],
-            process_name=row["process_name"],
-            screenshot_id=row["screenshot_id"],
-            resolved_element_id=row["resolved_element_id"],
-        )
-
-    @staticmethod
-    def _row_to_step(row: sqlite3.Row) -> DraftStep:
-        return DraftStep(
-            id=row["id"],
-            sequence=row["sequence"],
-            action=row["action"],
-            result=row["result"],
-            source_event_ids=tuple(json.loads(row["source_event_ids"])),
-            screenshot_id=row["screenshot_id"],
-            suppressed=bool(row["suppressed"]),
-            manual_edit=bool(row["manual_edit"]),
-            evidentiary=bool(row["evidentiary"]),
-        )
-
-    @staticmethod
-    def _row_to_screenshot(row: sqlite3.Row) -> ScreenshotArtifact:
-        return ScreenshotArtifact(
-            id=row["id"],
-            relative_path=row["relative_path"],
-            captured_at=_parse_iso(row["captured_at"]),
-            width=row["width"],
-            height=row["height"],
-            sha256=row["sha256"],
-            highlight_rect=_loads_rect(row["highlight_rect"]),
-        )
-
-    @staticmethod
-    def _row_to_element(row: sqlite3.Row) -> ResolvedElement:
-        # ``nearby_text`` was added in schema v6; older sessions opened
-        # by a newer build don't have the column populated, so fall
-        # through with None when keys() doesn't include it. (sqlite3.Row
-        # doesn't implement __contains__, so the `.keys()` is required;
-        # SIM118 suggests dropping it but that breaks here.)
-        nearby = (
-            row["nearby_text"]
-            if "nearby_text" in row.keys()  # noqa: SIM118
-            else None
-        )
-        return ResolvedElement(
-            id=row["id"],
-            name=row["name"],
-            control_type=row["control_type"],
-            automation_id=row["automation_id"],
-            class_name=row["class_name"],
-            role=row["role"],
-            confidence=row["confidence"],
-            method=row["method"],
-            bounding_rect=_loads_rect(row["bounding_rect"]),
-            owner_process_name=row["owner_process_name"],
-            nearby_text=nearby,
-        )
+    # Row → dataclass mapping moved to inscription.storage._rowmap;
+    # the read methods above import them directly.
 
 
 # --------------------------------------------------------------- free funcs

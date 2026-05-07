@@ -32,6 +32,25 @@ class ChatClient(Protocol):
 
 DEFAULT_TEMPERATURE = 0.2
 
+#: Default LLM endpoint — a local Ollama install on its standard port.
+#: The air-gapped bundle's start-suite.ps1 sets SUITE_LLM_BASE_URL to
+#: 11435 (its dedicated port) which each app's config layer prefers
+#: over this default. Inscription and CaseGuide ship the same value
+#: so a forensic operator's settings round-trip identically across
+#: the two tools.
+DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1"
+
+#: Default model tag pulled by the air-gapped bundle and used by both
+#: the rewrite (Inscription) and refine (CaseGuide) flows when nothing
+#: more specific is configured.
+DEFAULT_LLM_MODEL = "gemma4:latest"
+
+#: HTTP read timeout for chat-completions calls. Local CPU-only models
+#: can take well over a minute on a long timeline; the default is set
+#: high enough that the real failure mode is "model didn't start" or
+#: "endpoint not reachable" rather than "we gave up too early".
+DEFAULT_LLM_TIMEOUT_S = 600.0
+
 #: Hard cap on the response body. A verbose chat-completion sits well
 #: under 100 KB; we accept up to 10 MB so a chatty model on a huge input
 #: can still complete, but a misbehaving / hostile endpoint returning
