@@ -23,6 +23,9 @@ from suite_common.coerce import (
     string_list,
 )
 from suite_common.llm import (
+    DEFAULT_LLM_BASE_URL,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_TIMEOUT_S,
     DEFAULT_TEMPERATURE,
     ChatClient,
     LLMClient,
@@ -35,6 +38,9 @@ from suite_common.llm import (
 from suite_common.paths import default_data_root, ensure_dirs
 
 __all__ = [
+    "DEFAULT_LLM_BASE_URL",
+    "DEFAULT_LLM_MODEL",
+    "DEFAULT_LLM_TIMEOUT_S",
     "DEFAULT_TEMPERATURE",
     "ChatClient",
     "LLMClient",

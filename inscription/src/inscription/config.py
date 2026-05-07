@@ -40,12 +40,14 @@ _K_EXAMINER_ID: Final = "examiner/id"
 _K_TRAY_CLOSE_HINT_SHOWN: Final = "tray/close_hint_shown"
 _K_MINI_DOCK_POSITION: Final = "tray/mini_dock_position"
 
-#: Default points at Ollama's OpenAI-compatible endpoint. Also works
-#: unchanged with LM Studio or ``llama.cpp --server`` when run on 11434.
-DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
-#: Small enough to run on a laptop, strong enough to rewrite a few dozen
-#: steps. Users with bigger hardware point at their preferred model.
-DEFAULT_LLM_MODEL: Final = "gemma4:latest"
+# Defaults are shared with CaseGuide via suite_common; re-exported
+# here so callers that already imported them from inscription.config
+# (the test suite, settings_dialog, …) keep working unchanged.
+from suite_common.llm import (  # noqa: E402
+    DEFAULT_LLM_BASE_URL,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_TIMEOUT_S,
+)
 
 
 def _bundled_default_model() -> str:
@@ -69,9 +71,6 @@ def _bundled_default_base_url() -> str:
     hard-coded default but the user's QSettings choice still wins.
     """
     return os.environ.get(_ENV_SUITE_LLM_BASE_URL, "").strip() or DEFAULT_LLM_BASE_URL
-
-
-DEFAULT_LLM_TIMEOUT_S: Final = 600.0
 
 
 class Config:

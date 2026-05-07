@@ -31,10 +31,14 @@ _K_LLM_TIMEOUT_S: Final = "llm/timeout_s"
 _K_LLM_API_KEY: Final = "llm/api_key"
 _K_RECENT_CASE_PATHS: Final = "browser/recent_case_paths"
 
-#: Defaults match Inscription's so a single Ollama instance serves both.
-DEFAULT_LLM_BASE_URL: Final = "http://localhost:11434/v1"
-DEFAULT_LLM_MODEL: Final = "gemma4:latest"
-DEFAULT_LLM_TIMEOUT_S: Final = 600.0
+# Defaults are shared with Inscription via suite_common; re-exported
+# here so callers that already imported them from caseguide.config
+# (the test suite, settings_dialog, …) keep working unchanged.
+from suite_common.llm import (  # noqa: E402
+    DEFAULT_LLM_BASE_URL,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_TIMEOUT_S,
+)
 
 
 def _bundled_default_model() -> str:
