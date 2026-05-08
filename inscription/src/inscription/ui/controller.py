@@ -16,14 +16,12 @@ Global hotkeys also live here:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QDialog,
-    QFileDialog,
     QInputDialog,
     QMessageBox,
     QWidget,
@@ -65,6 +63,8 @@ from inscription.storage import (
 from inscription.storage import (
     submitted as submitted_marker,
 )
+from inscription.ui.controller_errors import friendly_llm_error as _friendly_llm_error
+from inscription.ui.controller_exports import run_export
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
@@ -80,7 +80,7 @@ from inscription.ui.verify_dialog import IntegrityResultDialog
 from inscription.ui.verify_progress_dialog import VerifyProgressDialog, VerifyWorker
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from pathlib import Path
 
     from inscription.caseguide_link import CaseguideSuggestion
     from inscription.model import ExportDocument
@@ -684,7 +684,9 @@ class SessionController(QObject):
         QMessageBox.warning(self._parent_widget, "LLM rewrite failed", friendly)
 
     def export_html(self) -> None:
-        self._export(
+        run_export(
+            self._repository,
+            parent=self._parent_widget,
             kind="HTML",
             extension="html",
             file_filter="HTML (*.html)",
@@ -692,7 +694,9 @@ class SessionController(QObject):
         )
 
     def export_markdown(self) -> None:
-        self._export(
+        run_export(
+            self._repository,
+            parent=self._parent_widget,
             kind="Markdown",
             extension="md",
             file_filter="Markdown (*.md)",
@@ -722,60 +726,23 @@ class SessionController(QObject):
                 case_reference=self._case_dir.name if self._case_dir is not None else None,
             )
 
-        self._export(
+        # After a deliverable-class export, offer to lock the session
+        # so further edits don't diverge from what's in the discovery
+        # package. The operator can always decline.
+        def _maybe_offer_lock() -> None:
+            if not self.is_session_submitted():
+                self._offer_mark_submitted(export_format="Forensic notes")
+
+        run_export(
+            self._repository,
+            parent=self._parent_widget,
             kind="Forensic notes",
             extension="html",
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
-            offer_submit=True,
+            on_complete=_maybe_offer_lock,
         )
-
-    def _export(
-        self,
-        *,
-        kind: str,
-        extension: str,
-        file_filter: str,
-        renderer: Callable[..., ExportDocument],
-        suggested_suffix: str = "",
-        offer_submit: bool = False,
-    ) -> None:
-        if self._repository is None:
-            return
-        suggested = str(
-            self._repository.session.exports_dir
-            / f"{self._repository.session.root.name}{suggested_suffix}.{extension}"
-        )
-        target, _ = QFileDialog.getSaveFileName(
-            self._parent_widget,
-            f"Export as {kind}",
-            suggested,
-            file_filter,
-        )
-        if not target:
-            return
-        try:
-            doc = renderer(self._repository, destination=Path(target))
-        except Exception:
-            logger.exception("%s export failed", kind)
-            QMessageBox.critical(
-                self._parent_widget,
-                "Export failed",
-                f"Inscription could not export the guide as {kind}. See logs for details.",
-            )
-            return
-        QMessageBox.information(
-            self._parent_widget,
-            "Export complete",
-            f"Exported to:\n{doc.path}",
-        )
-        # After a "deliverable-class" export (forensic notes, PDF, …),
-        # offer to lock the session so further edits don't diverge from
-        # what's in the discovery package. The operator can always
-        # decline; reopening later is one click away in the banner.
-        if offer_submit and not self.is_session_submitted():
-            self._offer_mark_submitted(export_format=kind)
 
     def _offer_mark_submitted(self, *, export_format: str) -> None:
         """Prompt: 'Mark this session as submitted? It will become read-only.'
@@ -1013,54 +980,6 @@ class SessionController(QObject):
         self._workspace.reload()
 
 
-def _friendly_llm_error(raw_message: str, *, base_url: str) -> str:
-    """Translate raw LLM exception text into a guided message.
-
-    The local-LLM-not-running case is the dominant failure mode in the
-    field — Ollama or LM Studio just isn't started. Catch the connection
-    refused / unreachable patterns and tell the user what to do, rather
-    than dumping a urllib stacktrace at them.
-    """
-    lower = raw_message.lower()
-    if "connection refused" in lower or "failed to establish" in lower:
-        return (
-            f"Couldn't reach the local LLM server at {base_url}.\n\n"
-            "Start Ollama (or LM Studio / llama.cpp --server) and try "
-            "again. If it's running on a different URL or port, open "
-            "Edit → Settings → LLM and use 'Test connection' to verify.\n\n"
-            f"Original error: {raw_message}"
-        )
-    if "timed out" in lower:
-        return (
-            "The LLM took too long to respond.\n\n"
-            "On a local model this usually means the model is large for "
-            "your hardware. Edit → Settings → LLM lets you raise the "
-            "timeout or switch to a smaller model.\n\n"
-            f"Original error: {raw_message}"
-        )
-    if "http 404" in lower or "model not found" in lower or "no such model" in lower:
-        return (
-            "The configured model isn't available on the LLM server.\n\n"
-            "Pull it (e.g. `ollama pull gemma2`) or change the model "
-            "name in Edit → Settings → LLM.\n\n"
-            f"Original error: {raw_message}"
-        )
-    if (
-        "missing top-level 'steps' key" in lower
-        or "did not return json" in lower
-        or "'steps' must be an array" in lower
-        or "zero usable steps" in lower
-    ):
-        # Schema-mismatch case: the model replied but in the wrong shape.
-        # The full payload is already in the log via logger.exception in
-        # the worker -- the dialog just needs to tell the operator what
-        # to try next, not paste 500 chars of dict repr at them.
-        return (
-            "The model returned JSON in an unexpected shape, even after "
-            "an automatic retry.\n\n"
-            "Smaller / less instruction-tuned local models sometimes "
-            "drift on the output schema. Try the same Rewrite again, or "
-            "switch to a stronger model in Edit → Settings → LLM. The "
-            "full payload is in the log file (Help → Show logs folder)."
-        )
-    return raw_message
+# _friendly_llm_error moved to inscription.ui.controller_errors;
+# imported at the top of this file and exposed under its old name
+# for any external caller / test that imported it from controller.
