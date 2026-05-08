@@ -15,7 +15,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
 from inscription.ui.step_editor import StepEditorPanel
 from inscription.ui.step_list import StepListWidget
@@ -25,7 +32,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
-    from inscription.storage import SessionRepository
+    from inscription.storage import SessionRepository, SubmittedMarker
 
 
 class SessionWorkspaceWidget(QWidget):
@@ -40,6 +47,10 @@ class SessionWorkspaceWidget(QWidget):
     #: Forwarded from the suggestions panel; controller catches it
     #: and inserts a new draft step from the chosen suggestion.
     draft_step_requested = Signal(object)  # CaseguideSuggestion
+    #: Emitted when the operator clicks "Reopen for editing" on the
+    #: submitted-session banner. Controller catches it, prompts to
+    #: confirm, and on confirm clears the on-disk marker.
+    reopen_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -71,8 +82,17 @@ class SessionWorkspaceWidget(QWidget):
         splitter.setHandleWidth(1)
         splitter.setChildrenCollapsible(False)
 
+        # Submitted-session banner: hidden by default, shown when the
+        # controller calls show_submitted_banner(). Sits above the
+        # splitter so it never gets occluded by the step list / editor.
+        self._submitted_banner = _SubmittedBanner(self)
+        self._submitted_banner.reopen_clicked.connect(self.reopen_requested)
+        self._submitted_banner.hide()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(self._submitted_banner)
         layout.addWidget(splitter)
 
     # ------------------------------------------------------------ API
@@ -137,4 +157,81 @@ class SessionWorkspaceWidget(QWidget):
             screenshot=shot,
             started_at=started_at,
             session_root=self._repository.session.root,
+        )
+
+    # ---------------------------------------------------------- banner
+
+    def set_submitted_marker(self, marker: SubmittedMarker | None) -> None:
+        """Show or hide the read-only banner.
+
+        ``marker`` carries the timestamp + optional examiner / format
+        strings the banner renders. ``None`` hides the banner. Pure UI;
+        the controller is responsible for actually gating mutations.
+        """
+        if marker is None:
+            self._submitted_banner.hide()
+        else:
+            self._submitted_banner.show_marker(marker)
+            self._submitted_banner.show()
+
+
+class _SubmittedBanner(QWidget):
+    """Yellow-tinted banner shown when the open session is submitted.
+
+    Two-line summary on the left ("Submitted as evidence on …") and a
+    "Reopen for editing" button on the right. The button emits the
+    ``reopen_clicked`` signal; the workspace forwards it as
+    ``reopen_requested`` and the controller catches that, prompts to
+    confirm, and clears the marker.
+    """
+
+    reopen_clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # Tinted background + thin border so the banner reads as a
+        # status notice rather than competing with the step editor.
+        # Picked to render legibly in both LIGHT and DARK palettes.
+        self.setStyleSheet(
+            "_SubmittedBanner {"
+            "  background-color: #fdf6d8;"
+            "  border: 1px solid #d6c97a;"
+            "  border-radius: 4px;"
+            "}"
+            "QLabel { color: #5c4a00; }"
+        )
+        self._title = QLabel("Submitted as evidence", self)
+        font = self._title.font()
+        font.setBold(True)
+        self._title.setFont(font)
+
+        self._detail = QLabel("", self)
+        self._detail.setWordWrap(True)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(2)
+        text_col.addWidget(self._title)
+        text_col.addWidget(self._detail)
+
+        self._reopen_btn = QPushButton("Reopen for editing…", self)
+        self._reopen_btn.clicked.connect(self.reopen_clicked)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
+        layout.addLayout(text_col, 1)
+        layout.addWidget(self._reopen_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def show_marker(self, marker: SubmittedMarker) -> None:
+        when = marker.submitted_at.astimezone().strftime("%Y-%m-%d %H:%M")
+        parts = [f"Marked submitted on {when}"]
+        if marker.examiner:
+            parts.append(f"by {marker.examiner}")
+        if marker.export_format:
+            parts.append(f"after {marker.export_format} export")
+        parts_str = " · ".join(parts) + "."
+        self._detail.setText(
+            parts_str + "  Edits are disabled. "
+            "Click \"Reopen for editing\" to make changes."
         )
