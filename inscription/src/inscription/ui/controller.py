@@ -41,7 +41,12 @@ from inscription.capture import (
     WindowFocusSource,
 )
 from inscription.config import Config
-from inscription.export import export_forensic_notes, export_html, export_markdown
+from inscription.export import (
+    export_forensic_notes,
+    export_html,
+    export_markdown,
+    export_pdf,
+)
 from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import DraftStep, EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
@@ -619,6 +624,61 @@ class SessionController(QObject):
         )
 
     def export_forensic_notes(self) -> None:
+        examiner = self._format_examiner()
+        case_ref = self._case_dir.name if self._case_dir is not None else None
+
+        def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
+            return export_forensic_notes(
+                repository,
+                destination=destination,
+                examiner=examiner,
+                case_reference=case_ref,
+            )
+
+        self._export(
+            kind="Forensic notes",
+            extension="html",
+            file_filter="HTML (*.html)",
+            renderer=render,
+            suggested_suffix="-notes",
+        )
+
+    def export_pdf(self) -> None:
+        """Render forensic notes to a self-contained PDF.
+
+        Uses the same case header / examiner block as the HTML
+        forensic-notes export, but adds per-page header (case +
+        examiner) + footer (page X of Y, generated-at timestamp)
+        and inlines all screenshots into a single .pdf file --
+        nothing for the operator to zip up before handing over.
+        """
+        examiner = self._format_examiner()
+        case_ref = self._case_dir.name if self._case_dir is not None else None
+
+        def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
+            return export_pdf(
+                repository,
+                destination=destination,
+                examiner=examiner,
+                case_reference=case_ref,
+            )
+
+        self._export(
+            kind="PDF",
+            extension="pdf",
+            file_filter="PDF (*.pdf)",
+            renderer=render,
+            suggested_suffix="-notes",
+        )
+
+    def _format_examiner(self) -> str | None:
+        """Build the "Name (Org) · ID" string used in export headers.
+
+        Each fragment is included only when present, so a config with
+        only a name produces just the name; with name + org but no
+        id, "Name (Org)"; etc. Shared by the HTML and PDF forensic
+        exports so the rendered header stays consistent across formats.
+        """
         examiner = self._config.examiner_name.strip() or None
         if self._config.examiner_org.strip():
             examiner = (
@@ -632,22 +692,7 @@ class SessionController(QObject):
                 if examiner
                 else self._config.examiner_id.strip()
             )
-
-        def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
-            return export_forensic_notes(
-                repository,
-                destination=destination,
-                examiner=examiner,
-                case_reference=self._case_dir.name if self._case_dir is not None else None,
-            )
-
-        self._export(
-            kind="Forensic notes",
-            extension="html",
-            file_filter="HTML (*.html)",
-            renderer=render,
-            suggested_suffix="-notes",
-        )
+        return examiner
 
     def _export(
         self,
