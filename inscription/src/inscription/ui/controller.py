@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -65,6 +66,13 @@ from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
 from inscription.ui.settings_dialog import SettingsDialog
+from inscription.ui.undo_commands import (
+    EditStepFieldsCommand,
+    ReorderStepsCommand,
+    SetStepEvidentiaryCommand,
+    SetStepSuppressedCommand,
+    SnapshotAndReplaceCommand,
+)
 from inscription.ui.verify_dialog import IntegrityResultDialog
 from inscription.ui.verify_progress_dialog import VerifyProgressDialog, VerifyWorker
 
@@ -133,6 +141,13 @@ class SessionController(QObject):
         self._window_source: WindowFocusSource | None = None
         self._event_count = 0
         self._hotkeys: HotkeyManager = create_hotkey_manager()
+        # One undo stack per controller instance (one per window). Cleared
+        # on session open / close so commands never reach across sessions.
+        # Workspace mutations push commands here instead of calling the
+        # repository directly; Edit -> Undo / Redo (Ctrl+Z / Ctrl+Y) walks
+        # the stack via the actions exposed by ``undo_action`` /
+        # ``redo_action``.
+        self._undo_stack: QUndoStack = QUndoStack(self)
 
         self._workspace.step_fields_edited.connect(self._on_step_fields_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
@@ -268,6 +283,9 @@ class SessionController(QObject):
     def _activate(self, repo: SessionRepository) -> None:
         self._repository = repo
         self._workspace.set_repository(repo)
+        # Clear the undo stack so commands recorded against an earlier
+        # session can't accidentally apply to this one.
+        self._undo_stack.clear()
         self._event_count = len(repo.list_events())
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
@@ -300,10 +318,22 @@ class SessionController(QObject):
             logger.exception("Failed to close session cleanly")
         self._repository = None
         self._workspace.clear_repository()
+        self._undo_stack.clear()
         self._recorder_bar.set_session_name(None)
         self._recorder_bar.set_event_count(0)
         self._recorder_bar.set_recording(False)
         self.session_closed.emit()
+
+    @property
+    def undo_stack(self) -> QUndoStack:
+        """Expose the undo stack so the main window can wire its actions.
+
+        ``MainWindow`` calls
+        ``stack.createUndoAction(parent, "Undo")`` /
+        ``createRedoAction(...)`` to get auto-updated menu entries with
+        Ctrl+Z / Ctrl+Y shortcuts and dynamic text ("Undo Edit step 3").
+        """
+        return self._undo_stack
 
     # ------------------------------------------------------------ recording
 
@@ -674,8 +704,28 @@ class SessionController(QObject):
     def _on_step_fields_edited(self, step_id: int, action: str, result: str) -> None:
         if self._repository is None:
             return
+        # Look up the pre-edit state so the undo command can restore the
+        # exact prior text + manual_edit flag. Skip pushing a command
+        # when nothing actually changed (the editor fires this slot on
+        # focus-out regardless of whether the text was edited).
+        before = self._repository.get_step(step_id)
+        if before is None:
+            return
+        if before.action == action and before.result == result and before.manual_edit:
+            return
         try:
-            self._repository.update_step_fields(step_id, action=action, result=result)
+            self._undo_stack.push(
+                EditStepFieldsCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    step_id=step_id,
+                    before_action=before.action,
+                    before_result=before.result,
+                    before_manual_edit=before.manual_edit,
+                    after_action=action,
+                    after_result=result,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist step edit (step_id=%d)", step_id)
 
@@ -683,43 +733,87 @@ class SessionController(QObject):
     def _on_step_suppressed(self, step_id: int, suppressed: bool) -> None:
         if self._repository is None:
             return
+        before = self._repository.get_step(step_id)
+        if before is None or before.suppressed == suppressed:
+            return
         try:
-            self._repository.set_step_suppressed(step_id, suppressed=suppressed)
+            self._undo_stack.push(
+                SetStepSuppressedCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    step_id=step_id,
+                    before=before.suppressed,
+                    after=suppressed,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist step suppression (step_id=%d)", step_id)
-        self._workspace.reload()
 
     @Slot(int, bool)
     def _on_step_evidentiary_toggled(self, step_id: int, evidentiary: bool) -> None:
         if self._repository is None:
             return
+        before = self._repository.get_step(step_id)
+        if before is None or before.evidentiary == evidentiary:
+            return
         try:
-            self._repository.set_step_evidentiary(step_id, evidentiary=evidentiary)
+            self._undo_stack.push(
+                SetStepEvidentiaryCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    step_id=step_id,
+                    before=before.evidentiary,
+                    after=evidentiary,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist evidentiary flag (step_id=%d)", step_id)
-        # No reload — the editor's checkbox is already in the right state
-        # and reloading would re-trigger selection logic for no benefit.
 
     @Slot(list)
     def _on_steps_reordered(self, ordered_ids: list[int]) -> None:
         if self._repository is None:
             return
+        # Snapshot the previous ordering so undo can restore it. We pull
+        # ids from the live step list rather than the workspace so the
+        # before-state is taken from the canonical source.
+        before_order = [
+            s.id
+            for s in self._repository.list_steps(include_suppressed=True)
+            if s.id is not None
+        ]
+        if before_order == ordered_ids:
+            return
         try:
-            self._repository.reorder_steps(ordered_ids)
+            self._undo_stack.push(
+                ReorderStepsCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    before_order=before_order,
+                    after_order=ordered_ids,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist reorder")
             self._workspace.reload()  # snap UI back to truth on failure
-            return
-        # Re-derive the manifest so the session picker reflects the new
-        # ordering on next launch.
-        self._repository.flush_manifest()
 
     @Slot(int, int)
     def _on_merge_requested(self, primary_id: int, other_id: int) -> None:
         if self._repository is None:
             return
+        repo = self._repository
+
+        def mutate() -> None:
+            repo.merge_steps(primary_id=primary_id, other_id=other_id)
+
         try:
-            self._repository.merge_steps(primary_id=primary_id, other_id=other_id)
+            self._undo_stack.push(
+                SnapshotAndReplaceCommand(
+                    repository=repo,
+                    workspace=self._workspace,
+                    text=f"Merge steps {primary_id} and {other_id}",
+                    mutate=mutate,
+                )
+            )
         except Exception:
             logger.exception("Failed to merge steps %d and %d", primary_id, other_id)
             QMessageBox.warning(
@@ -727,16 +821,25 @@ class SessionController(QObject):
                 "Merge failed",
                 "Could not merge those two steps. See logs for details.",
             )
-            return
-        self._repository.flush_manifest()
-        self._workspace.reload()
 
     @Slot(int)
     def _on_split_requested(self, step_id: int) -> None:
         if self._repository is None:
             return
+        repo = self._repository
+
+        def mutate() -> None:
+            repo.split_step(step_id)
+
         try:
-            self._repository.split_step(step_id)
+            self._undo_stack.push(
+                SnapshotAndReplaceCommand(
+                    repository=repo,
+                    workspace=self._workspace,
+                    text=f"Split step {step_id}",
+                    mutate=mutate,
+                )
+            )
         except Exception:
             logger.exception("Failed to split step %d", step_id)
             QMessageBox.warning(
@@ -744,9 +847,6 @@ class SessionController(QObject):
                 "Split failed",
                 "Could not split that step. See logs for details.",
             )
-            return
-        self._repository.flush_manifest()
-        self._workspace.reload()
 
     @Slot(object)
     def _on_draft_step_requested(self, suggestion: CaseguideSuggestion) -> None:
