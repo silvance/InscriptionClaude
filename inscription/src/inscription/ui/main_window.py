@@ -188,6 +188,24 @@ class MainWindow(QMainWindow):
 
     def _build_edit_menu(self, menubar: QMenuBar) -> None:
         edit_menu = menubar.addMenu("&Edit")
+
+        # Qt's QUndoStack vends QAction instances that auto-update their
+        # enabled state and label text ("Undo Edit step 3" / "Redo
+        # Reorder steps") as the stack changes. Wiring the Edit menu to
+        # those actions rather than rolling our own keeps the menu
+        # honest as commands push and pop.
+        undo_action = self._controller.undo_stack.createUndoAction(self, "&Undo")
+        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        undo_action.setStatusTip("Undo the last step edit")
+        edit_menu.addAction(undo_action)
+
+        redo_action = self._controller.undo_stack.createRedoAction(self, "&Redo")
+        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        redo_action.setStatusTip("Redo the previously undone edit")
+        edit_menu.addAction(redo_action)
+
+        edit_menu.addSeparator()
+
         self._add_action(
             edit_menu, "&Settings…", self._controller.open_settings,
             shortcut="Ctrl+,", tip="Examiner identity and LLM endpoint",
