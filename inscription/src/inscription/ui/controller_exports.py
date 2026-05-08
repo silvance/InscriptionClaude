@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Protocol
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PySide6.QtWidgets import QWidget
 
     from inscription.model import ExportDocument
@@ -50,6 +52,7 @@ def run_export(
     file_filter: str,
     renderer: _Renderer,
     suggested_suffix: str = "",
+    on_complete: Callable[[], None] | None = None,
 ) -> None:
     """File-dialog → render → result-dialog loop.
 
@@ -61,6 +64,12 @@ def run_export(
     distinguish themselves in the default filename (forensic notes
     use ``-notes`` so they don't collide with a plain HTML export of
     the same session).
+
+    ``on_complete`` runs after the success dialog dismisses. The
+    forensic-notes path uses it to offer "mark this session as
+    submitted?" -- keeps the deliverable-class lock-down flow at the
+    controller layer (where it can read state) without dragging the
+    submitted-marker concept into this generic helper.
 
     Silently returns when the controller has no session open --
     matches the menu-disabled guard the controller already has, but
@@ -95,3 +104,5 @@ def run_export(
         "Export complete",
         f"Exported to:\n{doc.path}",
     )
+    if on_complete is not None:
+        on_complete()

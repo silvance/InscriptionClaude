@@ -60,11 +60,11 @@ from inscription.storage import (
     SessionRepository,
     list_sessions,
 )
-from inscription.ui.controller_errors import friendly_llm_error as _friendly_llm_error
-from inscription.ui.controller_exports import run_export
 from inscription.storage import (
     submitted as submitted_marker,
 )
+from inscription.ui.controller_errors import friendly_llm_error as _friendly_llm_error
+from inscription.ui.controller_exports import run_export
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
@@ -726,6 +726,13 @@ class SessionController(QObject):
                 case_reference=self._case_dir.name if self._case_dir is not None else None,
             )
 
+        # After a deliverable-class export, offer to lock the session
+        # so further edits don't diverge from what's in the discovery
+        # package. The operator can always decline.
+        def _maybe_offer_lock() -> None:
+            if not self.is_session_submitted():
+                self._offer_mark_submitted(export_format="Forensic notes")
+
         run_export(
             self._repository,
             parent=self._parent_widget,
@@ -734,54 +741,8 @@ class SessionController(QObject):
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
-            offer_submit=True,
+            on_complete=_maybe_offer_lock,
         )
-
-    def _export(
-        self,
-        *,
-        kind: str,
-        extension: str,
-        file_filter: str,
-        renderer: Callable[..., ExportDocument],
-        suggested_suffix: str = "",
-        offer_submit: bool = False,
-    ) -> None:
-        if self._repository is None:
-            return
-        suggested = str(
-            self._repository.session.exports_dir
-            / f"{self._repository.session.root.name}{suggested_suffix}.{extension}"
-        )
-        target, _ = QFileDialog.getSaveFileName(
-            self._parent_widget,
-            f"Export as {kind}",
-            suggested,
-            file_filter,
-        )
-        if not target:
-            return
-        try:
-            doc = renderer(self._repository, destination=Path(target))
-        except Exception:
-            logger.exception("%s export failed", kind)
-            QMessageBox.critical(
-                self._parent_widget,
-                "Export failed",
-                f"Inscription could not export the guide as {kind}. See logs for details.",
-            )
-            return
-        QMessageBox.information(
-            self._parent_widget,
-            "Export complete",
-            f"Exported to:\n{doc.path}",
-        )
-        # After a "deliverable-class" export (forensic notes, PDF, …),
-        # offer to lock the session so further edits don't diverge from
-        # what's in the discovery package. The operator can always
-        # decline; reopening later is one click away in the banner.
-        if offer_submit and not self.is_session_submitted():
-            self._offer_mark_submitted(export_format=kind)
 
     def _offer_mark_submitted(self, *, export_format: str) -> None:
         """Prompt: 'Mark this session as submitted? It will become read-only.'
