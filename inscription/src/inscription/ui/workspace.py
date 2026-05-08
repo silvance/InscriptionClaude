@@ -162,17 +162,30 @@ class SessionWorkspaceWidget(QWidget):
     # ---------------------------------------------------------- banner
 
     def set_submitted_marker(self, marker: SubmittedMarker | None) -> None:
-        """Show or hide the read-only banner.
+        """Show or hide the read-only banner and toggle child widgets.
 
         ``marker`` carries the timestamp + optional examiner / format
-        strings the banner renders. ``None`` hides the banner. Pure UI;
-        the controller is responsible for actually gating mutations.
+        strings the banner renders. ``None`` hides the banner.
+
+        Also forwards the read-only state to the step list, step editor,
+        and suggestions panel so their *appearance* matches what the
+        controller's slot gates already enforce -- closes the seam
+        where the banner says read-only but the fields still look
+        interactive. The controller's gates remain the source of truth
+        for rejecting writes; this is purely visual.
         """
         if marker is None:
             self._submitted_banner.hide()
+            self._set_children_read_only(False)
         else:
             self._submitted_banner.show_marker(marker)
             self._submitted_banner.show()
+            self._set_children_read_only(True)
+
+    def _set_children_read_only(self, read_only: bool) -> None:
+        self._list.set_read_only(read_only)
+        self._editor.set_read_only(read_only)
+        self._suggestions.set_read_only(read_only)
 
 
 class _SubmittedBanner(QWidget):

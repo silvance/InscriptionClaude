@@ -60,6 +60,10 @@ class StepEditorPanel(QWidget):
         self._current_step_id: int | None = None
         self._current_action: str = ""
         self._current_result: str = ""
+        # Read-only state for submitted sessions. When True, every
+        # show_step / clear leaves the editor controls disabled.
+        # Flipped by SessionWorkspaceWidget.set_read_only().
+        self._read_only: bool = False
 
         self._action = self._build_text_edit("What the examiner did…")
         self._result = self._build_text_edit("What was observed (optional)")
@@ -155,7 +159,7 @@ class StepEditorPanel(QWidget):
         result_blocked = self._result.blockSignals(True)
         self._result.setPlainText(step.result)
         self._result.blockSignals(result_blocked)
-        self._suppress_btn.setEnabled(True)
+        self._suppress_btn.setEnabled(not self._read_only)
         self._suppress_btn.setText("Restore step" if step.suppressed else "Remove step")
         # Set the checkbox without firing the toggled signal — otherwise
         # selecting a step would write its current state right back to the
@@ -163,9 +167,33 @@ class StepEditorPanel(QWidget):
         cb_blocked = self._evidentiary_cb.blockSignals(True)
         self._evidentiary_cb.setChecked(step.evidentiary)
         self._evidentiary_cb.blockSignals(cb_blocked)
-        self._evidentiary_cb.setEnabled(True)
+        self._evidentiary_cb.setEnabled(not self._read_only)
+        # Text edits respect the read-only flag too -- the controller
+        # gates the slot anyway, but a greyed-out field is the visible
+        # signal that this session is locked.
+        self._action.setReadOnly(self._read_only)
+        self._result.setReadOnly(self._read_only)
         self._heading_label.setText(_heading_for(step, started_at))
         self._load_screenshot(screenshot, session_root)
+
+    def set_read_only(self, read_only: bool) -> None:
+        """Enter / leave read-only mode.
+
+        Called by :class:`SessionWorkspaceWidget` when the open session's
+        submitted marker is set or cleared. Disables the action / result
+        text edits and the suppress / evidentiary controls so the
+        editor's *appearance* matches what the controller's slot gates
+        already enforce -- closes the seam where the banner says
+        read-only but the fields still look interactive.
+        """
+        self._read_only = read_only
+        self._action.setReadOnly(read_only)
+        self._result.setReadOnly(read_only)
+        # Enable the suppress / evidentiary controls only when there's
+        # also a step loaded (clear() leaves them disabled regardless).
+        if self._current_step_id is not None:
+            self._suppress_btn.setEnabled(not read_only)
+            self._evidentiary_cb.setEnabled(not read_only)
 
     def clear(self) -> None:
         self.flush_pending()
