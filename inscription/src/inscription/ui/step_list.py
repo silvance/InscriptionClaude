@@ -59,8 +59,29 @@ class StepListWidget(QListWidget):
         # only meaningful when the step covers more than one event).
         self._source_ids: dict[int, tuple[int, ...]] = {}
 
+        # Read-only mode for submitted sessions. Disables drag-drop
+        # reorder + suppresses the merge / split context menu so the
+        # list is selection-only.
+        self._read_only: bool = False
+
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
+
+    def set_read_only(self, read_only: bool) -> None:
+        """Toggle list-level edit affordances.
+
+        When True: drag-reorder is off and the right-click context
+        menu is suppressed. Selection still works so the operator can
+        view a submitted session's steps; the editor on the right
+        will also be in read-only mode and shows the same content
+        without edit affordances.
+        """
+        self._read_only = read_only
+        self.setDragDropMode(
+            QAbstractItemView.DragDropMode.NoDragDrop
+            if read_only
+            else QAbstractItemView.DragDropMode.InternalMove
+        )
 
     # -------------------------------------------------------- API
 
@@ -170,6 +191,11 @@ class StepListWidget(QListWidget):
     # ----------------------------------------------------- context menu
 
     def _on_context_menu(self, pos: QPoint) -> None:
+        if self._read_only:
+            # Submitted session: the merge / split actions would be
+            # blocked at the controller anyway, so don't pop a menu the
+            # operator can't act on.
+            return
         item = self.itemAt(pos)
         if item is None:
             return
