@@ -277,6 +277,18 @@ class SessionRepository:
                 ).fetchall()
         return [row_to_step(r) for r in rows]
 
+    def get_step(self, step_id: int) -> DraftStep | None:
+        """Read one step by id, or ``None`` when no such row exists.
+
+        Used by the undo machinery to snapshot a step's pre-edit state
+        before a command runs.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM draft_steps WHERE id = ?", (step_id,)
+            ).fetchone()
+        return row_to_step(row) if row else None
+
     def list_screenshots(self) -> list[ScreenshotArtifact]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM screenshot_artifacts ORDER BY id").fetchall()
@@ -559,10 +571,16 @@ class SessionRepository:
         *,
         action: str | None = None,
         result: str | None = None,
+        manual_edit: bool = True,
     ) -> None:
-        """Update the action and/or result columns and mark the step manual.
+        """Update the action and/or result columns.
 
         Either or both fields may be supplied; ``None`` means "leave alone".
+        ``manual_edit`` defaults to True because the typical caller is the
+        examiner editing in the workspace — the resulting row should be
+        protected from the next Regenerate-Steps pass. The undo path
+        passes ``manual_edit=False`` (or whatever the row's prior flag
+        was) to restore the pre-edit state faithfully.
         """
         if action is None and result is None:
             return
@@ -574,7 +592,8 @@ class SessionRepository:
         if result is not None:
             sets.append("result = ?")
             params.append(result)
-        sets.append("manual_edit = 1")
+        sets.append("manual_edit = ?")
+        params.append(1 if manual_edit else 0)
         params.append(step_id)
         with self._transaction(what="update_step_fields"):
             self._conn.execute(

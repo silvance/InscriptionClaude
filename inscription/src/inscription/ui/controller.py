@@ -19,6 +19,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import (
     QDialog,
     QInputDialog,
@@ -61,10 +62,20 @@ from inscription.storage import (
 )
 from inscription.ui.controller_errors import friendly_llm_error as _friendly_llm_error
 from inscription.ui.controller_exports import run_export
+from inscription.storage import (
+    submitted as submitted_marker,
+)
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
 from inscription.ui.settings_dialog import SettingsDialog
+from inscription.ui.undo_commands import (
+    EditStepFieldsCommand,
+    ReorderStepsCommand,
+    SetStepEvidentiaryCommand,
+    SetStepSuppressedCommand,
+    SnapshotAndReplaceCommand,
+)
 from inscription.ui.verify_dialog import IntegrityResultDialog
 from inscription.ui.verify_progress_dialog import VerifyProgressDialog, VerifyWorker
 
@@ -133,6 +144,13 @@ class SessionController(QObject):
         self._window_source: WindowFocusSource | None = None
         self._event_count = 0
         self._hotkeys: HotkeyManager = create_hotkey_manager()
+        # One undo stack per controller instance (one per window). Cleared
+        # on session open / close so commands never reach across sessions.
+        # Workspace mutations push commands here instead of calling the
+        # repository directly; Edit -> Undo / Redo (Ctrl+Z / Ctrl+Y) walks
+        # the stack via the actions exposed by ``undo_action`` /
+        # ``redo_action``.
+        self._undo_stack: QUndoStack = QUndoStack(self)
 
         self._workspace.step_fields_edited.connect(self._on_step_fields_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
@@ -141,6 +159,7 @@ class SessionController(QObject):
         self._workspace.merge_requested.connect(self._on_merge_requested)
         self._workspace.split_requested.connect(self._on_split_requested)
         self._workspace.draft_step_requested.connect(self._on_draft_step_requested)
+        self._workspace.reopen_requested.connect(self._on_reopen_requested)
         self._recorder_bar.record_toggled.connect(self._on_record_toggled)
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
         self._toggle_requested.connect(self._on_toggle_hotkey)
@@ -207,6 +226,81 @@ class SessionController(QObject):
         self._close_session()
         self._hotkeys.unregister_all()
 
+    # ---------------------------------------------------- submitted state
+
+    def is_session_submitted(self) -> bool:
+        """True when the open session has a submitted marker on disk.
+
+        Read straight off the marker file rather than caching, so the
+        answer stays correct even if a sibling tool (or a manual file
+        edit) tweaks the marker while the session is open.
+        """
+        if self._repository is None:
+            return False
+        return submitted_marker.read(self._repository.session) is not None
+
+    def mark_session_submitted(self, *, export_format: str | None = None) -> None:
+        """Mark the open session as submitted; show the banner.
+
+        ``export_format`` records what produced the submission
+        ("Forensic notes", "PDF") so the banner can display it. The
+        examiner string is pulled from Config so the banner shows
+        "by Alex Smith" without per-call wiring.
+
+        Clears the undo stack so undoing past the submission isn't
+        possible -- the operator should see the locked state as a
+        firm checkpoint, not a pending change.
+        """
+        if self._repository is None:
+            return
+        examiner = self._config.examiner_name.strip() or None
+        marker = submitted_marker.mark(
+            self._repository.session,
+            examiner=examiner,
+            export_format=export_format,
+        )
+        self._workspace.set_submitted_marker(marker)
+        self._undo_stack.clear()
+
+    def reopen_session_for_editing(self) -> None:
+        """Clear the submitted marker; hide the banner."""
+        if self._repository is None:
+            return
+        submitted_marker.clear(self._repository.session)
+        self._workspace.set_submitted_marker(None)
+
+    @Slot()
+    def _on_reopen_requested(self) -> None:
+        """Banner's "Reopen for editing" button → confirm and clear."""
+        if self._repository is None:
+            return
+        confirm = QMessageBox.warning(
+            self._parent_widget,
+            "Reopen submitted session?",
+            (
+                "This session was marked submitted as evidence. Reopening "
+                "lets you edit it, but any changes will diverge from what's "
+                "in the discovery package you already handed over.\n\n"
+                "If you make changes, re-export and re-mark the session as "
+                "submitted before sharing again."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.reopen_session_for_editing()
+
+    def _blocked_by_submitted(self) -> bool:
+        """Defensive gate for every workspace mutation slot.
+
+        The workspace's banner already directs the operator to
+        "Reopen for editing", so this guard is silent -- a stray
+        signal that reaches a slot when the session is submitted
+        just no-ops. Returns True when the caller should skip the
+        mutation.
+        """
+        return self.is_session_submitted()
+
     # --------------------------------------------------------- session picker
 
     def _show_session_picker(self) -> None:
@@ -268,6 +362,11 @@ class SessionController(QObject):
     def _activate(self, repo: SessionRepository) -> None:
         self._repository = repo
         self._workspace.set_repository(repo)
+        # Clear the undo stack so commands recorded against an earlier
+        # session can't accidentally apply to this one.
+        self._undo_stack.clear()
+        # Show / hide the read-only banner based on the on-disk marker.
+        self._workspace.set_submitted_marker(submitted_marker.read(repo.session))
         self._event_count = len(repo.list_events())
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
@@ -300,10 +399,22 @@ class SessionController(QObject):
             logger.exception("Failed to close session cleanly")
         self._repository = None
         self._workspace.clear_repository()
+        self._undo_stack.clear()
         self._recorder_bar.set_session_name(None)
         self._recorder_bar.set_event_count(0)
         self._recorder_bar.set_recording(False)
         self.session_closed.emit()
+
+    @property
+    def undo_stack(self) -> QUndoStack:
+        """Expose the undo stack so the main window can wire its actions.
+
+        ``MainWindow`` calls
+        ``stack.createUndoAction(parent, "Undo")`` /
+        ``createRedoAction(...)`` to get auto-updated menu entries with
+        Ctrl+Z / Ctrl+Y shortcuts and dynamic text ("Undo Edit step 3").
+        """
+        return self._undo_stack
 
     # ------------------------------------------------------------ recording
 
@@ -623,7 +734,78 @@ class SessionController(QObject):
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
+            offer_submit=True,
         )
+
+    def _export(
+        self,
+        *,
+        kind: str,
+        extension: str,
+        file_filter: str,
+        renderer: Callable[..., ExportDocument],
+        suggested_suffix: str = "",
+        offer_submit: bool = False,
+    ) -> None:
+        if self._repository is None:
+            return
+        suggested = str(
+            self._repository.session.exports_dir
+            / f"{self._repository.session.root.name}{suggested_suffix}.{extension}"
+        )
+        target, _ = QFileDialog.getSaveFileName(
+            self._parent_widget,
+            f"Export as {kind}",
+            suggested,
+            file_filter,
+        )
+        if not target:
+            return
+        try:
+            doc = renderer(self._repository, destination=Path(target))
+        except Exception:
+            logger.exception("%s export failed", kind)
+            QMessageBox.critical(
+                self._parent_widget,
+                "Export failed",
+                f"Inscription could not export the guide as {kind}. See logs for details.",
+            )
+            return
+        QMessageBox.information(
+            self._parent_widget,
+            "Export complete",
+            f"Exported to:\n{doc.path}",
+        )
+        # After a "deliverable-class" export (forensic notes, PDF, …),
+        # offer to lock the session so further edits don't diverge from
+        # what's in the discovery package. The operator can always
+        # decline; reopening later is one click away in the banner.
+        if offer_submit and not self.is_session_submitted():
+            self._offer_mark_submitted(export_format=kind)
+
+    def _offer_mark_submitted(self, *, export_format: str) -> None:
+        """Prompt: 'Mark this session as submitted? It will become read-only.'
+
+        Default is Yes -- if the operator just hand-rolled an evidence
+        export, locking is the right next move. Cancel keeps the session
+        editable and they can mark it later via Edit -> Mark as
+        submitted.
+        """
+        choice = QMessageBox.question(
+            self._parent_widget,
+            "Mark session as submitted?",
+            (
+                f"You just exported {export_format} for this session. "
+                "Mark the session as submitted so further edits don't "
+                "diverge from what's now in the discovery package?\n\n"
+                "You can reopen for editing any time from the banner that "
+                "appears at the top of the workspace."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if choice == QMessageBox.StandardButton.Yes:
+            self.mark_session_submitted(export_format=export_format)
 
     # ----------------------------------------------------------- slots
 
@@ -641,8 +823,30 @@ class SessionController(QObject):
     def _on_step_fields_edited(self, step_id: int, action: str, result: str) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
+        # Look up the pre-edit state so the undo command can restore the
+        # exact prior text + manual_edit flag. Skip pushing a command
+        # when nothing actually changed (the editor fires this slot on
+        # focus-out regardless of whether the text was edited).
+        before = self._repository.get_step(step_id)
+        if before is None:
+            return
+        if before.action == action and before.result == result and before.manual_edit:
+            return
         try:
-            self._repository.update_step_fields(step_id, action=action, result=result)
+            self._undo_stack.push(
+                EditStepFieldsCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    step_id=step_id,
+                    before_action=before.action,
+                    before_result=before.result,
+                    before_manual_edit=before.manual_edit,
+                    after_action=action,
+                    after_result=result,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist step edit (step_id=%d)", step_id)
 
@@ -650,43 +854,96 @@ class SessionController(QObject):
     def _on_step_suppressed(self, step_id: int, suppressed: bool) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
+        before = self._repository.get_step(step_id)
+        if before is None or before.suppressed == suppressed:
+            return
         try:
-            self._repository.set_step_suppressed(step_id, suppressed=suppressed)
+            self._undo_stack.push(
+                SetStepSuppressedCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    step_id=step_id,
+                    before=before.suppressed,
+                    after=suppressed,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist step suppression (step_id=%d)", step_id)
-        self._workspace.reload()
 
     @Slot(int, bool)
     def _on_step_evidentiary_toggled(self, step_id: int, evidentiary: bool) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
+        before = self._repository.get_step(step_id)
+        if before is None or before.evidentiary == evidentiary:
+            return
         try:
-            self._repository.set_step_evidentiary(step_id, evidentiary=evidentiary)
+            self._undo_stack.push(
+                SetStepEvidentiaryCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    step_id=step_id,
+                    before=before.evidentiary,
+                    after=evidentiary,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist evidentiary flag (step_id=%d)", step_id)
-        # No reload — the editor's checkbox is already in the right state
-        # and reloading would re-trigger selection logic for no benefit.
 
     @Slot(list)
     def _on_steps_reordered(self, ordered_ids: list[int]) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            self._workspace.reload()  # snap UI back to truth: drag is rejected
+            return
+        # Snapshot the previous ordering so undo can restore it. We pull
+        # ids from the live step list rather than the workspace so the
+        # before-state is taken from the canonical source.
+        before_order = [
+            s.id
+            for s in self._repository.list_steps(include_suppressed=True)
+            if s.id is not None
+        ]
+        if before_order == ordered_ids:
+            return
         try:
-            self._repository.reorder_steps(ordered_ids)
+            self._undo_stack.push(
+                ReorderStepsCommand(
+                    repository=self._repository,
+                    workspace=self._workspace,
+                    before_order=before_order,
+                    after_order=ordered_ids,
+                )
+            )
         except Exception:
             logger.exception("Failed to persist reorder")
             self._workspace.reload()  # snap UI back to truth on failure
-            return
-        # Re-derive the manifest so the session picker reflects the new
-        # ordering on next launch.
-        self._repository.flush_manifest()
 
     @Slot(int, int)
     def _on_merge_requested(self, primary_id: int, other_id: int) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
+        repo = self._repository
+
+        def mutate() -> None:
+            repo.merge_steps(primary_id=primary_id, other_id=other_id)
+
         try:
-            self._repository.merge_steps(primary_id=primary_id, other_id=other_id)
+            self._undo_stack.push(
+                SnapshotAndReplaceCommand(
+                    repository=repo,
+                    workspace=self._workspace,
+                    text=f"Merge steps {primary_id} and {other_id}",
+                    mutate=mutate,
+                )
+            )
         except Exception:
             logger.exception("Failed to merge steps %d and %d", primary_id, other_id)
             QMessageBox.warning(
@@ -694,16 +951,27 @@ class SessionController(QObject):
                 "Merge failed",
                 "Could not merge those two steps. See logs for details.",
             )
-            return
-        self._repository.flush_manifest()
-        self._workspace.reload()
 
     @Slot(int)
     def _on_split_requested(self, step_id: int) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
+        repo = self._repository
+
+        def mutate() -> None:
+            repo.split_step(step_id)
+
         try:
-            self._repository.split_step(step_id)
+            self._undo_stack.push(
+                SnapshotAndReplaceCommand(
+                    repository=repo,
+                    workspace=self._workspace,
+                    text=f"Split step {step_id}",
+                    mutate=mutate,
+                )
+            )
         except Exception:
             logger.exception("Failed to split step %d", step_id)
             QMessageBox.warning(
@@ -711,9 +979,6 @@ class SessionController(QObject):
                 "Split failed",
                 "Could not split that step. See logs for details.",
             )
-            return
-        self._repository.flush_manifest()
-        self._workspace.reload()
 
     @Slot(object)
     def _on_draft_step_requested(self, suggestion: CaseguideSuggestion) -> None:
@@ -725,6 +990,8 @@ class SessionController(QObject):
         regeneration.
         """
         if self._repository is None:
+            return
+        if self._blocked_by_submitted():
             return
         action = suggestion.action.strip()
         if not action:

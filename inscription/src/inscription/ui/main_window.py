@@ -181,6 +181,18 @@ class MainWindow(QMainWindow):
             tip="Re-hash every screenshot and compare to the stored SHA-256",
         )
         file_menu.addSeparator()
+        self._add_action(
+            file_menu, "Mark session as &submitted",
+            self._on_mark_submitted,
+            tip="Lock the session so further edits don't diverge from what's "
+                "already in the discovery package. Reopen any time from the banner.",
+        )
+        self._add_action(
+            file_menu, "Reop&en for editing",
+            self._on_reopen_submitted,
+            tip="Clear the submitted marker and re-enable editing.",
+        )
+        file_menu.addSeparator()
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
@@ -188,6 +200,24 @@ class MainWindow(QMainWindow):
 
     def _build_edit_menu(self, menubar: QMenuBar) -> None:
         edit_menu = menubar.addMenu("&Edit")
+
+        # Qt's QUndoStack vends QAction instances that auto-update their
+        # enabled state and label text ("Undo Edit step 3" / "Redo
+        # Reorder steps") as the stack changes. Wiring the Edit menu to
+        # those actions rather than rolling our own keeps the menu
+        # honest as commands push and pop.
+        undo_action = self._controller.undo_stack.createUndoAction(self, "&Undo")
+        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        undo_action.setStatusTip("Undo the last step edit")
+        edit_menu.addAction(undo_action)
+
+        redo_action = self._controller.undo_stack.createRedoAction(self, "&Redo")
+        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        redo_action.setStatusTip("Redo the previously undone edit")
+        edit_menu.addAction(redo_action)
+
+        edit_menu.addSeparator()
+
         self._add_action(
             edit_menu, "&Settings…", self._controller.open_settings,
             shortcut="Ctrl+,", tip="Examiner identity and LLM endpoint",
@@ -367,6 +397,35 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.activateWindow()
         self.raise_()
+
+    def _on_mark_submitted(self) -> None:
+        """File menu → Mark session as submitted."""
+        if self._controller.is_session_submitted():
+            QMessageBox.information(
+                self,
+                "Already submitted",
+                "This session is already marked as submitted. The "
+                "banner at the top of the workspace shows when, and "
+                "the Reopen button there returns it to editable.",
+            )
+            return
+        # Same prompt the export-flow uses, but with the export_format
+        # field set to "manual" because no export just ran.
+        self._controller._offer_mark_submitted(export_format="manual")
+
+    def _on_reopen_submitted(self) -> None:
+        """File menu → Reopen for editing."""
+        if not self._controller.is_session_submitted():
+            QMessageBox.information(
+                self,
+                "Session is editable",
+                "This session isn't marked as submitted, so editing "
+                "is already enabled.",
+            )
+            return
+        # Same confirm-dialog the banner button uses, so the menu and
+        # banner paths produce identical operator-facing UX.
+        self._controller._on_reopen_requested()
 
     def _hide_to_tray(self) -> None:
         """Same path the X button takes when the tray is available."""

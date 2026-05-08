@@ -12,18 +12,29 @@
 # Default model set: gemma4:latest + granite4:tiny-h, matching the
 # Windows build. Override with --models if you need different tags.
 #
-# Required: --ollama-bundle <path> pointing at an extracted
-# ollama-linux-amd64.tgz. Get it from
-# https://github.com/ollama/ollama/releases.
+# Required: --ollama-bundle <path> to a directory laid out as
+# bin/ollama + lib/ollama/. Easiest paths to one:
+#
+#   1. (Recommended.) Install Ollama on this build machine the normal way
+#      and point at /usr/local -- the layout matches:
+#        curl -fsSL https://ollama.com/install.sh | sh
+#        --ollama-bundle /usr/local
+#
+#   2. Extract the standalone Linux runtime archive (Ollama ships it as
+#      a Zstandard-compressed tar -- not .tgz):
+#        curl -LO https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+#        mkdir -p /tmp/ollama-linux-amd64
+#        tar --zstd -xf ollama-linux-amd64.tar.zst -C /tmp/ollama-linux-amd64
+#        --ollama-bundle /tmp/ollama-linux-amd64
 #
 # Usage:
 #     ./scripts/prepare-bundle.sh \
-#         --ollama-bundle ~/Downloads/ollama-linux-amd64
+#         --ollama-bundle /usr/local
 #     ./scripts/prepare-bundle.sh \
-#         --ollama-bundle ~/Downloads/ollama-linux-amd64 \
+#         --ollama-bundle /usr/local \
 #         --destination /media/usb/
 #     ./scripts/prepare-bundle.sh \
-#         --ollama-bundle ~/Downloads/ollama-linux-amd64 \
+#         --ollama-bundle /tmp/ollama-linux-amd64 \
 #         --models gemma4:latest --skip-pull --destination /media/usb/
 
 set -euo pipefail
@@ -66,7 +77,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            sed -n '2,32p' "$0"
+            sed -n '2,38p' "$0"
             exit 0
             ;;
         *)
@@ -77,10 +88,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$OLLAMA_BUNDLE" ]]; then
-    echo "ERROR: --ollama-bundle is required." >&2
-    echo "       Download ollama-linux-amd64.tgz from" >&2
-    echo "       https://github.com/ollama/ollama/releases, extract it," >&2
-    echo "       and pass --ollama-bundle <extracted-dir>." >&2
+    cat <<'EOF' >&2
+ERROR: --ollama-bundle is required.
+       Pass a directory containing bin/ollama and lib/ollama/. Easiest paths:
+
+       1. (Recommended.) Install Ollama on this build machine and point at
+          /usr/local -- the curl installer lays the layout we need:
+            curl -fsSL https://ollama.com/install.sh | sh
+            --ollama-bundle /usr/local
+
+       2. Extract the standalone Linux runtime archive
+          (Ollama ships it as Zstandard-compressed tar, not .tgz):
+            curl -LO https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+            mkdir -p /tmp/ollama-linux-amd64
+            tar --zstd -xf ollama-linux-amd64.tar.zst -C /tmp/ollama-linux-amd64
+            --ollama-bundle /tmp/ollama-linux-amd64
+EOF
     exit 2
 fi
 
