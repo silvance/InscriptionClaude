@@ -20,18 +20,30 @@
 #     - PyInstaller-capable venv with all four packages installed
 #       editable (see SETUP.md).
 #     - Ollama models already pulled to a local store.
-#     - The ollama-linux-amd64.tgz tarball downloaded and extracted
-#       to a directory; pass --ollama-bundle <that-directory>.
-#       Get it from https://github.com/ollama/ollama/releases.
+#     - --ollama-bundle <dir> pointing at a directory laid out as
+#       bin/ollama + lib/ollama/. Easiest paths to one:
+#
+#         1. (Recommended.) Install Ollama on this build machine and
+#            point at /usr/local -- the curl installer lays the layout
+#            we need:
+#              curl -fsSL https://ollama.com/install.sh | sh
+#              --ollama-bundle /usr/local
+#
+#         2. Extract the standalone Linux runtime archive
+#            (Ollama ships it as Zstandard-compressed tar, not .tgz):
+#              curl -LO https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+#              mkdir -p /tmp/ollama-linux-amd64
+#              tar --zstd -xf ollama-linux-amd64.tar.zst -C /tmp/ollama-linux-amd64
+#              --ollama-bundle /tmp/ollama-linux-amd64
 #
 # Usage:
 #     ./scripts/package-airgapped.sh \
-#         --ollama-bundle ~/Downloads/ollama-linux-amd64
+#         --ollama-bundle /usr/local
 #     ./scripts/package-airgapped.sh \
-#         --ollama-bundle ~/Downloads/ollama-linux-amd64 \
+#         --ollama-bundle /usr/local \
 #         --models qwen2.5:7b-instruct-q5_K_M --skip-build
 #     ./scripts/package-airgapped.sh \
-#         --ollama-bundle ~/Downloads/ollama-linux-amd64 \
+#         --ollama-bundle /tmp/ollama-linux-amd64 \
 #         --output-root /media/usb/
 
 set -euo pipefail
@@ -100,7 +112,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            sed -n '2,33p' "$0"
+            sed -n '2,47p' "$0"
             exit 0
             ;;
         *)
@@ -111,11 +123,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$OLLAMA_BUNDLE_SRC" ]]; then
-    echo "ERROR: --ollama-bundle is required." >&2
-    echo "       Download ollama-linux-amd64.tgz from" >&2
-    echo "       https://github.com/ollama/ollama/releases, extract it" >&2
-    echo "       (tar -xzf ollama-linux-amd64.tgz -C /tmp/ollama-linux-amd64)," >&2
-    echo "       and pass --ollama-bundle /tmp/ollama-linux-amd64." >&2
+    cat <<'EOF' >&2
+ERROR: --ollama-bundle is required.
+       Pass a directory containing bin/ollama and lib/ollama/. Easiest paths:
+
+       1. (Recommended.) Install Ollama on this build machine and point at
+          /usr/local -- the curl installer lays the layout we need:
+            curl -fsSL https://ollama.com/install.sh | sh
+            --ollama-bundle /usr/local
+
+       2. Extract the standalone Linux runtime archive
+          (Ollama ships it as Zstandard-compressed tar, not .tgz):
+            curl -LO https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst
+            mkdir -p /tmp/ollama-linux-amd64
+            tar --zstd -xf ollama-linux-amd64.tar.zst -C /tmp/ollama-linux-amd64
+            --ollama-bundle /tmp/ollama-linux-amd64
+EOF
     exit 2
 fi
 
@@ -140,7 +163,14 @@ if [[ ! -d "$OLLAMA_BUNDLE_SRC" ]]; then
 fi
 if [[ ! -x "$OLLAMA_BUNDLE_SRC/bin/ollama" ]]; then
     echo "ERROR: $OLLAMA_BUNDLE_SRC/bin/ollama is missing or not executable." >&2
-    echo "       Did you extract ollama-linux-amd64.tgz correctly?" >&2
+    echo "       Pass either an extracted ollama-linux-amd64.tar.zst directory" >&2
+    echo "       or a system-install root such as /usr/local." >&2
+    exit 1
+fi
+if [[ ! -d "$OLLAMA_BUNDLE_SRC/lib/ollama" ]]; then
+    echo "ERROR: $OLLAMA_BUNDLE_SRC/lib/ollama is missing." >&2
+    echo "       Pass either an extracted ollama-linux-amd64.tar.zst directory" >&2
+    echo "       or a system-install root such as /usr/local." >&2
     exit 1
 fi
 if [[ ! -d "$OLLAMA_MODELS_ROOT" ]]; then
@@ -200,10 +230,16 @@ for entry in "${apps[@]}"; do
 done
 
 # 5. Copy Ollama Linux runtime ---------------------------------------------
+# Only bin/ollama and lib/ollama/ are needed -- the launcher template
+# references exactly those two paths. Copying selectively (rather than
+# the whole source dir) is what makes --ollama-bundle /usr/local work
+# without sweeping in /usr/local/share, /usr/local/include, etc.
 
 write_step "Bundling Ollama runtime from $OLLAMA_BUNDLE_SRC"
 ollama_dest="${BUNDLE_ROOT}/ollama"
-cp -r "$OLLAMA_BUNDLE_SRC" "$ollama_dest"
+mkdir -p "${ollama_dest}/bin" "${ollama_dest}/lib"
+cp "$OLLAMA_BUNDLE_SRC/bin/ollama" "${ollama_dest}/bin/ollama"
+cp -r "$OLLAMA_BUNDLE_SRC/lib/ollama" "${ollama_dest}/lib/ollama"
 # Defensive: tarball preserves +x but a USB-mounted exFAT source
 # could strip it. Re-assert.
 chmod +x "${ollama_dest}/bin/ollama" 2>/dev/null || true
