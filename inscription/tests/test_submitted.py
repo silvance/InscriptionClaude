@@ -17,9 +17,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QAbstractItemView
 
 from inscription.model import DraftStep, EventKind, ResolvedElement
-from inscription.storage import SessionRepository, submitted
+from inscription.storage import SessionRepository, SubmittedMarker, submitted
+from inscription.ui.step_editor import StepEditorPanel
+from inscription.ui.step_list import StepListWidget
+from inscription.ui.workspace import SessionWorkspaceWidget
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -305,3 +309,60 @@ def test_reopen_session_clears_marker(qtbot, tmp_path: Path) -> None:  # type: i
         assert ws.set_submitted_marker_calls[-1] is None
     finally:
         repo.close()
+
+
+# ----------------------------------------------------- read-only widget propagation
+
+
+def test_workspace_set_submitted_marker_propagates_to_children(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """SessionWorkspaceWidget should forward read-only state to its
+    list / editor / suggestions children when the marker is set,
+    and re-enable them when cleared."""
+    workspace = SessionWorkspaceWidget()
+    qtbot.addWidget(workspace)
+
+    # Sanity: brand-new workspace -> children all editable.
+    assert workspace._list._read_only is False
+    assert workspace._editor._read_only is False
+    assert workspace._suggestions._read_only is False
+
+    workspace.set_submitted_marker(
+        SubmittedMarker(submitted_at=datetime.now(UTC), examiner="Alex")
+    )
+    assert workspace._list._read_only is True
+    assert workspace._editor._read_only is True
+    assert workspace._suggestions._read_only is True
+
+    workspace.set_submitted_marker(None)
+    assert workspace._list._read_only is False
+    assert workspace._editor._read_only is False
+    assert workspace._suggestions._read_only is False
+
+
+def test_step_editor_read_only_disables_text_edits(qtbot) -> None:  # type: ignore[no-untyped-def]
+    """The action / result text edits become QTextEdit.readOnly under
+    set_read_only(True), so a user typing into them produces no change."""
+    editor = StepEditorPanel()
+    qtbot.addWidget(editor)
+    editor.set_read_only(True)
+    assert editor._action.isReadOnly() is True
+    assert editor._result.isReadOnly() is True
+
+    editor.set_read_only(False)
+    assert editor._action.isReadOnly() is False
+    assert editor._result.isReadOnly() is False
+
+
+def test_step_list_read_only_disables_drag_drop(qtbot) -> None:  # type: ignore[no-untyped-def]
+    """DragDropMode flips to NoDragDrop when read-only -- prevents the
+    operator from dragging a row to a new position."""
+    lst = StepListWidget()
+    qtbot.addWidget(lst)
+    # Default: InternalMove (drag-drop allowed).
+    assert lst.dragDropMode() == QAbstractItemView.DragDropMode.InternalMove
+
+    lst.set_read_only(True)
+    assert lst.dragDropMode() == QAbstractItemView.DragDropMode.NoDragDrop
+
+    lst.set_read_only(False)
+    assert lst.dragDropMode() == QAbstractItemView.DragDropMode.InternalMove

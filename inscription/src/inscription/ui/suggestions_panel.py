@@ -68,6 +68,10 @@ class SuggestionsPanel(QWidget):
         self._case_dir: Path | None = None
         self._document: CaseguideDocument | None = None
         self._has_session = False
+        # Read-only mode for submitted sessions. The controller would
+        # block draft_step_requested anyway, but disabling the button
+        # when read-only is the visible signal.
+        self._read_only = False
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_watch_event)
         self._watcher.directoryChanged.connect(self._on_watch_event)
@@ -264,12 +268,28 @@ class SuggestionsPanel(QWidget):
             self._detail_rationale.setVisible(False)
         self._update_draft_button_state()
 
+    def set_read_only(self, read_only: bool) -> None:
+        """Enter / leave read-only mode for submitted sessions.
+
+        Disables the "Insert as draft step" button. Selection / detail
+        viewing still works -- the operator can still browse what
+        CaseGuide suggested -- but inserting as a step is gated.
+        """
+        self._read_only = read_only
+        self._update_draft_button_state()
+
     def _update_draft_button_state(self) -> None:
         item = self._list.currentItem()
         suggestion = item.data(_SUGGESTION_ROLE) if item is not None else None
         has_pick = isinstance(suggestion, CaseguideSuggestion)
-        self._draft_button.setEnabled(has_pick and self._has_session)
-        if has_pick and not self._has_session:
+        self._draft_button.setEnabled(
+            has_pick and self._has_session and not self._read_only
+        )
+        if has_pick and self._read_only:
+            self._draft_button.setToolTip(
+                "Session is marked as submitted. Reopen for editing first."
+            )
+        elif has_pick and not self._has_session:
             self._draft_button.setToolTip("Open a session to draft this as a step.")
         else:
             self._draft_button.setToolTip("")
