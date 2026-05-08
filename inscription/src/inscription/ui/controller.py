@@ -62,6 +62,9 @@ from inscription.storage import (
     SessionRepository,
     list_sessions,
 )
+from inscription.storage import (
+    submitted as submitted_marker,
+)
 from inscription.ui.qt_capture_bridge import QtCaptureBridge
 from inscription.ui.rewrite_dialog import RewriteProgressDialog, RewriteWorker
 from inscription.ui.session_dialogs import SessionListDialog
@@ -156,6 +159,7 @@ class SessionController(QObject):
         self._workspace.merge_requested.connect(self._on_merge_requested)
         self._workspace.split_requested.connect(self._on_split_requested)
         self._workspace.draft_step_requested.connect(self._on_draft_step_requested)
+        self._workspace.reopen_requested.connect(self._on_reopen_requested)
         self._recorder_bar.record_toggled.connect(self._on_record_toggled)
         self._recorder_bar.marker_requested.connect(self._on_marker_requested)
         self._toggle_requested.connect(self._on_toggle_hotkey)
@@ -222,6 +226,81 @@ class SessionController(QObject):
         self._close_session()
         self._hotkeys.unregister_all()
 
+    # ---------------------------------------------------- submitted state
+
+    def is_session_submitted(self) -> bool:
+        """True when the open session has a submitted marker on disk.
+
+        Read straight off the marker file rather than caching, so the
+        answer stays correct even if a sibling tool (or a manual file
+        edit) tweaks the marker while the session is open.
+        """
+        if self._repository is None:
+            return False
+        return submitted_marker.read(self._repository.session) is not None
+
+    def mark_session_submitted(self, *, export_format: str | None = None) -> None:
+        """Mark the open session as submitted; show the banner.
+
+        ``export_format`` records what produced the submission
+        ("Forensic notes", "PDF") so the banner can display it. The
+        examiner string is pulled from Config so the banner shows
+        "by Alex Smith" without per-call wiring.
+
+        Clears the undo stack so undoing past the submission isn't
+        possible -- the operator should see the locked state as a
+        firm checkpoint, not a pending change.
+        """
+        if self._repository is None:
+            return
+        examiner = self._config.examiner_name.strip() or None
+        marker = submitted_marker.mark(
+            self._repository.session,
+            examiner=examiner,
+            export_format=export_format,
+        )
+        self._workspace.set_submitted_marker(marker)
+        self._undo_stack.clear()
+
+    def reopen_session_for_editing(self) -> None:
+        """Clear the submitted marker; hide the banner."""
+        if self._repository is None:
+            return
+        submitted_marker.clear(self._repository.session)
+        self._workspace.set_submitted_marker(None)
+
+    @Slot()
+    def _on_reopen_requested(self) -> None:
+        """Banner's "Reopen for editing" button → confirm and clear."""
+        if self._repository is None:
+            return
+        confirm = QMessageBox.warning(
+            self._parent_widget,
+            "Reopen submitted session?",
+            (
+                "This session was marked submitted as evidence. Reopening "
+                "lets you edit it, but any changes will diverge from what's "
+                "in the discovery package you already handed over.\n\n"
+                "If you make changes, re-export and re-mark the session as "
+                "submitted before sharing again."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.reopen_session_for_editing()
+
+    def _blocked_by_submitted(self) -> bool:
+        """Defensive gate for every workspace mutation slot.
+
+        The workspace's banner already directs the operator to
+        "Reopen for editing", so this guard is silent -- a stray
+        signal that reaches a slot when the session is submitted
+        just no-ops. Returns True when the caller should skip the
+        mutation.
+        """
+        return self.is_session_submitted()
+
     # --------------------------------------------------------- session picker
 
     def _show_session_picker(self) -> None:
@@ -286,6 +365,8 @@ class SessionController(QObject):
         # Clear the undo stack so commands recorded against an earlier
         # session can't accidentally apply to this one.
         self._undo_stack.clear()
+        # Show / hide the read-only banner based on the on-disk marker.
+        self._workspace.set_submitted_marker(submitted_marker.read(repo.session))
         self._event_count = len(repo.list_events())
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
@@ -647,6 +728,7 @@ class SessionController(QObject):
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
+            offer_submit=True,
         )
 
     def _export(
@@ -657,6 +739,7 @@ class SessionController(QObject):
         file_filter: str,
         renderer: Callable[..., ExportDocument],
         suggested_suffix: str = "",
+        offer_submit: bool = False,
     ) -> None:
         if self._repository is None:
             return
@@ -687,6 +770,36 @@ class SessionController(QObject):
             "Export complete",
             f"Exported to:\n{doc.path}",
         )
+        # After a "deliverable-class" export (forensic notes, PDF, …),
+        # offer to lock the session so further edits don't diverge from
+        # what's in the discovery package. The operator can always
+        # decline; reopening later is one click away in the banner.
+        if offer_submit and not self.is_session_submitted():
+            self._offer_mark_submitted(export_format=kind)
+
+    def _offer_mark_submitted(self, *, export_format: str) -> None:
+        """Prompt: 'Mark this session as submitted? It will become read-only.'
+
+        Default is Yes -- if the operator just hand-rolled an evidence
+        export, locking is the right next move. Cancel keeps the session
+        editable and they can mark it later via Edit -> Mark as
+        submitted.
+        """
+        choice = QMessageBox.question(
+            self._parent_widget,
+            "Mark session as submitted?",
+            (
+                f"You just exported {export_format} for this session. "
+                "Mark the session as submitted so further edits don't "
+                "diverge from what's now in the discovery package?\n\n"
+                "You can reopen for editing any time from the banner that "
+                "appears at the top of the workspace."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if choice == QMessageBox.StandardButton.Yes:
+            self.mark_session_submitted(export_format=export_format)
 
     # ----------------------------------------------------------- slots
 
@@ -703,6 +816,8 @@ class SessionController(QObject):
     @Slot(int, str, str)
     def _on_step_fields_edited(self, step_id: int, action: str, result: str) -> None:
         if self._repository is None:
+            return
+        if self._blocked_by_submitted():
             return
         # Look up the pre-edit state so the undo command can restore the
         # exact prior text + manual_edit flag. Skip pushing a command
@@ -733,6 +848,8 @@ class SessionController(QObject):
     def _on_step_suppressed(self, step_id: int, suppressed: bool) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
         before = self._repository.get_step(step_id)
         if before is None or before.suppressed == suppressed:
             return
@@ -753,6 +870,8 @@ class SessionController(QObject):
     def _on_step_evidentiary_toggled(self, step_id: int, evidentiary: bool) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
         before = self._repository.get_step(step_id)
         if before is None or before.evidentiary == evidentiary:
             return
@@ -772,6 +891,9 @@ class SessionController(QObject):
     @Slot(list)
     def _on_steps_reordered(self, ordered_ids: list[int]) -> None:
         if self._repository is None:
+            return
+        if self._blocked_by_submitted():
+            self._workspace.reload()  # snap UI back to truth: drag is rejected
             return
         # Snapshot the previous ordering so undo can restore it. We pull
         # ids from the live step list rather than the workspace so the
@@ -800,6 +922,8 @@ class SessionController(QObject):
     def _on_merge_requested(self, primary_id: int, other_id: int) -> None:
         if self._repository is None:
             return
+        if self._blocked_by_submitted():
+            return
         repo = self._repository
 
         def mutate() -> None:
@@ -825,6 +949,8 @@ class SessionController(QObject):
     @Slot(int)
     def _on_split_requested(self, step_id: int) -> None:
         if self._repository is None:
+            return
+        if self._blocked_by_submitted():
             return
         repo = self._repository
 
@@ -858,6 +984,8 @@ class SessionController(QObject):
         regeneration.
         """
         if self._repository is None:
+            return
+        if self._blocked_by_submitted():
             return
         action = suggestion.action.strip()
         if not action:
