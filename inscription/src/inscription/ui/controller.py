@@ -758,12 +758,22 @@ class SessionController(QObject):
                 case_reference=case_ref,
             )
 
-        self._export(
+        # PDF is a deliverable-class export -- offer to lock the
+        # session after a successful render, matching the forensic
+        # notes flow.
+        def _maybe_offer_lock() -> None:
+            if not self.is_session_submitted():
+                self._offer_mark_submitted(export_format="PDF")
+
+        run_export(
+            self._repository,
+            parent=self._parent_widget,
             kind="PDF",
             extension="pdf",
             file_filter="PDF (*.pdf)",
             renderer=render,
             suggested_suffix="-notes",
+            on_complete=_maybe_offer_lock,
         )
 
     def _format_examiner(self) -> str | None:
@@ -788,47 +798,6 @@ class SessionController(QObject):
                 else self._config.examiner_id.strip()
             )
         return examiner
-
-    def _export(
-        self,
-        *,
-        kind: str,
-        extension: str,
-        file_filter: str,
-        renderer: Callable[..., ExportDocument],
-        suggested_suffix: str = "",
-        offer_submit: bool = False,
-    ) -> None:
-        if self._repository is None:
-            return
-        suggested = str(
-            self._repository.session.exports_dir
-            / f"{self._repository.session.root.name}{suggested_suffix}.{extension}"
-        )
-        target, _ = QFileDialog.getSaveFileName(
-            self._parent_widget,
-            f"Export as {kind}",
-            suggested,
-            file_filter,
-        )
-        if not target:
-            return
-        try:
-            doc = renderer(self._repository, destination=Path(target))
-        except Exception:
-            logger.exception("%s export failed", kind)
-            QMessageBox.critical(
-                self._parent_widget,
-                "Export failed",
-                f"Inscription could not export the guide as {kind}. See logs for details.",
-            )
-            return
-        QMessageBox.information(
-            self._parent_widget,
-            "Export complete",
-            f"Exported to:\n{doc.path}",
-            on_complete=_maybe_offer_lock,
-        )
 
     def _offer_mark_submitted(self, *, export_format: str) -> None:
         """Prompt: 'Mark this session as submitted? It will become read-only.'
