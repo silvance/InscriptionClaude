@@ -101,6 +101,59 @@ def test_read_handles_missing_submitted_at_field(tmp_path: Path) -> None:
         repo.close()
 
 
+def test_read_rejects_naive_submitted_at(tmp_path: Path) -> None:
+    """Naive datetimes are corrupt for forensic timestamping -- the
+    marker is rejected so a banner rendered on another machine in
+    another timezone can't misread the time."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="NaiveTs")
+    try:
+        marker_path = repo.session.internal_dir / "submitted.json"
+        # Naive ISO8601: no offset, no Z.
+        marker_path.write_text(
+            '{"submitted_at": "2026-05-08T12:00:00"}', encoding="utf-8"
+        )
+        assert submitted.read(repo.session) is None
+    finally:
+        repo.close()
+
+
+def test_read_rejects_oversized_marker(tmp_path: Path) -> None:
+    """A marker file larger than the cap is treated as corrupt
+    (defensive against a tampered or runaway file silently filling
+    RAM during read_text)."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="HugeMarker")
+    try:
+        marker_path = repo.session.internal_dir / "submitted.json"
+        # 128 KB of valid-looking JSON (well past the 64 KB cap).
+        body = '{"submitted_at": "2026-05-08T12:00:00+00:00", "padding": "'
+        body += "x" * (128 * 1024)
+        body += '"}'
+        marker_path.write_text(body, encoding="utf-8")
+        assert submitted.read(repo.session) is None
+    finally:
+        repo.close()
+
+
+def test_mark_writes_atomically(tmp_path: Path) -> None:
+    """mark() goes through a .tmp file + os.replace so a crash
+    mid-write can't leave a half-written marker the reader treats
+    as 'not submitted', silently dropping the evidentiary lock."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="AtomicMark")
+    try:
+        submitted.mark(repo.session)
+        # Final file is in place; no .tmp sibling left behind.
+        marker_path = repo.session.internal_dir / "submitted.json"
+        tmp_path_stale = repo.session.internal_dir / "submitted.json.tmp"
+        assert marker_path.exists()
+        assert not tmp_path_stale.exists()
+        # Sanity: the file is fully readable JSON, not a partial.
+        marker = submitted.read(repo.session)
+        assert marker is not None
+        assert marker.submitted_at.tzinfo is not None
+    finally:
+        repo.close()
+
+
 def test_mark_creates_internal_dir(tmp_path: Path) -> None:
     """Defensive: mark() should create .inscription/ if it's missing."""
     repo = SessionRepository.create(workspace_root=tmp_path, name="MakeDir")

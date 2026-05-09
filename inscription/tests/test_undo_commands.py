@@ -148,6 +148,45 @@ def test_edit_step_fields_coalesces_consecutive_edits(tmp_path: Path) -> None:
         repo.close()
 
 
+def test_edit_step_fields_refuses_merge_outside_coalesce_window(tmp_path: Path) -> None:
+    """An edit made well after the coalesce window has lapsed should
+    NOT merge into the previous command -- the operator expects one
+    Ctrl+Z to undo the most recent edit, not a 10-minute-old one."""
+    repo = SessionRepository.create(workspace_root=tmp_path, name="EditWindow")
+    try:
+        sid, _ = _seed_two_steps(repo)
+        workspace = _FakeWorkspace()
+        before = repo.get_step(sid)
+        assert before is not None
+
+        first = EditStepFieldsCommand(
+            repository=repo,
+            workspace=cast("Workspace", workspace),
+            step_id=sid,
+            before_action=before.action,
+            before_result=before.result,
+            before_manual_edit=before.manual_edit,
+            after_action="A",
+            after_result="",
+        )
+        # Push the first command's "last extended at" stamp 10 minutes
+        # into the past so the second edit looks like a separate op.
+        first._last_extended_at -= 600.0
+        second = EditStepFieldsCommand(
+            repository=repo,
+            workspace=cast("Workspace", workspace),
+            step_id=sid,
+            before_action="A",
+            before_result="",
+            before_manual_edit=True,
+            after_action="AB",
+            after_result="",
+        )
+        assert first.mergeWith(second) is False
+    finally:
+        repo.close()
+
+
 def test_set_step_suppressed_round_trip(tmp_path: Path) -> None:
     repo = SessionRepository.create(workspace_root=tmp_path, name="Suppress")
     try:

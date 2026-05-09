@@ -29,6 +29,7 @@ into a unit test.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtGui import QUndoCommand
@@ -103,6 +104,11 @@ class EditStepFieldsCommand(_StepCommandBase):
         # keeps typing in the same field.
         self._after_action = after_action
         self._after_result = after_result
+        # Monotonic timestamp of the most recent edit folded into this
+        # command. Used by mergeWith to enforce the coalesce window so
+        # an edit made an hour after the last one starts a fresh undo
+        # entry instead of silently merging.
+        self._last_extended_at = time.monotonic()
 
     def id(self) -> int:
         return _EDIT_STEP_FIELDS_ID
@@ -112,10 +118,17 @@ class EditStepFieldsCommand(_StepCommandBase):
             return False
         if other._step_id != self._step_id:
             return False
+        # Refuse to merge once the coalesce window has lapsed -- an
+        # edit made minutes / hours after the previous one is a
+        # logically separate operation and the operator expects one
+        # Ctrl+Z to undo the latest edit, not the whole conversation.
+        if (other._last_extended_at - self._last_extended_at) * 1000 > _TEXT_EDIT_COALESCE_MS:
+            return False
         # Extend our "after" state to include the newer edit. The "before"
         # state stays put -- one undo restores the pre-merge state.
         self._after_action = other._after_action
         self._after_result = other._after_result
+        self._last_extended_at = other._last_extended_at
         return True
 
     def redo(self) -> None:
