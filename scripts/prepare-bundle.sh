@@ -322,7 +322,11 @@ fi
 # 6. Report ----------------------------------------------------------------
 
 total_bytes=$(du -sb "$final_path" | awk '{print $1}')
-total_gb=$(python3 -c "print(f'{${total_bytes}/(1024**3):.2f}')")
+# Pass via argv (not interpolated into the f-string source) so an
+# empty / unexpected du output produces a clean error instead of a
+# Python SyntaxError, and there's no path to source-injection if the
+# size value ever becomes operator-influenced.
+total_gb=$(python3 -c "import sys; print(f'{int(sys.argv[1])/(1024**3):.2f}')" "$total_bytes")
 
 echo
 echo "Bundle ready"
