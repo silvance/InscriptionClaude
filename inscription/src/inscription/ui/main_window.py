@@ -175,6 +175,10 @@ class MainWindow(QMainWindow):
             file_menu, "Export &Forensic notes…", self._controller.export_forensic_notes,
             tip="Export a printable Time/Date · Action · Result notes table",
         )
+        self._add_action(
+            file_menu, "Export as &PDF…", self._controller.export_pdf,
+            tip="Export the forensic notes as a self-contained PDF with per-page headers",
+        )
         file_menu.addSeparator()
         self._add_action(
             file_menu, "&Verify integrity…", self._controller.verify_integrity,

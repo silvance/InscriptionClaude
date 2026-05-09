@@ -39,7 +39,12 @@ from inscription.capture import (
     WindowFocusSource,
 )
 from inscription.config import Config
-from inscription.export import export_forensic_notes, export_html, export_markdown
+from inscription.export import (
+    export_forensic_notes,
+    export_html,
+    export_markdown,
+    export_pdf,
+)
 from inscription.llm import LLMClient, LLMError, StepRewriter
 from inscription.model import DraftStep, EventKind, utcnow
 from inscription.paths import WORKSPACE_DIR
@@ -704,26 +709,15 @@ class SessionController(QObject):
         )
 
     def export_forensic_notes(self) -> None:
-        examiner = self._config.examiner_name.strip() or None
-        if self._config.examiner_org.strip():
-            examiner = (
-                f"{examiner} ({self._config.examiner_org.strip()})"
-                if examiner
-                else self._config.examiner_org.strip()
-            )
-        if self._config.examiner_id.strip():
-            examiner = (
-                f"{examiner} · {self._config.examiner_id.strip()}"
-                if examiner
-                else self._config.examiner_id.strip()
-            )
+        examiner = self._format_examiner()
+        case_ref = self._case_dir.name if self._case_dir is not None else None
 
         def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
             return export_forensic_notes(
                 repository,
                 destination=destination,
                 examiner=examiner,
-                case_reference=self._case_dir.name if self._case_dir is not None else None,
+                case_reference=case_ref,
             )
 
         # After a deliverable-class export, offer to lock the session
@@ -741,8 +735,69 @@ class SessionController(QObject):
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
+            offer_submit=True,
+        )
+
+    def export_pdf(self) -> None:
+        """Render forensic notes to a self-contained PDF.
+
+        Uses the same case header / examiner block as the HTML
+        forensic-notes export, but adds per-page header (case +
+        examiner) + footer (page X of Y, generated-at timestamp)
+        and inlines all screenshots into a single .pdf file --
+        nothing for the operator to zip up before handing over.
+        """
+        examiner = self._format_examiner()
+        case_ref = self._case_dir.name if self._case_dir is not None else None
+
+        def render(repository: SessionRepository, *, destination: Path) -> ExportDocument:
+            return export_pdf(
+                repository,
+                destination=destination,
+                examiner=examiner,
+                case_reference=case_ref,
+            )
+
+        # PDF is a deliverable-class export -- offer to lock the
+        # session after a successful render, matching the forensic
+        # notes flow.
+        def _maybe_offer_lock() -> None:
+            if not self.is_session_submitted():
+                self._offer_mark_submitted(export_format="PDF")
+
+        run_export(
+            self._repository,
+            parent=self._parent_widget,
+            kind="PDF",
+            extension="pdf",
+            file_filter="PDF (*.pdf)",
+            renderer=render,
+            suggested_suffix="-notes",
             on_complete=_maybe_offer_lock,
         )
+
+    def _format_examiner(self) -> str | None:
+        """Build the "Name (Org) · ID" string used in export headers.
+
+        Each fragment is included only when present, so a config with
+        only a name produces just the name; with name + org but no
+        id, "Name (Org)"; etc. Shared by the HTML and PDF forensic
+        exports so the rendered header stays consistent across formats.
+        """
+        examiner = self._config.examiner_name.strip() or None
+        if self._config.examiner_org.strip():
+            examiner = (
+                f"{examiner} ({self._config.examiner_org.strip()})"
+                if examiner
+                else self._config.examiner_org.strip()
+            )
+        if self._config.examiner_id.strip():
+            examiner = (
+                f"{examiner} · {self._config.examiner_id.strip()}"
+                if examiner
+                else self._config.examiner_id.strip()
+            )
+        return examiner
 
     def _offer_mark_submitted(self, *, export_format: str) -> None:
         """Prompt: 'Mark this session as submitted? It will become read-only.'
