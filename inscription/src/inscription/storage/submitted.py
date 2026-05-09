@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 #: Filename inside the session's ``.inscription/`` directory.
 _FILENAME = "submitted.json"
 
+#: Hard cap on marker file size when reading. The file we write is
+#: ~150 bytes; anything past 64 KB indicates corruption or tampering
+#: and we'd rather treat the session as not-submitted than slurp a
+#: pathological file into RAM only to fail the JSON parse.
+_MAX_READ_BYTES = 64 * 1024
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SubmittedMarker:
@@ -58,16 +64,32 @@ def marker_path(session: Session) -> object:
     return session.internal_dir / _FILENAME
 
 
-def read(session: Session) -> SubmittedMarker | None:
+def read(session: Session) -> SubmittedMarker | None:  # noqa: PLR0911 - linear validator chain
     """Return the marker for ``session``, or ``None`` when not submitted.
 
     Defensive against the file being absent (the common case for an
     in-progress session) and against a corrupt / partial JSON write
     from a crash mid-mark (treat as "not submitted" so the operator
     isn't blocked by a stale marker).
+
+    Treats a naive ``submitted_at`` as corrupt: forensic timestamps
+    must carry a UTC offset so a banner rendered on another machine
+    in another timezone can't misread the time.
     """
     path = session.internal_dir / _FILENAME
     if not path.exists():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size > _MAX_READ_BYTES:
+        logger.warning(
+            "Submitted marker at %s is %d bytes (cap %d); treating as not submitted",
+            path,
+            size,
+            _MAX_READ_BYTES,
+        )
         return None
     try:
         raw = path.read_text(encoding="utf-8")
@@ -81,6 +103,13 @@ def read(session: Session) -> SubmittedMarker | None:
     try:
         submitted_at = datetime.fromisoformat(submitted_at_raw)
     except ValueError:
+        return None
+    if submitted_at.tzinfo is None:
+        logger.warning(
+            "Submitted marker at %s has naive datetime %r; treating as not submitted",
+            path,
+            submitted_at_raw,
+        )
         return None
     examiner = data.get("examiner")
     fmt = data.get("export_format")
@@ -104,6 +133,10 @@ def mark(
     directory is created if missing -- it always should exist for an
     open session, but be defensive in case a caller writes the
     marker before opening the session.
+
+    Writes via temp-file + ``os.replace`` so a crash mid-write can't
+    leave a truncated JSON the reader will treat as "not submitted",
+    silently dropping the evidentiary lock.
     """
     marker = SubmittedMarker(
         submitted_at=utcnow(),
@@ -118,7 +151,10 @@ def mark(
 
     session.internal_dir.mkdir(parents=True, exist_ok=True)
     path = session.internal_dir / _FILENAME
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    body = json.dumps(payload, indent=2) + "\n"
+    tmp_path.write_text(body, encoding="utf-8")
+    tmp_path.replace(path)
     logger.info(
         "Marked session %r as submitted at %s",
         session.info.name,

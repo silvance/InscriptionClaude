@@ -89,10 +89,19 @@ def run_export(
     )
     if not target:
         return
+    target_path = Path(target)
     try:
-        doc = renderer(repository, destination=Path(target))
+        doc = renderer(repository, destination=target_path)
     except Exception:
         logger.exception("%s export failed", kind)
+        # Best-effort: drop a partial file the renderer may have
+        # written before failing. Otherwise the operator finds an
+        # orphan in exports_dir/ that looks like a successful export.
+        if target_path.exists():
+            try:
+                target_path.unlink()
+            except OSError:
+                logger.warning("Could not remove partial export file at %s", target_path)
         QMessageBox.critical(
             parent,
             "Export failed",

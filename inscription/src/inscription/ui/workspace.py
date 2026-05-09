@@ -237,7 +237,10 @@ class _SubmittedBanner(QWidget):
         layout.addWidget(self._reopen_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def show_marker(self, marker: SubmittedMarker) -> None:
-        when = marker.submitted_at.astimezone().strftime("%Y-%m-%d %H:%M")
+        # %Z renders the timezone abbreviation so an operator on a
+        # different machine can't misread a UTC marker as local time
+        # (or vice versa). Required for forensic-grade timestamping.
+        when = marker.submitted_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")
         parts = [f"Marked submitted on {when}"]
         if marker.examiner:
             parts.append(f"by {marker.examiner}")

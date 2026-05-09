@@ -949,6 +949,10 @@ class SessionController(QObject):
         the row untouched — the examiner deliberately chose this
         suggestion, it shouldn't be clobbered by event-driven
         regeneration.
+
+        Routed through ``SnapshotAndReplaceCommand`` so a Ctrl+Z
+        pulls the drafted step back out instead of silently undoing
+        the previous unrelated edit.
         """
         if self._repository is None:
             return
@@ -958,14 +962,26 @@ class SessionController(QObject):
         if not action:
             logger.info("Draft-as-step ignored: suggestion %s has no action", suggestion.id)
             return
-        try:
-            self._repository.append_step(
+        repo = self._repository
+
+        def mutate() -> None:
+            repo.append_step(
                 DraftStep(
                     id=None,
                     sequence=0,  # repository auto-assigns from MAX(sequence) + 1
                     action=action,
                     result=suggestion.expected_result,
                     manual_edit=True,
+                )
+            )
+
+        try:
+            self._undo_stack.push(
+                SnapshotAndReplaceCommand(
+                    repository=repo,
+                    workspace=self._workspace,
+                    text=f"Draft step from suggestion {suggestion.id}",
+                    mutate=mutate,
                 )
             )
         except Exception:
@@ -975,9 +991,6 @@ class SessionController(QObject):
                 "Draft failed",
                 "Could not add that suggestion as a step. See logs for details.",
             )
-            return
-        self._repository.flush_manifest()
-        self._workspace.reload()
 
 
 # _friendly_llm_error moved to inscription.ui.controller_errors;
