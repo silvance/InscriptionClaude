@@ -63,6 +63,7 @@ from inscription.storage import (
     SessionAlreadyExistsError,
     SessionLockedError,
     SessionRepository,
+    SubmittedMarker,
     list_sessions,
 )
 from inscription.storage import (
@@ -85,6 +86,7 @@ from inscription.ui.verify_dialog import IntegrityResultDialog
 from inscription.ui.verify_progress_dialog import VerifyProgressDialog, VerifyWorker
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from inscription.caseguide_link import CaseguideSuggestion
@@ -156,6 +158,16 @@ class SessionController(QObject):
         # the stack via the actions exposed by ``undo_action`` /
         # ``redo_action``.
         self._undo_stack: QUndoStack = QUndoStack(self)
+        # Bounded so a long editing session of SnapshotAndReplaceCommands
+        # (each holding two full step lists) doesn't accumulate
+        # unboundedly. 100 is generous for an examiner workflow.
+        self._undo_stack.setUndoLimit(100)
+
+        # Cache of the open session's submitted marker. Populated in
+        # _activate, invalidated in _close_session, and updated through
+        # mark_session_submitted / reopen_session_for_editing. See
+        # is_session_submitted for the rationale.
+        self._submitted_marker: SubmittedMarker | None = None
 
         self._workspace.step_fields_edited.connect(self._on_step_fields_edited)
         self._workspace.step_suppressed.connect(self._on_step_suppressed)
@@ -236,13 +248,15 @@ class SessionController(QObject):
     def is_session_submitted(self) -> bool:
         """True when the open session has a submitted marker on disk.
 
-        Read straight off the marker file rather than caching, so the
-        answer stays correct even if a sibling tool (or a manual file
-        edit) tweaks the marker while the session is open.
+        Reads from the cached marker populated at session activation
+        and updated through ``mark_session_submitted`` /
+        ``reopen_session_for_editing``. The cache exists because every
+        mutation slot calls this gate -- on a debounced text edit
+        that's per-keystroke, and a per-keystroke ``stat()`` +
+        ``read_text()`` + ``json.loads()`` is wasteful, especially on
+        a network-mounted case directory.
         """
-        if self._repository is None:
-            return False
-        return submitted_marker.read(self._repository.session) is not None
+        return self._submitted_marker is not None
 
     def mark_session_submitted(self, *, export_format: str | None = None) -> None:
         """Mark the open session as submitted; show the banner.
@@ -264,6 +278,7 @@ class SessionController(QObject):
             examiner=examiner,
             export_format=export_format,
         )
+        self._submitted_marker = marker
         self._workspace.set_submitted_marker(marker)
         self._undo_stack.clear()
 
@@ -272,6 +287,7 @@ class SessionController(QObject):
         if self._repository is None:
             return
         submitted_marker.clear(self._repository.session)
+        self._submitted_marker = None
         self._workspace.set_submitted_marker(None)
 
     @Slot()
@@ -371,7 +387,9 @@ class SessionController(QObject):
         # session can't accidentally apply to this one.
         self._undo_stack.clear()
         # Show / hide the read-only banner based on the on-disk marker.
-        self._workspace.set_submitted_marker(submitted_marker.read(repo.session))
+        # Cache so per-keystroke is_session_submitted() doesn't hit disk.
+        self._submitted_marker = submitted_marker.read(repo.session)
+        self._workspace.set_submitted_marker(self._submitted_marker)
         self._event_count = len(repo.list_events())
         self._recorder_bar.set_session_name(repo.session.info.name)
         self._recorder_bar.set_event_count(self._event_count)
@@ -403,6 +421,7 @@ class SessionController(QObject):
         except Exception:
             logger.exception("Failed to close session cleanly")
         self._repository = None
+        self._submitted_marker = None
         self._workspace.clear_repository()
         self._undo_stack.clear()
         self._recorder_bar.set_session_name(None)
@@ -720,22 +739,12 @@ class SessionController(QObject):
                 case_reference=case_ref,
             )
 
-        # After a deliverable-class export, offer to lock the session
-        # so further edits don't diverge from what's in the discovery
-        # package. The operator can always decline.
-        def _maybe_offer_lock() -> None:
-            if not self.is_session_submitted():
-                self._offer_mark_submitted(export_format="Forensic notes")
-
-        run_export(
-            self._repository,
-            parent=self._parent_widget,
+        self._run_deliverable_export(
             kind="Forensic notes",
             extension="html",
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
-            offer_submit=True,
         )
 
     def export_pdf(self) -> None:
@@ -758,21 +767,43 @@ class SessionController(QObject):
                 case_reference=case_ref,
             )
 
-        # PDF is a deliverable-class export -- offer to lock the
-        # session after a successful render, matching the forensic
-        # notes flow.
-        def _maybe_offer_lock() -> None:
-            if not self.is_session_submitted():
-                self._offer_mark_submitted(export_format="PDF")
-
-        run_export(
-            self._repository,
-            parent=self._parent_widget,
+        self._run_deliverable_export(
             kind="PDF",
             extension="pdf",
             file_filter="PDF (*.pdf)",
             renderer=render,
             suggested_suffix="-notes",
+        )
+
+    def _run_deliverable_export(
+        self,
+        *,
+        kind: str,
+        extension: str,
+        file_filter: str,
+        renderer: Callable[[SessionRepository, Path], ExportDocument],
+        suggested_suffix: str = "",
+    ) -> None:
+        """Drive a deliverable-class export through ``run_export`` and
+        offer to lock the session afterwards.
+
+        ``kind`` doubles as the ``export_format`` recorded in the
+        submitted marker so the lock prompt and the marker stay
+        consistent. Used by export_forensic_notes / export_pdf.
+        """
+
+        def _maybe_offer_lock() -> None:
+            if not self.is_session_submitted():
+                self._offer_mark_submitted(export_format=kind)
+
+        run_export(
+            self._repository,
+            parent=self._parent_widget,
+            kind=kind,
+            extension=extension,
+            file_filter=file_filter,
+            renderer=renderer,  # type: ignore[arg-type]
+            suggested_suffix=suggested_suffix,
             on_complete=_maybe_offer_lock,
         )
 
