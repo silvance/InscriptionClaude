@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from inscription.ui.step_editor import StepEditorPanel
 from inscription.ui.step_list import StepListWidget
 from inscription.ui.suggestions_panel import SuggestionsPanel
+from inscription.util import format_local
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -140,10 +141,7 @@ class SessionWorkspaceWidget(QWidget):
     def _on_step_selected(self, step_id: int) -> None:
         if self._repository is None:
             return
-        step = next(
-            (s for s in self._repository.list_steps(include_suppressed=True) if s.id == step_id),
-            None,
-        )
+        step = self._repository.get_step(step_id)
         if step is None:
             self._editor.clear()
             return
@@ -240,7 +238,7 @@ class _SubmittedBanner(QWidget):
         # %Z renders the timezone abbreviation so an operator on a
         # different machine can't misread a UTC marker as local time
         # (or vice versa). Required for forensic-grade timestamping.
-        when = marker.submitted_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+        when = format_local(marker.submitted_at, "%Y-%m-%d %H:%M %Z")
         parts = [f"Marked submitted on {when}"]
         if marker.examiner:
             parts.append(f"by {marker.examiner}")

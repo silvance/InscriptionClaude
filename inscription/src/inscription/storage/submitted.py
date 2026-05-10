@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING
 from inscription.model import utcnow
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from inscription.model import Session
 
 logger = logging.getLogger(__name__)
@@ -53,13 +55,11 @@ class SubmittedMarker:
     export_format: str | None = None
 
 
-def marker_path(session: Session) -> object:
+def marker_path(session: Session) -> Path:
     """Return the marker file's path on disk.
 
     Exposed as a free function so tests / external tools can poke at
-    the file without instantiating a Session-managing harness. Returns
-    a ``Path`` but typed as ``object`` here to keep the public type
-    surface tight when callers don't need it.
+    the file without instantiating a Session-managing harness.
     """
     return session.internal_dir / _FILENAME
 
@@ -76,11 +76,11 @@ def read(session: Session) -> SubmittedMarker | None:  # noqa: PLR0911 - linear 
     must carry a UTC offset so a banner rendered on another machine
     in another timezone can't misread the time.
     """
-    path = session.internal_dir / _FILENAME
-    if not path.exists():
-        return None
+    path = marker_path(session)
     try:
         size = path.stat().st_size
+    except FileNotFoundError:
+        return None
     except OSError:
         return None
     if size > _MAX_READ_BYTES:
@@ -150,7 +150,7 @@ def mark(
         payload["export_format"] = marker.export_format
 
     session.internal_dir.mkdir(parents=True, exist_ok=True)
-    path = session.internal_dir / _FILENAME
+    path = marker_path(session)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     body = json.dumps(payload, indent=2) + "\n"
     tmp_path.write_text(body, encoding="utf-8")
@@ -170,8 +170,9 @@ def clear(session: Session) -> None:
     captures the reopen event even though this isn't a full audit
     trail.
     """
-    path = session.internal_dir / _FILENAME
-    if not path.exists():
+    path = marker_path(session)
+    try:
+        path.unlink()
+    except FileNotFoundError:
         return
-    path.unlink()
     logger.info("Cleared submitted marker for session %r", session.info.name)
