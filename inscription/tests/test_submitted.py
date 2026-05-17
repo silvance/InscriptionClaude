@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QAbstractItemView
 
 from inscription.model import DraftStep, EventKind, ResolvedElement
 from inscription.storage import SessionRepository, SubmittedMarker, submitted
+from inscription.ui import controller_exports
 from inscription.ui.step_editor import StepEditorPanel
 from inscription.ui.step_list import StepListWidget
 from inscription.ui.workspace import SessionWorkspaceWidget
@@ -277,7 +278,7 @@ def test_controller_blocks_step_edit_when_submitted(qtbot, tmp_path: Path) -> No
         assert original is not None
 
         # Mark the session as submitted; subsequent edits must no-op.
-        submitted.mark(repo.session)
+        controller.mark_session_submitted()
         controller._on_step_fields_edited(sid, "Should not persist", "")
         after = repo.get_step(sid)
         assert after is not None
@@ -300,8 +301,8 @@ def test_controller_allows_edits_when_marker_cleared(qtbot, tmp_path: Path) -> N
         )
         controller._activate(repo)
 
-        submitted.mark(repo.session)
-        submitted.clear(repo.session)
+        controller.mark_session_submitted()
+        controller.reopen_session_for_editing()
 
         controller._on_step_fields_edited(sid, "Now this persists", "")
         after = repo.get_step(sid)
@@ -360,6 +361,39 @@ def test_reopen_session_clears_marker(qtbot, tmp_path: Path) -> None:  # type: i
         assert controller.is_session_submitted() is False
         # Last set_submitted_marker call carries None (banner hidden).
         assert ws.set_submitted_marker_calls[-1] is None
+    finally:
+        repo.close()
+
+
+def test_export_methods_pass_valid_kwargs_to_run_export(  # type: ignore[no-untyped-def]
+    qtbot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for the merge artefact where export_forensic_notes /
+    export_pdf were passing offer_submit=True to run_export, which
+    only accepts on_complete. The call shape used to TypeError at
+    runtime; mock the file dialog to cancel and confirm both methods
+    return cleanly.
+    """
+    monkeypatch.setattr(
+        controller_exports.QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *a, **kw: ("", "")),
+    )
+    repo = SessionRepository.create(workspace_root=tmp_path, name="ExportShape")
+    try:
+        _seed_repo_with_steps(repo)
+        ws = _FakeWorkspace()
+        rb = _FakeRecorderBar()
+        controller = SessionController(
+            workspace=ws,  # type: ignore[arg-type]
+            recorder_bar=rb,  # type: ignore[arg-type]
+        )
+        controller._activate(repo)
+        # Both methods cancel cleanly because the dialog returned "".
+        # Before the fix, export_forensic_notes raised TypeError on
+        # the run_export call.
+        controller.export_forensic_notes()
+        controller.export_pdf()
     finally:
         repo.close()
 
