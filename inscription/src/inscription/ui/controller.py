@@ -735,7 +735,7 @@ class SessionController(QObject):
             file_filter="HTML (*.html)",
             renderer=render,
             suggested_suffix="-notes",
-            offer_submit=True,
+            on_complete=_maybe_offer_lock,
         )
 
     def export_pdf(self) -> None:
